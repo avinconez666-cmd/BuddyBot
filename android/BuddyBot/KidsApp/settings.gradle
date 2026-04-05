@@ -1,0 +1,33 @@
+// ═══════════════════════════════════════════════════════════════
+// settings.gradle  —  BuddyBot Kids
+// FIX: removed  include ':libausbc'  (no longer a local module;
+//      ausbc is now pulled from Maven via app/build.gradle)
+// ═══════════════════════════════════════════════════════════════
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+        // AndroidUSBCamera Maven repository (jiangdongguo/AndroidUSBCamera)
+        maven { url 'https://raw.githubusercontent.com/jiangdongguo/AndroidUSBCamera/master/repository' }
+    }
+}
+
+rootProject.name = "BuddyBot Kids"
+include ':app'
+include ':libausbc'
+include ':libuvc'
+include ':libnative'

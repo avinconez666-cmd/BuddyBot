@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<usb>
+    <!-- Standard UVC Classes -->
+    <usb-device class="239" subclass="2" /> <!-- MISC / COMMON / IAD -->
+    <usb-device class="14" />               <!-- VIDEO -->
+
+    <!-- Specific Logitech Cameras -->
+    <usb-device vendor-id="1133" /> <!-- Logitech All -->
+    <usb-device vendor-id="1133" product-id="2085" /> <!-- C270 -->
+    <usb-device vendor-id="1133" product-id="2229" /> <!-- C920 -->
+
+    <!-- Other common VIDs -->
+    <usb-device vendor-id="1266" />
+    <usb-device vendor-id="1409" />
+    <usb-device vendor-id="9228" />
+    <usb-device vendor-id="19" />
+</usb>

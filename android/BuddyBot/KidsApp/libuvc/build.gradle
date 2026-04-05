@@ -1,0 +1,75 @@
+plugins {
+    id 'com.android.library'
+}
+
+import org.apache.tools.ant.taskdefs.condition.Os
+
+android {
+	namespace 'com.jiangdg.uvc'
+	compileSdk rootProject.ext.versionCompiler
+    ndkVersion rootProject.ext.ndkVersion
+
+	compileOptions {
+		sourceCompatibility rootProject.ext.javaSourceCompatibility
+		targetCompatibility rootProject.ext.javaTargetCompatibility
+	}
+
+	defaultConfig {
+		minSdk rootProject.ext.versionMinSdk
+		targetSdk rootProject.ext.versionTarget
+        ndk {
+			abiFilters 'arm64-v8a', 'armeabi-v7a'
+		}
+	}
+
+
+    buildTypes {
+		release {
+			minifyEnabled false
+			proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.txt'
+		}
+	}
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+        disable 'MissingTranslation'
+    }
+}
+
+tasks.withType(JavaCompile) {
+	compileTask -> compileTask.dependsOn ndkBuild
+}
+
+String getNdkBuildPath() {
+	def ndkBuildingDir = System.getenv("NDK_HOME")
+	if (ndkBuildingDir == null || ndkBuildingDir.isEmpty()) {
+		Properties properties = new Properties()
+		properties.load(project.rootProject.file('local.properties').newDataInputStream())
+		ndkBuildingDir = properties.getProperty("ndk.dir")
+	}
+	if (Os.isFamily(Os.FAMILY_WINDOWS)) {
+		return ndkBuildingDir + '/ndk-build.cmd'
+	} else {
+		return ndkBuildingDir + '/ndk-build'
+	}
+}
+
+task ndkBuild(type: Exec, description: 'Compile JNI source via NDK') {
+	println('executing ndkBuild')
+	commandLine getNdkBuildPath(), '-j8', '-C', file('src/main').absolutePath,
+			'APP_ABI=arm64-v8a armeabi-v7a'
+}
+
+task ndkClean(type: Exec, description: 'clean JNI libraries') {
+	println('executing ndkBuild clean')
+	commandLine getNdkBuildPath(), 'clean', '-C', file('src/main').absolutePath,
+			'APP_ABI=arm64-v8a armeabi-v7a'
+}
+
+clean.dependsOn 'ndkClean'
+
+dependencies {
+	implementation fileTree(dir: 'libs', include: ['*.jar'])
+	implementation 'androidx.appcompat:appcompat:1.7.1'
+	implementation 'com.elvishew:xlog:1.11.1'
+}

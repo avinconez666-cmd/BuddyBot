@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="app_name" tools:ignore="MissingTranslation" translatable="false">BuddyBot Kids</string>
+    
+    <!-- UI Strings -->
+    <string name="call_daddy" translatable="false">Call Daddy</string>
+    <string name="emergency_mode" translatable="false">Emergency Mode</string>
+    <string name="listening" tools:ignore="MissingTranslation" translatable="false">Listening…</string>
+    <string name="processing" translatable="false">Processing…</string>
+    <string name="speaking" translatable="false">Speaking…</string>
+
+    <!-- Security & PIN -->
+    <string name="pin_title" translatable="false">Security Gateway</string>
+    <string name="pin_prompt" translatable="false">Enter Master PIN to Change Mode</string>
+    <string name="pin_error" translatable="false">Invalid PIN - Access Denied</string>
+
+    <!-- Notifications -->
+    <string name="monitoring_active" translatable="false">BuddyBot is monitoring environment</string>
+    <string name="alert_argument_detected" translatable="false">Argument detected</string>
+    <string name="alert_swearing_detected" translatable="false">Inappropriate language detected</string>
+    <string name="alert_yelling_detected" translatable="false">Yelling detected</string>
+    <string name="alert_distress_detected" translatable="false">Child distress detected</string>
+    <string name="alert_stranger_detected" translatable="false">Unrecognized person detected</string>
+    <string name="patrol_active" translatable="false">Patrol Mode Active: Recording Video</string>
+
+    <!-- Permissions -->
+    <string name="permission_camera_rationale" translatable="false">BuddyBot needs camera access for face recognition</string>
+    <string name="permission_microphone_rationale" translatable="false">BuddyBot needs microphone access to listen and speak</string>
+    <string name="permission_phone_rationale" translatable="false">BuddyBot needs phone access to call you in emergencies</string>
+    <string name="permission_notification_rationale" translatable="false">BuddyBot needs notification access to alert you</string>
+    
+    <!-- Errors -->
+    <string name="error_camera_failed" translatable="false">Camera initialization failed</string>
+    <string name="error_microphone_failed" tools:ignore="MissingTranslation" translatable="false">Microphone access failed</string>
+    <string name="error_usb_failed" tools:ignore="MissingTranslation" translatable="false">USB connection failed</string>
+    <string name="error_api_failed" translatable="false">API connection failed</string>
+    
+    <!-- Face Recognition -->
+    <string name="face_recognized" translatable="false">Hello %s!</string>
+    <string name="face_unknown" translatable="false">Hello! I don\'t think we\'ve met.</string>
+    <string name="face_learning" translatable="false">Learning your face…</string>
+    
+    <!-- Modes -->
+    <string name="mode_normal" translatable="false">Normal Mode</string>
+    <string name="mode_dog" translatable="false">Guard Dog Mode</string>
+    <string name="mode_bodyguard" translatable="false">Bodyguard Mode</string>
+    <string name="mode_unhinged" translatable="false">Unhinged Mode</string>
+    <string name="mode_party" translatable="false">Party Mode</string>
+</resources>

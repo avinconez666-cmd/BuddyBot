@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ── USB Webcams ────────────────────────────────────────────────── -->
+    <!-- Logitech C270: VID=0x046D (1133), PID=0x0825 (2085) -->
+    <usb-device vendor-id="1133" product-id="2085" />
+    <!-- Catch all UVC cameras (Class 239/2 or 14) -->
+    <usb-device class="239" subclass="2" />
+    <usb-device class="14" />
+
+    <!-- ── Arduino / Serial Chips ────────────────────────────────────── -->
+    <!-- Arduino Genuine: VID=0x2341 (9025) -->
+    <usb-device vendor-id="9025" />
+    <!-- Arduino.org: VID=0x2A03 (10755) -->
+    <usb-device vendor-id="10755" />
+    <!-- CH340: VID=0x1A86 (6790), PID=0x7523 (29987) -->
+    <usb-device vendor-id="6790" product-id="29987" />
+    <!-- CP210x: VID=0x10C4 (4292), PID=0xEA60 (60000) -->
+    <usb-device vendor-id="4292" product-id="60000" />
+    <!-- FTDI: VID=0x0403 (1027), PID=0x6001 (24577) -->
+    <usb-device vendor-id="1027" product-id="24577" />
+    <!-- Prolific: VID=0x067B (1659), PID=0x2303 (8963) -->
+    <usb-device vendor-id="1659" product-id="8963" />
+</resources>

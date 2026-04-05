@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Arduino Mega 2560 -->
+    <usb-device vendor-id="9025" product-id="67" />
+    
+    <!-- Arduino Uno -->
+    <usb-device vendor-id="9025" product-id="1" />
+    
+    <!-- Generic FTDI -->
+    <usb-device vendor-id="1027" />
+    
+    <!-- CH340 USB to Serial -->
+    <usb-device vendor-id="6790" />
+</resources>

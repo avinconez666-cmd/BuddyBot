@@ -1,0 +1,119 @@
+// ═══════════════════════════════════════════════════════════════
+// app/build.gradle
+// ═══════════════════════════════════════════════════════════════
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.gms.google-services'
+}
+
+// ── Load API keys from secrets.properties ──────────────────────
+def secretsFile = rootProject.file("secrets.properties")
+def secrets = new Properties()
+if (secretsFile.exists()) {
+    secretsFile.withInputStream { secrets.load(it) }
+} else {
+    secrets['ELEVENLABS_API_KEY'] = 'YOUR_ELEVENLABS_KEY'
+    secrets['CLAUDE_API_KEY']     = 'YOUR_CLAUDE_KEY'
+    secrets['DADDY_PHONE_NUMBER'] = '+61400000000'
+    secrets['DADDY_MESSENGER_ID'] = '000000000'
+    secrets['FCM_SERVER_KEY']     = 'YOUR_FCM_KEY'
+    secrets['GEMINI_API_KEY']     = ''
+}
+
+android {
+    namespace 'com.buddybot.kids'
+    compileSdk rootProject.ext.versionCompiler
+
+    defaultConfig {
+        applicationId "com.buddybot.kids"
+        minSdk rootProject.ext.versionMinSdk
+        targetSdk rootProject.ext.versionTarget
+        versionCode 1
+        versionName "1.0"
+
+        buildConfigField "String", "ELEVENLABS_API_KEY", "\"${secrets['ELEVENLABS_API_KEY']}\""
+        buildConfigField "String", "CLAUDE_API_KEY",     "\"${secrets['CLAUDE_API_KEY']}\""
+        buildConfigField "String", "DADDY_PHONE_NUMBER", "\"${secrets['DADDY_PHONE_NUMBER']}\""
+        buildConfigField "String", "DADDY_MESSENGER_ID", "\"${secrets['DADDY_MESSENGER_ID']}\""
+        buildConfigField "String", "FCM_SERVER_KEY",     "\"${secrets['FCM_SERVER_KEY']}\""
+        buildConfigField "String", "GEMINI_API_KEY",     "\"${secrets['GEMINI_API_KEY']}\""
+
+        vectorDrawables { useSupportLibrary true }
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility rootProject.ext.javaSourceCompatibility
+        targetCompatibility rootProject.ext.javaTargetCompatibility
+    }
+
+    kotlinOptions { jvmTarget = rootProject.ext.kotlinJvmTarget }
+
+    buildFeatures {
+        compose     true
+        buildConfig true
+        viewBinding false
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.5.14'
+    }
+
+    packaging {
+        resources { excludes += '/META-INF/{AL2.0,LGPL2.1}' }
+        jniLibs    { pickFirsts += ['**/libc++_shared.so'] }
+    }
+
+    ndkVersion rootProject.ext.ndkVersion
+}
+
+dependencies {
+    // ── AndroidX Core ────────────────────────────────────────
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+    implementation 'androidx.activity:activity-compose:1.8.2'
+
+    // ── Jetpack Compose ──────────────────────────────────────
+    implementation platform('androidx.compose:compose-bom:2024.01.00')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-graphics'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.material:material-icons-extended'
+    
+    // ── ExoPlayer ────────────────────────────────────────────
+    implementation 'androidx.media3:media3-exoplayer:1.2.0'
+    implementation 'androidx.media3:media3-ui:1.2.0'
+    implementation 'androidx.media3:media3-common:1.2.0'
+
+    // ── Firebase ─────────────────────────────────────────────
+    implementation platform('com.google.firebase:firebase-bom:33.1.2')
+    implementation 'com.google.firebase:firebase-messaging-ktx'
+
+    // ── USB Camera ───────────────────────────────────────────
+    implementation project(':libausbc')
+    // ── ML Kit ───────────────────────────────────────────────
+    implementation 'com.google.mlkit:face-detection:16.1.5'
+    implementation 'com.google.mlkit:object-detection:17.0.1'
+
+    // ── TensorFlow Lite ──────────────────────────────────────
+    implementation 'org.tensorflow:tensorflow-lite:2.14.0'
+    implementation 'org.tensorflow:tensorflow-lite-task-vision:0.4.4'
+
+    // ── Coroutines ───────────────────────────────────────────
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
+
+    // ── Networking ───────────────────────────────────────────
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    // ── Arduino USB Serial ───────────────────────────────────
+    implementation 'com.github.felHR85:UsbSerial:6.1.0'
+}
