@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.Manifest
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -58,6 +59,7 @@ import com.jiangdg.ausbc.camera.CameraUvcStrategy
 import com.jiangdg.ausbc.camera.bean.CameraRequest
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -149,6 +151,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     private var lastRightDistance = -1
     private var isPatrolling = false
     private var isDogFollowing = true
+    private val elevenLabsMutex = Mutex()
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -972,7 +975,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                     try {
                         // Phase 4 fix: pass the TextureView (not null) so the driver
                         // has a real output surface — this is what makes preview data fire
-                        usbCameraClient?.openCamera(offscreenTexture)
+                        usbCameraClient?.openCamera(offscreenTexture as? com.jiangdg.ausbc.widget.IAspectRatio)
                         withContext(Dispatchers.Main) {
                             _robotState.value = _robotState.value.copy(isCameraConnected = true)
                             logComm("CAMERA", "USB webcam opened successfully")
@@ -1071,7 +1074,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 // Phase 5: push detection results to RobotState for Compose overlay
                 withContext(Dispatchers.Main) {
                     _robotState.value = _robotState.value.copy(
-                        detectedFaces = faceResults,
+                        detectedFaces = faceResults.map { com.buddybot.kids.FaceResult(RectF(it.bounds), it.name, 1.0f) },
                         detectedObjects = objectResults
                     )
                 }

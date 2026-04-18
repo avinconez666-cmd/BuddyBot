@@ -1110,7 +1110,7 @@ private fun TelemetryCard(telemetry: TelemetryData) {
             }
             Spacer(Modifier.height(4.dp))
             LinearProgressIndicator(
-                progress = { (telemetry.batteryPercent / 100f).coerceIn(0f, 1f) },
+                progress = (telemetry.batteryPercent / 100f).coerceIn(0f, 1f),
                 modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                 color = battColor,
                 trackColor = battColor.copy(alpha = 0.15f)
