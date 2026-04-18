@@ -15,6 +15,7 @@ if (secretsFile.exists()) {
 } else {
     secrets['ELEVENLABS_API_KEY'] = 'YOUR_ELEVENLABS_KEY'
     secrets['CLAUDE_API_KEY']     = 'YOUR_CLAUDE_KEY'
+    secrets['GROQ_API_KEY']       = 'YOUR_GROQ_KEY'
     secrets['DADDY_PHONE_NUMBER'] = '+61400000000'
     secrets['DADDY_MESSENGER_ID'] = '000000000'
     secrets['FCM_SERVER_KEY']     = 'YOUR_FCM_KEY'
@@ -37,6 +38,7 @@ android {
 
         buildConfigField "String", "ELEVENLABS_API_KEY", "\"${secrets['ELEVENLABS_API_KEY']}\""
         buildConfigField "String", "CLAUDE_API_KEY",     "\"${secrets['CLAUDE_API_KEY']}\""
+        buildConfigField "String", "GROQ_API_KEY",       "\"${secrets.getProperty('GROQ_API_KEY', '')}\""
         buildConfigField "String", "DADDY_PHONE_NUMBER", "\"${secrets['DADDY_PHONE_NUMBER']}\""
         buildConfigField "String", "DADDY_MESSENGER_ID", "\"${secrets['DADDY_MESSENGER_ID']}\""
         buildConfigField "String", "FCM_SERVER_KEY",     "\"${secrets['FCM_SERVER_KEY']}\""

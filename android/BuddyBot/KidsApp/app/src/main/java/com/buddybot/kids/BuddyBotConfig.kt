@@ -1,3 +1,34 @@
+/*
+ * AI BACKEND FREE TIER LIMITS (as of 2026):
+ *
+ * GROQ (primary):
+ *   - Free tier: 14,400 requests/day, 6,000 requests/minute
+ *   - Model: llama-3.1-8b-instant (fastest) or llama-3.3-70b-versatile (smarter)
+ *   - Sign up: console.groq.com
+ *   - Cost: FREE
+ *
+ * GEMINI 2.0 FLASH (secondary fallback):
+ *   - Free tier: 1,500 requests/day, 15 requests/minute
+ *   - Model: gemini-2.0-flash
+ *   - Sign up: aistudio.google.com
+ *   - Cost: FREE
+ *
+ * CLAUDE (last resort):
+ *   - No free tier - costs per token
+ *   - Only used when Groq and Gemini both fail
+ *   - Cost: ~$0.003 per 1K input tokens (Haiku)
+ *
+ * ELEVENLABS TTS (premium voice):
+ *   - Free tier: 10,000 characters/month
+ *   - Disabled by default - toggle in Settings
+ *   - Cost: $5/month for 30,000 chars on paid plan
+ *
+ * ANDROID TTS (operational speech):
+ *   - Completely free, on-device
+ *   - Used for all operational phrases and when premium voice is OFF
+ *   - Cost: FREE
+ */
+
 package com.buddybot.kids
 
 import android.Manifest

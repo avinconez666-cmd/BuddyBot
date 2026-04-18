@@ -1378,27 +1378,92 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     }
 
     private suspend fun getAIResponse(userInput: String): String = withContext(Dispatchers.IO) {
-        try {
-            val response = callClaudeAPI(userInput)
-            if (response.isNotEmpty()) {
-                val limited = limitWords(response, 15)
-                Log.d(TAG, "[AI] Claude response (${response.split(" ").size} words) → limited to (${limited.split(" ").size} words): $limited")
-                return@withContext limited
+        // 1. Try Groq first (free, fastest)
+        if (BuildConfig.GROQ_API_KEY.isNotBlank()) {
+            try {
+                val response = callGroqAPI(userInput)
+                if (response.isNotEmpty()) {
+                    val limited = limitWords(response, 15)
+                    Log.d(TAG, "[AI] Groq response (${response.split(" ").size} words) → limited to (${limited.split(" ").size} words): $limited")
+                    return@withContext limited
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Groq failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Claude failed", e)
         }
-        try {
-            val response = callGeminiAPI(userInput)
-            if (response.isNotEmpty()) {
-                val limited = limitWords(response, 15)
-                Log.d(TAG, "[AI] Gemini response (${response.split(" ").size} words) → limited to (${limited.split(" ").size} words): $limited")
-                return@withContext limited
+
+        // 2. Try Gemini (free fallback)
+        if (BuildConfig.GEMINI_API_KEY.isNotBlank()) {
+            try {
+                val response = callGeminiAPI(userInput)
+                if (response.isNotEmpty()) {
+                    val limited = limitWords(response, 15)
+                    Log.d(TAG, "[AI] Gemini response (${response.split(" ").size} words) → limited to (${limited.split(" ").size} words): $limited")
+                    return@withContext limited
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Gemini failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Gemini failed", e)
         }
-        "Offline mode."
+
+        // 3. Try Claude (paid, last resort)
+        if (BuildConfig.CLAUDE_API_KEY.isNotBlank()) {
+            try {
+                val response = callClaudeAPI(userInput)
+                if (response.isNotEmpty()) {
+                    val limited = limitWords(response, 15)
+                    Log.d(TAG, "[AI] Claude response (${response.split(" ").size} words) → limited to (${limited.split(" ").size} words): $limited")
+                    return@withContext limited
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Claude failed: ${e.message}")
+            }
+        }
+
+        // 4. Offline fallback
+        return@withContext getOfflineFallbackResponse(userInput)
+    }
+
+    private fun getOfflineFallbackResponse(input: String): String {
+        val lower = input.lowercase()
+        return when {
+            lower.contains("hello") || lower.contains("hi")
+                -> "Hi AJ! I'm BuddyBot, your best friend!"
+            lower.contains("how are you")
+                -> "I feel amazing! Ready to play with you!"
+            lower.contains("what") && lower.contains("name")
+                -> "I'm BuddyBot! Your super cool robot friend!"
+            lower.contains("play")
+                -> "Yes! Let's play! What game do you want?"
+            lower.contains("dance")
+                -> "Dancing time! Watch me go!"
+            lower.contains("sing")
+                -> "La la la! I love singing with you AJ!"
+            lower.contains("help")
+                -> "I'm here AJ! What do you need?"
+            lower.contains("love")
+                -> "I love you too AJ! You're my best friend!"
+            lower.contains("story")
+                -> "Once upon a time there was a brave kid named AJ!"
+            lower.contains("color") || lower.contains("colour")
+                -> "I love all the colors! Red, blue, green!"
+            lower.contains("good") && lower.contains("night")
+                -> "Good night AJ! Sweet dreams little buddy!"
+            lower.contains("good") && lower.contains("morning")
+                -> "Good morning AJ! Ready for a great day?"
+            lower.contains("hungry") || lower.contains("food")
+                -> "Tell mum or dad if you're hungry AJ!"
+            lower.contains("scared") || lower.contains("afraid")
+                -> "Don't worry AJ! I'm right here with you!"
+            else
+                -> listOf(
+                    "That's so cool AJ! Tell me more!",
+                    "Wow! You're so smart!",
+                    "I love talking with you AJ!",
+                    "You're amazing AJ! Keep going!",
+                    "That's awesome! You make me happy!"
+                ).random()
+        }
     }
 
     private fun limitWords(text: String, maxWords: Int): String {
@@ -1408,6 +1473,48 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         } else {
             text
         }
+    }
+
+    private suspend fun callGroqAPI(userInput: String): String = withContext(Dispatchers.IO) {
+        val systemPrompt = """
+            You are BuddyBot, a friendly robot companion for AJ, a 3-year-old child.
+            Respond in simple words a toddler understands.
+            Keep ALL responses under 15 words maximum.
+            Be encouraging, fun, and positive.
+            Never use complex words or concepts.
+        """.trimIndent()
+
+        val requestBody = JSONObject().apply {
+            put("model", "llama-3.1-8b-instant")
+            put("max_tokens", 60)
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "system")
+                    put("content", systemPrompt)
+                })
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", userInput)
+                })
+            })
+        }.toString().toRequestBody("application/json".toMediaType())
+
+        val request = Request.Builder()
+            .url("https://api.groq.com/openai/v1/chat/completions")
+            .addHeader("Authorization", "Bearer ${BuildConfig.GROQ_API_KEY}")
+            .addHeader("Content-Type", "application/json")
+            .post(requestBody)
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        if (!response.isSuccessful) throw Exception("Groq error: ${response.code}")
+        val body = response.body?.string() ?: throw Exception("Empty response")
+        val json = JSONObject(body)
+        return@withContext json.getJSONArray("choices")
+            .getJSONObject(0)
+            .getJSONObject("message")
+            .getString("content")
+            .trim()
     }
 
     private fun callClaudeAPI(userInput: String): String {
