@@ -19,7 +19,7 @@ class FaceCoordinator(
 ) {
     private var player: ExoPlayer = ExoPlayer.Builder(context).build().apply {
         playerView.player = this
-        volume = 0f // Audio handled by ElevenLabs/MediaPlayer
+        volume = 1f // Full volume for video playback (intro, splash, animations)
         repeatMode = Player.REPEAT_MODE_ONE
     }
 
@@ -123,6 +123,7 @@ class FaceCoordinator(
             playerView.alpha = 0f
             val mediaItem = MediaItem.fromUri("asset:///$fileName")
             player.setMediaItem(mediaItem)
+            player.volume = 1f  // intro.mp4 plays WITH sound
             player.repeatMode = Player.REPEAT_MODE_OFF
             player.prepare()
             player.play()
@@ -137,6 +138,8 @@ class FaceCoordinator(
                 val uri = Uri.parse("android.resource://${context.packageName}/$resId")
                 val mediaItem = MediaItem.fromUri(uri)
                 player.setMediaItem(mediaItem)
+                // Mute face videos (idle, talk, animations) so ElevenLabs TTS plays over them
+                player.volume = 0f
                 player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
                 player.prepare()
                 player.play()

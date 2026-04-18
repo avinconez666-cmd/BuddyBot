@@ -1,0 +1,9 @@
+# BuddyBot project rules
+
+- Do NOT read files in /build, /.gradle, /app/build, or /node_modules directories
+- Do NOT read more than 3 files per task unless I explicitly ask you to
+- Always show me a diff preview before applying any changes
+- Only edit the exact file and line numbers I specify
+- Do not refactor, rename, or reorganise any code I have not mentioned
+- When a task is complete, stop. Do not look for more things to fix.
+- If context usage reaches 70%, summarise and start a new task

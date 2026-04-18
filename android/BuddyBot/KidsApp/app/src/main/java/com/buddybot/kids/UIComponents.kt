@@ -1,5 +1,8 @@
 package com.buddybot.kids
 
+// SettingsMenu has been moved to SettingsScreen.kt (Phase 2 – futuristic UI).
+// This file retains all other shared UI composables.
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,7 +28,20 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import com.jiangdg.ausbc.CameraClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.toArgb
+import android.graphics.Paint as NativePaint
 
 @Composable
 fun ProcessingOverlay() {
@@ -100,18 +116,65 @@ fun BuddyBotOverlay(
                 .padding(horizontal = 12.dp, vertical = 4.dp)
         )
 
-        Box(
+        // Phase 5: Detection overlay — face bounding boxes (cyan) + object boxes (green)
+        DetectionOverlay(
+            faces = robotState.detectedFaces,
+            objects = robotState.detectedObjects
+        )
+
+        // Phase 4: Call Daddy button with camera status indicator
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(32.dp)
-                .size(80.dp)
-                .clip(CircleShape)
-                .background(Color.Green.copy(alpha = 0.3f))
-                .border(4.dp, Color.White, CircleShape)
-                .clickable { onCallDaddy() },
-            contentAlignment = Alignment.Center
+                .padding(16.dp)
         ) {
-            Text("📞", fontSize = 32.sp)
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (robotState.isCameraConnected) Color.Green.copy(alpha = 0.3f)
+                        else Color.Yellow.copy(alpha = 0.3f)
+                    )
+                    .border(
+                        4.dp,
+                        if (robotState.isCameraConnected) Color.Green else Color.Yellow,
+                        CircleShape
+                    )
+                    .clickable { onCallDaddy() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("📞", fontSize = 32.sp)
+            }
+            Spacer(Modifier.height(4.dp))
+            // Camera status badge below the button
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .background(
+                        Color.Black.copy(alpha = 0.6f),
+                        RoundedCornerShape(6.dp)
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(
+                            if (robotState.isCameraConnected) Color.Green else Color.Yellow,
+                            CircleShape
+                        )
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = if (robotState.isCameraConnected) "CAM OK" else "NO CAM",
+                    color = if (robotState.isCameraConnected) Color.Green else Color.Yellow,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
 
         IconButton(onClick = onEmergency, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
@@ -133,97 +196,9 @@ fun BuddyBotOverlay(
     }
 }
 
-@Composable
-fun SettingsMenu(
-    robotState: RobotState,
-    telemetry: TelemetryData,
-    logs: List<String>,
-    onClose: () -> Unit,
-    onModeChange: (RobotMode) -> Unit,
-    onMotorCommand: (String) -> Unit,
-    onIPChange: (String) -> Unit,
-    onToggleCommunication: () -> Unit,
-    webcamClient: CameraClient? = null 
-) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var ipInput by remember { mutableStateOf(robotState.buddybotIP) }
-    var showWebcamPreview by remember { mutableStateOf(false) }
-
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("BuddyBot Controls", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-                IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close") }
-            }
-
-            TabRow(selectedTabIndex = selectedTab) {
-                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Modes") })
-                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Webcam") })
-                Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Network") })
-                Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("Logs") })
-            }
-
-            when (selectedTab) {
-                0 -> {
-                    LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
-                        items(RobotMode.values().toList()) { mode ->
-                            Button(onClick = { onModeChange(mode) }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), enabled = mode != robotState.currentMode) {
-                                Text(mode.name)
-                            }
-                        }
-                    }
-                }
-                1 -> {
-                    Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Real-time Webcam Processing", modifier = Modifier.weight(1f))
-                            Switch(checked = showWebcamPreview, onCheckedChange = { showWebcamPreview = it })
-                        }
-                        
-                        if (showWebcamPreview && webcamClient != null) {
-                            Box(modifier = Modifier.fillMaxWidth().height(240.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black)) {
-                                AndroidView(
-                                    factory = { context ->
-                                        com.jiangdg.ausbc.widget.AspectRatioTextureView(context).apply {
-                                            webcamClient.openCamera(this)
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        } else if (showWebcamPreview) {
-                            Text("Webcam not connected", color = Color.Red)
-                        }
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("Motor Overrides:", fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { onMotorCommand("MOTOR|F") }) { Text("F") }
-                            Button(onClick = { onMotorCommand("MOTOR|L") }) { Text("L") }
-                            Button(onClick = { onMotorCommand("MOTOR|S") }) { Text("S") }
-                            Button(onClick = { onMotorCommand("MOTOR|R") }) { Text("R") }
-                            Button(onClick = { onMotorCommand("MOTOR|B") }) { Text("B") }
-                        }
-                    }
-                }
-                2 -> {
-                    Column(modifier = Modifier.padding(top = 16.dp)) {
-                        TextField(value = ipInput, onValueChange = { ipInput = it }, label = { Text("WebSocket IP") }, modifier = Modifier.fillMaxWidth())
-                        Button(onClick = { onIPChange(ipInput) }) { Text("Save IP") }
-                    }
-                }
-                3 -> {
-                    LazyColumn(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
-                        items(logs) { log -> Text(text = log, fontSize = 10.sp, color = Color.Gray, modifier = Modifier.padding(vertical = 1.dp)) }
-                    }
-                }
-            }
-        }
-    }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// PasscodeDialog & PinEntryDialog – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 fun PasscodeDialog(correctPasscode: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
@@ -234,11 +209,22 @@ fun PasscodeDialog(correctPasscode: String, onConfirm: () -> Unit, onDismiss: ()
         title = { Text("Exit Authentication") },
         text = {
             Column {
-                TextField(value = text, onValueChange = { text = it; error = false }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), isError = error, modifier = Modifier.fillMaxWidth())
+                TextField(
+                    value = text,
+                    onValueChange = { text = it; error = false },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    isError = error,
+                    modifier = Modifier.fillMaxWidth()
+                )
                 if (error) Text("Incorrect passcode", color = Color.Red, fontSize = 12.sp)
             }
         },
-        confirmButton = { Button(onClick = { if (text == correctPasscode) onConfirm() else error = true }) { Text("Exit") } },
+        confirmButton = {
+            Button(onClick = { if (text == correctPasscode) onConfirm() else error = true }) {
+                Text("Exit")
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
@@ -269,3 +255,83 @@ fun PinEntryDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 5: Detection Overlay — draws bounding boxes + labels for faces/objects
+// Rendered on top of the main UI using a Canvas composable.
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+fun DetectionOverlay(
+    faces: List<FaceResult>,
+    objects: List<DetectedObjectResult>,
+    // Camera frame dimensions (used to scale boxes to screen)
+    frameWidth: Int = 640,
+    frameHeight: Int = 480,
+    modifier: Modifier = Modifier
+) {
+    if (faces.isEmpty() && objects.isEmpty()) return
+
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val scaleX = size.width / frameWidth.toFloat()
+        val scaleY = size.height / frameHeight.toFloat()
+
+        // ── Face boxes (cyan) ────────────────────────────────────────────────
+        faces.forEach { face ->
+            val left   = face.bounds.left   * scaleX
+            val top    = face.bounds.top    * scaleY
+            val right  = face.bounds.right  * scaleX
+            val bottom = face.bounds.bottom * scaleY
+
+            // Bounding box
+            drawRect(
+                color = if (face.name != null) Color(0xFF00FFFF) else Color(0xFFFFFF00),
+                topLeft = Offset(left, top),
+                size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f)
+            )
+
+            // Label with name + confidence
+            val label = if (face.name != null)
+                "${face.name} (${"%.0f".format(face.confidence * 100)}%)"
+            else
+                "Unknown (${"%.0f".format(face.confidence * 100)}%)"
+
+            drawIntoCanvas { canvas ->
+                val paint = NativePaint().apply {
+                    color = if (face.name != null) 0xFF00FFFF.toInt() else 0xFFFFFF00.toInt()
+                    textSize = 32f
+                    isAntiAlias = true
+                    setShadowLayer(4f, 2f, 2f, 0xFF000000.toInt())
+                }
+                canvas.nativeCanvas.drawText(label, left, (top - 8f).coerceAtLeast(32f), paint)
+            }
+        }
+
+        // ── Object boxes (green) ─────────────────────────────────────────────
+        objects.forEach { obj ->
+            val left   = obj.bounds.left   * scaleX
+            val top    = obj.bounds.top    * scaleY
+            val right  = obj.bounds.right  * scaleX
+            val bottom = obj.bounds.bottom * scaleY
+
+            drawRect(
+                color = Color(0xFF00FF88),
+                topLeft = Offset(left, top),
+                size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+            )
+
+            val label = "${obj.label} (${"%.0f".format(obj.confidence * 100)}%)"
+            drawIntoCanvas { canvas ->
+                val paint = NativePaint().apply {
+                    color = 0xFF00FF88.toInt()
+                    textSize = 28f
+                    isAntiAlias = true
+                    setShadowLayer(4f, 2f, 2f, 0xFF000000.toInt())
+                }
+                canvas.nativeCanvas.drawText(label, left, (top - 8f).coerceAtLeast(28f), paint)
+            }
+        }
+    }
+}
+

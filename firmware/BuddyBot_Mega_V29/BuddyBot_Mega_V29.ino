@@ -1,6 +1,6 @@
 /*
  * ════════════════════════════════════════════════════════════════════
- *  BUDDYBOT  ·  KEYESTUDIO MEGA 2560 PLUS WiFi  ·  PRODUCTION V29.0
+ *  BUDDYBOT  ·  KEYESTUDIO MEGA 2560 PLUS WiFi  ·  PRODUCTION V30.0
  * ════════════════════════════════════════════════════════════════════
  *
  *  MERGED FROM: V28.0 (production) + V2.0 (architecture additions)
@@ -42,7 +42,7 @@
  *  Serial   (USB, pins 0/1)   115200  ↔ Samsung S9 Android app
  *  Serial1  (pins 18 TX/19 RX) 115200  ↔ UNO R4 WiFi (R4 Serial1: D1/D0)
  *  Serial2  (pins 17 TX/16 RX)   9600  ↔ GPS NEO-6M (TinyGPS++)
- *  Serial3  (pins 14 TX/15 RX) 115200  ↔ ESP32 GPIO17(RX)/GPIO16(TX)
+ *  Serial3  (pins 14 TX/15 RX) 115200  ↔ ESP32 GPIO16(RX)/GPIO17(TX)
  *  SoftwareSerial(10 RX / 11 TX) 9600  ↔ UNO R3 Motor Shield A0(RX)/A1(TX)
  *
  *  SENSOR TOGGLE IDs
@@ -58,27 +58,29 @@
 #include <DHT.h>
 #include <RCSwitch.h>
 #include "paj7620.h"
-
+#include <util/atomic.h>
+bool r3CommFail = false;
 // ════════════════════════════════════════════════════════════════════
 //  CONFIGURATION
 // ════════════════════════════════════════════════════════════════════
 #define DEBUG_VERBOSE   false
-#define FW_VERSION      "V29.0"
+#define FW_VERSION      "V30.0"
 
 const String PRIORITY_USER = "AJ";
 
 // Battery thresholds (2S10P Li-ion, nominal 8.4V)
 const float BAT_MAX    = 8.4f;
 const float BAT_MIN    = 6.0f;    // CRITICAL — ESTOP
-const float BAT_LOW    = 6.8f;    // LOW — warn + slow
-const float BAT_WARN   = 7.2f;    // WARN — first notice
-const float BAT_VDIV   = 3.1277f; // Voltage divider multiplier for A15
+const float BAT_LOW    = 6.6f;    // LOW — warn + slow
+const float BAT_WARN   = 7.0f;    // WARN — first notice
+const float BAT_VDIV   = 4.75f; // Voltage divider multiplier for A15
+const float BOOST_VDIV  = 2.93f;   // ← CALIBRATE: ratio for boost converter divider (R1+R2)/R2
 const float BAT_CTEMP  = 50.0f;   // Battery over-temp ESTOP
 const float BAT_WTEMP  = 45.0f;   // Fan-on threshold
 
 // Navigation geometry
-const int OBS_STOP = 25;   // cm — emergency stop
-const int OBS_SLOW = 40;   // cm — slow down
+const int OBS_STOP = 40;   // cm — emergency stop (increased from 25)
+const int OBS_SLOW = 50;   // cm — slow down (increased from 40)
 const int OBS_WARN = 60;   // cm — caution
 const int SIDE_MIN = 35;   // cm — minimum side clearance
 const int T45      = 350;  // ms for ~45° turn at DEFAULT_SPEED
@@ -97,53 +99,142 @@ const unsigned long RF_AUTO = 5400;
 // ════════════════════════════════════════════════════════════════════
 
 // SoftwareSerial → UNO R3 Motor Shield
-SoftwareSerial motorComm(10, 11);  // RX=10 ← R3 A1(TX), TX=11 → R3 A0(RX)
+SoftwareSerial motorComm(10, 11);  // RX=10 ← R3 A1(TX), TX=11 → R3 A0(RX)  ✅ FIXED PIN ORDER
+
+void motorCommPrintln(const __FlashStringHelper *msg) {
+  if (!r3CommFail) motorComm.println(msg);
+}
+void motorCommPrintln(const String &msg) {
+  if (!r3CommFail) motorComm.println(msg);
+}
+void motorCommPrintln(const char *msg) {
+  if (!r3CommFail) motorComm.println(msg);
+}
+
+bool waitForR3Line(const String &prefix, unsigned long timeout, String &outLine) {
+  unsigned long start = millis();
+  String line = "";
+
+  while (millis() - start < timeout) {
+    while (motorComm.available()) {
+      char c = motorComm.read();
+      if (c == '\r' || c == '\n') {
+        if (line.length() > 0) {
+          line.trim();
+          outLine = line;
+          if (line.startsWith(prefix)) return true;
+          line = "";
+        }
+      } else {
+        line += c;
+        if (line.length() > 128) line = "";
+      }
+    }
+  }
+  return false;
+}
+
+bool readR3StatusResponse(unsigned long timeout) {
+  unsigned long start = millis();
+  String line = "";
+  bool sawEnd = false;
+
+  while (millis() - start < timeout) {
+    while (motorComm.available()) {
+      char c = motorComm.read();
+      if (c == '\r' || c == '\n') {
+        if (line.length() > 0) {
+          line.trim();
+          Serial.print("R3 STATUS: ");
+          Serial.println(line);
+          if (line == "R3:STATUS:END") {
+            sawEnd = true;
+            return true;
+          }
+          line = "";
+        }
+      } else {
+        line += c;
+        if (line.length() > 128) line = "";
+      }
+    }
+  }
+  return sawEnd;
+}
+
+void runR3CommTest() {
+  String response;
+
+  motorComm.println(F("PING"));
+  if (waitForR3Line("PONG", 2000, response)) {
+    Serial.println(F("R3 COMM OK"));
+    Serial1.println(F("R3 COMM OK"));
+  } else {
+    Serial.println(F("R3 COMM FAIL — check wiring on pins 10/11 and A0/A1"));
+    Serial1.println(F("R3 COMM FAIL — check wiring on pins 10/11 and A0/A1"));
+    r3CommFail = true;
+  }
+
+  if (!r3CommFail) {
+    motorComm.println(F("MOTOR|S"));
+    if (waitForR3Line("ACK:MOTOR|S", 2000, response)) {
+      Serial.println(F("ACK:MOTOR|S received"));
+      Serial1.println(F("ACK:MOTOR|S received"));
+    } else {
+      Serial.println(F("ACK:MOTOR|S timeout"));
+      Serial1.println(F("ACK:MOTOR|S timeout"));
+    }
+
+    motorComm.println(F("STATUS"));
+    readR3StatusResponse(2000);
+  }
+}
 
 // Analog sensors
-#define VOLTAGE_SENSOR  A15   // Battery voltage divider
+#define VOLTAGE_SENSOR  A14   // Battery voltage divider
 #define TEMP_SENSOR_1   A0    // Thermistor 1 (battery temp)
-#define TEMP_SENSOR_2   A1    // Thermistor 2 (ambient, optional)
-#define FLAME_AO        A2    // Flame sensor analog output
-#define LDR_AO          A3    // Light-dependent resistor
-#define SOUND_AO        A4    // Sound sensor analog
-#define GAS_AO          A6    // Gas/MQ analog
+#define BOOST_VOLT_SENSOR A9  // Boost converter output — voltage divider input
+#define FLAME_AO        A3    // Flame sensor analog output
+#define LDR_AO          A2    // Light-dependent resistor
+#define SOUND_AO        A1    // Sound sensor analog
+#define GAS_AO          A12    // Gas/MQ analog
 
 // I2C interrupt
 #define GESTURE_INT     A13   // PAJ7620 gesture sensor interrupt
 
 // Digital outputs
-#define LEFT_HEADLIGHT   5
-#define RIGHT_HEADLIGHT  6
-#define FAN_PIN          3
+#define LEFT_HEADLIGHT   8
+#define RIGHT_HEADLIGHT  9
+#define FAN_PIN          34
 #define BUZZER_PIN      33
 
 // Digital inputs
-#define MOMENTARY_BTN    4    // Push button — toggle auto mode
+#define MOMENTARY_BTN    A11    // Push button — toggle auto mode
 #define FLAME_DO         7    // Flame sensor digital output (LOW = flame)
-#define LDR_DO           9    // LDR threshold output
+#define LDR_DO           5    // LDR threshold output
 #define UNHINGED_SW     12    // Physical switch — unhinged mode
 #define TILT_SENSOR     23    // Tilt/vibration sensor (HIGH = tilt)
-#define PIR_PIN         40    // PIR motion sensor (HIGH = motion)
-#define DHT_PIN         45    // DHT11 data
-#define GAS_DO          34    // Gas sensor digital output (HIGH = gas)
-#define RF_PIN          49    // 433MHz RF receiver
+#define PIR_PIN         -1    // PIR motion sensor (HIGH = motion)
+#define DHT_PIN         38    // DHT11 data
+#define GAS_DO          32    // Gas sensor digital output (HIGH = gas)
+#define RF_PIN          36    // 433MHz RF receiver
 #define CURRENT_SENSOR  30    // Current sensor pulse input (interrupt)
 
 // IR obstacle sensors (LOW = obstacle detected)
 #define REAR_IR   22
 #define FRONT_IR  26
-#define LEFT_IR   24
-#define RIGHT_IR  25
+#define LEFT_IR   -1
+#define RIGHT_IR  -1
 
 // Ultrasonic sensors (4x HC-SR04)
 #define FRONT_TRIG  29
 #define FRONT_ECHO  28
-#define LEFT_TRIG   43
-#define LEFT_ECHO   45
-#define RIGHT_TRIG  49
-#define RIGHT_ECHO  47
-#define REAR_TRIG   39
-#define REAR_ECHO   35
+#define LEFT_TRIG   42
+#define LEFT_ECHO   44
+#define RIGHT_TRIG  48
+#define RIGHT_ECHO  50
+#define REAR_TRIG   3
+#define REAR_ECHO   2
 
 // ════════════════════════════════════════════════════════════════════
 //  OBJECTS
@@ -158,17 +249,18 @@ RCSwitch   rfReceiver = RCSwitch();
 //  Disabled sensors return -1 / false and are excluded from safety logic.
 // ════════════════════════════════════════════════════════════════════
 struct SensorFlags {
-  bool dht     = true;
-  bool light   = true;
-  bool sound   = true;
-  bool gas     = true;
-  bool flame   = true;   // alert-only — never triggers ESTOP
-  bool pir     = false;  // off by default (can be noisy indoors)
-  bool tilt    = true;
-  bool ir      = true;
-  bool us      = true;
-  bool current = true;
-  bool gps     = true;
+    bool dht     = true;
+    bool light   = true;
+    bool sound   = true;
+    bool gas     = true;
+    bool flame   = true;   // alert-only — never triggers ESTOP
+    bool pir     = false;  // off by default (can be noisy indoors)
+    bool tilt    = true;
+    bool ir      = true;
+    bool us      = true;
+    bool current = true;
+    bool gps     = true;
+
 } sens;
 
 // Returns the SENS_ST| string that R4 V24 expects
@@ -225,11 +317,13 @@ void applyToggle(const String& cmd) {
 // ════════════════════════════════════════════════════════════════════
 //  GLOBAL STATE
 // ════════════════════════════════════════════════════════════════════
-
+bool lc      = false;   // left clear
+bool rc      = false;   // right clear
 // Sensor readings
 float battVolt    = 8.4f;
 float battPct     = 100.0f;
 float battTemp    = 25.0f;
+float boostVolt   = 0.0f;   // Boost converter measured output voltage
 float ambTemp     = 25.0f;
 float humidity    = 50.0f;
 float currentAmps = 0.0f;
@@ -264,6 +358,12 @@ bool fanAuto        = true;
 bool debugVerbose   = DEBUG_VERBOSE;
 int  estopRetries   = 0;
 const int MAX_ESTOP = 3;
+unsigned long estopT = 0;   // [FIX] file-scope so manual CLEAR commands can reset it
+
+// R4 link tracking (E1 watchdog, B1 ping)
+unsigned long r4LastPingMs  = 0;   // millis() of last PING_R4 received
+uint8_t       r4PingSeq     = 0;   // last ping sequence echoed
+bool          r4Linked      = false;
 
 // S9 connection tracking
 bool          s9Connected = false;
@@ -278,6 +378,9 @@ unsigned long lastTelem   = 0;
 unsigned long lastNavDec  = 0;
 unsigned long lastAvoid   = 0;
 unsigned long lastSenseTs = 0;   // freshness timestamp for collisionAvoidance()
+unsigned long lastEsp32Check = 0; // ESP32 handshake re-send timer
+unsigned long bootStartTime = 0;
+const unsigned long BOOT_LOCK_TIME = 5000;  // 5 seconds boot quiet period
 unsigned long uptimeSec   = 0;
 
 // RF
@@ -296,6 +399,12 @@ String lastFace = "";
 String        esp32Buf   = "";
 bool          esp32Ready = false;
 
+// R4 dashboard
+String        r4Buf      = "";
+
+// R3 motor shield responses
+String        r3Buf      = "";
+
 // ── Non-blocking motor queue ──────────────────────────────────────────────────
 // sendMotor() deposits a command here; drainMotorQueue() flushes it at the
 // top of loop() — ensures SoftSerial never blocks the main loop for >1ms.
@@ -303,29 +412,71 @@ struct MotorCmd { char cmd[24]; bool pending; } mQueue = { "", false };
 
 // ── Navigation state ─────────────────────────────────────────────────────────
 struct NavState {
-  bool   isMoving      = false;
-  bool   isAvoiding    = false;
-  bool   isReversing   = false;
-  int    avoidAttempts = 0;
-  long   lastFrontDist = 0;
-  unsigned long avoidStart  = 0;
-  unsigned long stuckStart  = 0;
-  bool   stuckDetected = false;
+    bool   isMoving      = false;
+    bool   isAvoiding    = false;
+    bool   isReversing   = false;
+    int    avoidAttempts = 0;
+    long   lastFrontDist = 0;
+    unsigned long avoidStart  = 0;
+    unsigned long lastAvoidEnd = 0;
+    unsigned long stuckStart  = 0;
+    bool   stuckDetected = false;
 } nav;
+
+// Enums for navigation states
+enum LookState { LOOK_IDLE, LOOK_STOP, LOOK_LEFT, LOOK_RIGHT, LOOK_BACK_LEFT, LOOK_FORWARD };
+enum StuckState { STUCK_IDLE, STUCK_STOP, STUCK_BACK, STUCK_LEFT, STUCK_FORWARD };
+enum AvoidState { AVOID_IDLE, AVOID_STOP, AVOID_BACK, AVOID_STOP2, AVOID_TURN, AVOID_FORWARD };
+enum RandomState { RANDOM_IDLE, RANDOM_TURN, RANDOM_FORWARD };
+
+// Global state variables
+LookState lookState = LOOK_IDLE;
+StuckState stuckState = STUCK_IDLE;
+AvoidState avoidState = AVOID_IDLE;
+RandomState randomState = RANDOM_IDLE;
+unsigned long navTimer = 0;
+
+// Timers for non-blocking UI
+unsigned long buttonBlinkTimer = 0;
+int buttonBlinkCount = 0;
+unsigned long flameBeepTimer = 0;
+int flameBeepCount = 0;
 
 // ════════════════════════════════════════════════════════════════════
 //  UTILITY
 // ════════════════════════════════════════════════════════════════════
-void toS9(const String& msg)  { Serial.println(msg); }
+void toS9(const String& msg) {
+  if (debugVerbose) {
+    Serial.print(F("[SEND] "));
+    Serial.println(msg);
+  } else {
+    Serial.println(msg);
+  }
+}
 void dbg(const char* msg)     { if (debugVerbose) Serial.println(msg); }
 void beep(int freq, int ms)   { tone(BUZZER_PIN, freq, ms); }
+
+// ── E2: XOR checksum helper ────────────────────────────────────────────
+uint8_t calcCRC(const String& s) {
+  uint8_t c = 0;
+  for (uint16_t i = 0; i < s.length(); i++) c ^= (uint8_t)s[i];
+  return c;
+}
+// Send to R4 with checksum suffix — R4 strips and validates before parsing
+void toR4(const String& msg) {
+  char hex[3];
+  sprintf(hex, "%02X", calcCRC(msg));
+  Serial1.print(msg);
+  Serial1.print(F("|CRC:"));
+  Serial1.println(hex);
+}
 
 long getDist(int trig, int echo) {
   if (!sens.us) return -1;
   digitalWrite(trig, LOW);  delayMicroseconds(2);
   digitalWrite(trig, HIGH); delayMicroseconds(10);
   digitalWrite(trig, LOW);
-  long dur = pulseIn(echo, HIGH, 30000);
+  long dur = pulseIn(echo, HIGH, 10000);
   return dur > 0 ? dur / 58 : -1;
 }
 
@@ -368,7 +519,7 @@ void sendMotor(const char* cmd) {
 
 void drainMotorQueue() {
   if (!mQueue.pending) return;
-  motorComm.println(mQueue.cmd);
+  motorCommPrintln(mQueue.cmd);
   mQueue.pending = false;
 }
 
@@ -382,6 +533,8 @@ void readAllSensors() {
     float h = dht.readHumidity();
     if (!isnan(t)) ambTemp  = t;
     if (!isnan(h)) humidity = h;
+    lc = (dLeft  > SIDE_MIN && dLeft  != -1);
+    rc = (dRight > SIDE_MIN && dRight != -1);
   }
 
   // ── Analog environmental sensors ────────────────────────────────
@@ -394,6 +547,8 @@ void readAllSensors() {
   int rawV  = analogRead(VOLTAGE_SENSOR);
   battVolt  = (rawV / 1023.0f) * 5.0f * BAT_VDIV;
   battTemp  = readThermistor(TEMP_SENSOR_1);
+  // Boost converter output voltage measured via resistor divider on BOOST_VOLT_SENSOR
+  boostVolt = (analogRead(BOOST_VOLT_SENSOR) / 1023.0f) * 5.0f * BOOST_VDIV;
 
   // Float-safe battery percentage (avoids integer rounding jitter)
   float bRange = BAT_MAX - BAT_MIN;
@@ -412,8 +567,8 @@ void readAllSensors() {
   // ── IR obstacle sensors ──────────────────────────────────────────
   irFront = sens.ir ? (digitalRead(FRONT_IR) == LOW) : false;
   irRear  = sens.ir ? (digitalRead(REAR_IR)  == LOW) : false;
-  irLeft  = sens.ir ? (digitalRead(LEFT_IR)  == LOW) : false;
-  irRight = sens.ir ? (digitalRead(RIGHT_IR) == LOW) : false;
+  irLeft  = (LEFT_IR  >= 0 && sens.ir) ? (digitalRead(LEFT_IR)  == LOW) : false;
+  irRight = (RIGHT_IR >= 0 && sens.ir) ? (digitalRead(RIGHT_IR) == LOW) : false;
 
   // ── Flame sensor — ALERT ONLY, never triggers ESTOP ─────────────
   flameDetected = sens.flame ? (digitalRead(FLAME_DO) == LOW) : false;
@@ -422,7 +577,7 @@ void readAllSensors() {
   tiltDetected = sens.tilt ? (digitalRead(TILT_SENSOR) == HIGH) : false;
 
   // ── PIR motion sensor ────────────────────────────────────────────
-  pirDetected = sens.pir ? (digitalRead(PIR_PIN) == HIGH) : false;
+  pirDetected = (PIR_PIN >= 0 && sens.pir) ? (digitalRead(PIR_PIN) == HIGH) : false;
 
   // Stamp freshness for collisionAvoidance() staleness guard
   lastSenseTs = millis();
@@ -436,8 +591,11 @@ void updatePower() {
   unsigned long now = millis();
   unsigned long dt  = now - lastCurrentCalc;
   if (dt >= 1000) {
-    currentAmps     = (currentPulses / (dt / 1000.0f)) * 0.066f;
-    currentPulses   = 0;
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+      unsigned long pulses = currentPulses;
+      currentPulses = 0;
+      currentAmps = (pulses / (dt / 1000.0f)) * 0.066f;
+    }
     lastCurrentCalc = now;
   }
 }
@@ -466,7 +624,8 @@ void sendTelemetryToR4() {
   t += ((irFront||irRear||irLeft||irRight) ? "1":"0"); t += ':'; // 7 ir
   t += String(battVolt, 2);           t += ':';   // 8 volt
   t += String((int)battPct);          t += ':';   // 9 pct
-  t += String(currentAmps, 2);                    // 10 amps
+  t += String(currentAmps, 2);          t += ':'; // 10 amps
+  t += String(boostVolt,   2);                    // 11 boostV
   Serial1.println(t);
 
   // ── US: ──────────────────────────────────────────────────────────
@@ -476,6 +635,7 @@ void sendTelemetryToR4() {
   u += String(dLeft);  u += ',';
   u += String(dRight);
   Serial1.println(u);
+  toS9(u);
 
   // ── PWR: (R4 parser: idx 0=volt 1=amps 4=pct) ────────────────────
   String p = F("PWR:");
@@ -486,7 +646,7 @@ void sendTelemetryToR4() {
   p += String((int)battPct);
   Serial1.println(p);
 
-  // ── STATUS| ──────────────────────────────────────────────────────
+  // ── STATUS| — enriched with all board states ─────────────────────
   String s = F("STATUS|ESTOP:");
   s += (emergencyStop  ? "YES" : "NO");
   s += F("|AUTO:");
@@ -495,7 +655,16 @@ void sendTelemetryToR4() {
   s += String(battVolt, 2);
   s += F("|PCT:");
   s += String((int)battPct);
+  s += F("|R3:");
+  s += (r3CommFail  ? F("FAIL") : F("OK"));
+  s += F("|ESP:");
+  s += (esp32Ready  ? F("OK")   : F("WAIT"));
+  s += F("|S9:");
+  s += (s9Connected ? F("OK")   : F("WAIT"));
+  s += F("|FW:");
+  s += FW_VERSION;
   Serial1.println(s);
+  Serial3.println(s);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -535,7 +704,8 @@ void sendTelemetryToESP32() {
   s += ((irFront||irRear||irLeft||irRight) ? "1":"0"); s += ':';
   s += String(battVolt, 2);       s += ':';
   s += String((int)battPct);      s += ':';
-  s += String(currentAmps, 2);
+  s += String(currentAmps, 2);  s += ':'; // 10 amps
+  s += String(boostVolt,   2);              // 11 boostV
   Serial3.println(s);
 
   String u = F("US:");
@@ -563,26 +733,26 @@ void checkBatteryTiers() {
 
   switch (tier) {
     case BAT_TIER_WARN:
-      toS9("AUDIO:BATTERY_WARN");
-      Serial1.println(F("BAT:WARN"));
-      Serial3.println(F("BAT:WARN"));
-      beep(1200, 200);
-      break;
+      toS9("EVENT:BATTERY_WARN");
+          Serial1.println(F("BAT:WARN"));
+          Serial3.println(F("BAT:WARN"));
+          beep(1200, 200);
+          break;
     case BAT_TIER_LOW:
-      toS9("AUDIO:BATTERY_LOW");
-      Serial1.println(F("BAT:LOW"));
-      Serial3.println(F("BAT:LOW"));
-      sendMotor("SLOW");
-      beep(1800, 300);
-      break;
+      toS9("EVENT:BATTERY_LOW");
+          Serial1.println(F("BAT:LOW"));
+          Serial3.println(F("BAT:LOW"));
+          sendMotor("SLOW");
+          beep(1800, 300);
+          break;
     case BAT_TIER_CRITICAL:
       emergencyStop = true;
-      sendMotor("STOP");
-      toS9("AUDIO:BATTERY_CRITICAL");
-      Serial1.println(F("BAT:CRITICAL"));
-      Serial3.println(F("BAT:CRITICAL"));
-      beep(2500, 1000);
-      break;
+          sendMotor("STOP");
+          toS9("EVENT:BATTERY_CRITICAL");
+          Serial1.println(F("BAT:CRITICAL"));
+          Serial3.println(F("BAT:CRITICAL"));
+          beep(2500, 1000);
+          break;
     default: break;
   }
 }
@@ -598,7 +768,7 @@ void checkSafety() {
     emergencyStop = true;
     sendMotor("STOP");
     digitalWrite(FAN_PIN, HIGH);
-    toS9("AUDIO:OVERTEMP");
+    toS9("EVENT:OVERTEMP");
     Serial1.println(F("SAFETY:OVERTEMP"));
     Serial3.println(F("ALERT:OVERTEMP"));
     beep(2500, 1000);
@@ -607,7 +777,7 @@ void checkSafety() {
   // Tilt: stop motors but NOT a latching ESTOP (recoverable)
   if (tiltDetected && sens.tilt) {
     sendMotor("STOP");
-    toS9("AUDIO:TILT");
+    toS9("EVENT:TILT");
     Serial1.println(F("SAFETY:TILT"));
     Serial3.println(F("ALERT:TILT_DETECTED"));
     beep(2000, 300);
@@ -617,16 +787,27 @@ void checkSafety() {
   // Rising-edge only — fires once per detection event
   static bool lastFlameState = false;
   if (flameDetected && !lastFlameState && sens.flame) {
-    toS9("AUDIO:HAZARD");
+    toS9("EVENT:HAZARD");
     Serial1.println(F("SAFETY:FLAME_ALERT"));   // R4 overlay
     Serial3.println(F("ALERT:FLAME_DETECTED"));  // ESP32 dashboard
-    beep(3000, 300); delay(100); beep(3000, 300);
+    flameBeepCount = 2;
+    flameBeepTimer = millis();
+    beep(3000, 300);
   }
   lastFlameState = flameDetected;
 
+  // Non-blocking flame beep
+  if (flameBeepCount > 0 && millis() >= flameBeepTimer) {
+    flameBeepCount--;
+    if (flameBeepCount > 0) {
+      beep(3000, 300);
+      flameBeepTimer = millis() + 100;
+    }
+  }
+
   // Gas: alert only
   if (gasDetected && sens.gas) {
-    toS9("AUDIO:GAS_ALERT");
+    toS9("EVENT:GAS_ALERT");
     Serial1.println(F("SAFETY:GAS_ALERT"));
     Serial3.println(F("ALERT:GAS_DETECTED"));
   }
@@ -648,10 +829,9 @@ void checkSafety() {
 //  ESTOP AUTO-RECOVERY  (3x retry with timer-reset fix from V28)
 // ════════════════════════════════════════════════════════════════════
 void handleEstopRecovery() {
-  static unsigned long estopT = 0;
   if (estopT == 0) {
     estopT = millis();
-    motorComm.println(F("MOTOR|S"));
+    motorCommPrintln(F("MOTOR|S"));
     nav.isMoving = false;
     return;
   }
@@ -678,15 +858,10 @@ void handleEstopRecovery() {
 //  S9 COMMUNICATION
 // ════════════════════════════════════════════════════════════════════
 void sendStatusToS9() {
-  String s = F("STATUS|BAT:");
-  s += String(battVolt, 2); s += F("|PCT:");  s += String((int)battPct);
-  s += F("|AMP:");          s += String(currentAmps, 2);
-  s += F("|TEMP:");         s += String(ambTemp, 1);
-  s += F("|AUTO:");         s += (autonomousMode ? "ON"  : "OFF");
-  s += F("|ESTOP:");        s += (emergencyStop  ? "YES" : "NO");
-  s += F("|FLAME:");        s += (flameDetected  ? "YES" : "NO");
-  s += F("|UPT:");          s += String(uptimeSec);
-  s += F("|END");
+  String s = F("TELE:");
+  s += String(battVolt, 2); s += ',';
+  s += String((int)battPct); s += ',';
+  s += (nav.isMoving ? "1" : "0");
   toS9(s);
 }
 
@@ -698,7 +873,11 @@ void handleS9Communication() {
       s9Buffer = "";
     } else if (c != '\r') {
       s9Buffer += c;
-      if (s9Buffer.length() > 80) s9Buffer = "";
+      if (s9Buffer.length() > 80) {
+        Serial.print(F("[WARN] S9 buffer overflow: "));
+        Serial.println(s9Buffer);
+        s9Buffer = "";
+      }
     }
   }
 }
@@ -706,30 +885,31 @@ void handleS9Communication() {
 void processS9Command(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
+  Serial.print(F("[RECV] S9 Command: ")); Serial.println(cmd);
   s9LastHB    = millis();
   s9Connected = true;
 
   // ── Motor commands ───────────────────────────────────────────────
-  if (cmd == "MOTOR|F")     { sendMotor("FORWARD");  toS9("ACK|MOTOR|F|END"); return; }
-  if (cmd == "MOTOR|B")     { sendMotor("BACKWARD"); toS9("ACK|MOTOR|B|END"); return; }
-  if (cmd == "MOTOR|L")     { sendMotor("LEFT");     toS9("ACK|MOTOR|L|END"); return; }
-  if (cmd == "MOTOR|R")     { sendMotor("RIGHT");    toS9("ACK|MOTOR|R|END"); return; }
-  if (cmd == "MOTOR|S")     { sendMotor("STOP");     toS9("ACK|MOTOR|S|END"); return; }
-  if (cmd == "MOTOR|DANCE") {
+  if (cmd == "MOTOR:F")     { sendMotor("FORWARD");  toS9("ACK|MOTOR:F|END"); return; }
+  if (cmd == "MOTOR:B")     { sendMotor("BACKWARD"); toS9("ACK|MOTOR:B|END"); return; }
+  if (cmd == "MOTOR:L")     { sendMotor("LEFT");     toS9("ACK|MOTOR:L|END"); return; }
+  if (cmd == "MOTOR:R")     { sendMotor("RIGHT");    toS9("ACK|MOTOR:R|END"); return; }
+  if (cmd == "MOTOR:S")     { sendMotor("STOP");     toS9("ACK|MOTOR:S|END"); return; }
+  if (cmd == "MOTOR:DANCE") {
     mQueue.pending = false;
-    motorComm.println(F("MOTOR|DANCE"));
+    motorCommPrintln(F("MOTOR:DANCE"));
     toS9("ACK|DANCE|END");
     return;
   }
   if (cmd == "DEFENSE") {
     mQueue.pending = false;
-    motorComm.println(F("DEFENSE"));
+    motorCommPrintln(F("DEFENSE"));
     toS9("ACK|DEFENSE|END");
     return;
   }
 
   // ── Speed ────────────────────────────────────────────────────────
-  if (cmd.startsWith("SPEED:")) { motorComm.println(cmd); toS9("ACK|" + cmd + "|END"); return; }
+  if (cmd.startsWith("SPEED:")) { motorCommPrintln(cmd); toS9("ACK|" + cmd + "|END"); return; }
 
   // ── Autonomous mode ──────────────────────────────────────────────
   if (cmd == "AUTO:ON")  { autonomousMode = true;  toS9("ACK|AUTO_ON|END"); return; }
@@ -746,6 +926,7 @@ void processS9Command(String cmd) {
   if (cmd == "ESTOP_CLEAR") {
     emergencyStop = false;
     estopRetries  = 0;
+    estopT        = 0;   // [FIX] allow recovery cycle to restart cleanly
     toS9("ACK|ESTOP_CLEARED|END");
     return;
   }
@@ -791,6 +972,102 @@ void processS9Command(String cmd) {
 
   if (cmd == "DEBUG:ON")  { debugVerbose = true;  return; }
   if (cmd == "DEBUG:OFF") { debugVerbose = false; return; }
+
+  // ── App notifications ────────────────────────────────────────────
+  if (cmd == "NOTIFY:PATROL_START") { /* TODO: handle patrol start */ toS9("ACK|PATROL_START|END"); return; }
+  if (cmd == "KEEP_DISTANCE")       { /* TODO: handle keep distance */ toS9("ACK|KEEP_DISTANCE|END"); return; }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  R4 DASHBOARD COMMUNICATION  (Serial1 receive — Mega was write-only before V29)
+//  Accepts:
+//    MODE:<name>              — mode selected on R4 touchscreen
+//    TOGGLE_SENSOR:<ID>:<ON|OFF> — sensor toggle from R4 sensor config screen
+// ════════════════════════════════════════════════════════════════════
+void processR4Command(String cmd) {
+  if (debugVerbose) { Serial.print(F("[R4] RX: ")); Serial.println(cmd); }
+
+  r4Linked = true;
+
+  // ── B1: PING_R4 handshake — reply with PONG_R4:<seq> ────────────
+  if (cmd.startsWith("PING_R4:")) {
+    r4LastPingMs = millis();
+    r4PingSeq    = (uint8_t)cmd.substring(8).toInt();
+    Serial1.print(F("PONG_R4:"));
+    Serial1.println(r4PingSeq);
+    if (debugVerbose) { Serial.print(F("[R4] PING seq=")); Serial.println(r4PingSeq); }
+    return;
+  }
+
+  // ── Mode change from R4 touchscreen ──────────────────────────────
+  if (cmd.startsWith("MODE:")) {
+    String mode = cmd.substring(5);
+    Serial1.print(F("MODE:")); Serial1.println(mode);   // echo back to R4 for confirmation
+    toS9("REQ_MODE:" + mode);
+    Serial3.print(F("MODE:")); Serial3.println(mode);   // forward to ESP32 web UI
+    return;
+  }
+
+  // ── Sensor toggle from R4 config screen ──────────────────────────
+  if (cmd.startsWith("TOGGLE_SENSOR:")) {
+    applyToggle(cmd);   // applies, ACKs to S9, and pushes SENS_ST| back to R4 + ESP32
+    return;
+  }
+
+  if (debugVerbose) { Serial.print(F("[R4] Unknown cmd: ")); Serial.println(cmd); }
+}
+
+void handleR4Communication() {
+  while (Serial1.available()) {
+    char c = Serial1.read();
+    if (c == '\n') {
+      r4Buf.trim();
+      if (r4Buf.length() > 0) processR4Command(r4Buf);
+      r4Buf = "";
+    } else if (c != '\r') {
+      r4Buf += c;
+      if (r4Buf.length() > 80) r4Buf = "";   // overflow guard
+    }
+  }
+}
+
+void processR3Response(String resp) {
+  if (debugVerbose) { Serial.print(F("[R3] RX: ")); Serial.println(resp); }
+  if (resp.startsWith("ACK:MOTOR|")) {
+    toS9("ACK|" + resp + "|END");
+    return;
+  }
+  if (resp == "ACK:DANCE:DONE") {
+    toS9("ACK|DANCE:DONE|END");
+    return;
+  }
+  if (resp == "ACK:DEFENSE:DONE") {
+    toS9("ACK|DEFENSE:DONE|END");
+    return;
+  }
+  if (resp.startsWith("PONG:")) {
+    toS9("PONG|" + resp.substring(5) + "|END");
+    return;
+  }
+  if (resp.startsWith("ERR:")) {
+    toS9("ERR|" + resp.substring(4) + "|END");
+    return;
+  }
+  if (debugVerbose) { Serial.print(F("[R3] Unknown: ")); Serial.println(resp); }
+}
+
+void handleR3Communication() {
+  while (motorComm.available()) {
+    char c = motorComm.read();
+    if (c == '\n') {
+      r3Buf.trim();
+      if (r3Buf.length() > 0) processR3Response(r3Buf);
+      r3Buf = "";
+    } else if (c != '\r') {
+      r3Buf += c;
+      if (r3Buf.length() > 80) r3Buf = "";
+    }
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -828,6 +1105,7 @@ void processESP32Command(String cmd) {
     if (sub == "SAFETY|CLR") {
       emergencyStop = false;
       estopRetries  = 0;
+      estopT        = 0;   // [FIX] allow recovery cycle to restart cleanly
       toS9("ACK|ESTOP_CLEARED|END");
       return;
     }
@@ -845,12 +1123,12 @@ void processESP32Command(String cmd) {
     else if (sub == "R")      { autonomousMode = false; sendMotor("RIGHT"); }
     else if (sub == "S")      { autonomousMode = false; sendMotor("STOP"); }
     else if (sub == "AUTO")   { autonomousMode = !autonomousMode; if (!autonomousMode) sendMotor("STOP"); }
-    else if (sub == "DANCE")  { motorComm.println(F("MOTOR|DANCE")); }
+    else if (sub == "DANCE")  { motorCommPrintln(F("MOTOR|DANCE")); }
     else if (sub == "SLOW")   { sendMotor("SLOW"); }
     else if (sub == "NORMAL") { sendMotor("NORMAL"); }
     else if (sub == "FAST")   { sendMotor("FAST"); }
     else if (sub == "ESTOP")  { emergencyStop = true; sendMotor("STOP"); }
-    else if (sub == "CLEAR")  { emergencyStop = false; estopRetries = 0; }
+    else if (sub == "CLEAR")  { emergencyStop = false; estopRetries = 0; estopT = 0; }  // [FIX]
     else if (sub.startsWith("TOGGLE_SENSOR:")) { applyToggle(sub); }
     return;
   }
@@ -887,9 +1165,14 @@ void handleGPS() {
 //  RF REMOTE
 // ════════════════════════════════════════════════════════════════════
 void handleRF() {
-  if (!rfReceiver.available()) return;
+  noInterrupts();
+  if (!rfReceiver.available()) {
+    interrupts();
+    return;
+  }
   unsigned long code = rfReceiver.getReceivedValue();
   rfReceiver.resetAvailable();
+  interrupts();
   if (code == 0 || code == lastRFCode) return;
   lastRFCode = code; lastRFTime = millis();
 
@@ -919,7 +1202,7 @@ void checkGestures() {
   else if (data == GES_LEFT_FLAG)      { g = "LEFT";  sendMotor("LEFT"); }
   else if (data == GES_RIGHT_FLAG)     { g = "RIGHT"; sendMotor("RIGHT"); }
   else if (data == GES_FORWARD_FLAG)   { g = "NEAR";  sendMotor("STOP"); }
-  else if (data == GES_CLOCKWISE_FLAG) { g = "CW";    motorComm.println(F("MOTOR|DANCE")); }
+  else if (data == GES_CLOCKWISE_FLAG) { g = "CW";    motorCommPrintln(F("MOTOR|DANCE")); }
   if (g) {
     Serial1.print(F("GESTURE:")); Serial1.println(g);
     toS9("GESTURE:" + String(g));
@@ -939,47 +1222,115 @@ void handleButton() {
       autonomousMode = !autonomousMode;
       if (!autonomousMode) sendMotor("STOP");
       toS9(autonomousMode ? "BTN:AUTO_ON" : "BTN:AUTO_OFF");
-      for (int i = 0; i < 3; i++) {
-        digitalWrite(LEFT_HEADLIGHT, HIGH); digitalWrite(RIGHT_HEADLIGHT, HIGH); delay(80);
-        digitalWrite(LEFT_HEADLIGHT, LOW);  digitalWrite(RIGHT_HEADLIGHT, LOW);  delay(80);
-      }
+      buttonBlinkCount = 6;  // 3 on + 3 off
+      buttonBlinkTimer = now;
+      digitalWrite(LEFT_HEADLIGHT, HIGH); digitalWrite(RIGHT_HEADLIGHT, HIGH);
     }
   } else {
     btnPressed = false;
+  }
+
+  // Non-blocking blink
+  if (buttonBlinkCount > 0 && millis() >= buttonBlinkTimer) {
+    buttonBlinkCount--;
+    if (buttonBlinkCount % 2 == 0) {
+      digitalWrite(LEFT_HEADLIGHT, HIGH); digitalWrite(RIGHT_HEADLIGHT, HIGH);
+    } else {
+      digitalWrite(LEFT_HEADLIGHT, LOW); digitalWrite(RIGHT_HEADLIGHT, LOW);
+    }
+    buttonBlinkTimer = millis() + 80;
   }
 }
 
 // ════════════════════════════════════════════════════════════════════
 //  AUTONOMOUS NAVIGATION
 // ════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+//  AUTONOMOUS NAVIGATION
+// ════════════════════════════════════════════════════════════════════
 void lookAndDecide() {
-  sendMotor("STOP"); delay(150);
-  bool leftClear  = (dLeft  > SIDE_MIN || dLeft  < 0);
-  bool rightClear = (dRight > SIDE_MIN || dRight < 0);
-  if (leftClear && (dLeft > dRight || !rightClear)) {
-    sendMotor("LEFT");  delay(T45); sendMotor("FORWARD"); nav.isMoving = true;
-  } else if (rightClear) {
-    sendMotor("RIGHT"); delay(T45); sendMotor("FORWARD"); nav.isMoving = true;
-  } else {
-    sendMotor("BACKWARD"); delay(800);
-    sendMotor("LEFT");     delay(T90);
-    sendMotor("FORWARD");  nav.isMoving = true;
+  if (lookState == LOOK_IDLE) {
+    sendMotor("STOP");
+    navTimer = millis() + 150;
+    lookState = LOOK_STOP;
+    return;
+  }
+  if (lookState == LOOK_STOP && millis() >= navTimer) {
+    bool leftClear  = (dLeft  > SIDE_MIN || dLeft  < 0);
+    bool rightClear = (dRight > SIDE_MIN || dRight < 0);
+    if (leftClear && (dLeft > dRight || !rightClear)) {
+      sendMotor("LEFT");
+      navTimer = millis() + T45;
+      lookState = LOOK_LEFT;
+    } else if (rightClear) {
+      sendMotor("RIGHT");
+      navTimer = millis() + T45;
+      lookState = LOOK_RIGHT;
+    } else {
+      sendMotor("BACKWARD");
+      navTimer = millis() + 800;
+      lookState = LOOK_BACK_LEFT;
+    }
+    return;
+  }
+  if (lookState == LOOK_LEFT && millis() >= navTimer) {
+    sendMotor("FORWARD");
+    nav.isMoving = true;
+    lookState = LOOK_IDLE;
+    return;
+  }
+  if (lookState == LOOK_RIGHT && millis() >= navTimer) {
+    sendMotor("FORWARD");
+    nav.isMoving = true;
+    lookState = LOOK_IDLE;
+    return;
+  }
+  if (lookState == LOOK_BACK_LEFT && millis() >= navTimer) {
+    sendMotor("LEFT");
+    navTimer = millis() + T90;
+    lookState = LOOK_FORWARD;
+    return;
+  }
+  if (lookState == LOOK_FORWARD && millis() >= navTimer) {
+    sendMotor("FORWARD");
+    nav.isMoving = true;
+    lookState = LOOK_IDLE;
+    return;
   }
 }
 
 void handleStuck() {
-  dbg("[NAV] Stuck — recovering");
-  sendMotor("STOP");     delay(150);
-  sendMotor("BACKWARD"); delay(1200);
-  sendMotor("LEFT");     delay(T90);
-  sendMotor("FORWARD");
-  nav.stuckDetected = false;
-  nav.stuckStart    = 0;
+  if (stuckState == STUCK_IDLE) {
+    sendMotor("STOP");
+    navTimer = millis() + 150;
+    stuckState = STUCK_STOP;
+    return;
+  }
+  if (stuckState == STUCK_STOP && millis() >= navTimer) {
+    sendMotor("BACKWARD");
+    navTimer = millis() + 1200;
+    stuckState = STUCK_BACK;
+    return;
+  }
+  if (stuckState == STUCK_BACK && millis() >= navTimer) {
+    sendMotor("LEFT");
+    navTimer = millis() + T90;
+    stuckState = STUCK_LEFT;
+    return;
+  }
+  if (stuckState == STUCK_LEFT && millis() >= navTimer) {
+    sendMotor("FORWARD");
+    nav.stuckDetected = false;
+    nav.stuckStart = 0;
+    stuckState = STUCK_IDLE;
+    return;
+  }
 }
 
 void makeAutonomousDecision() {
   if (emergencyStop) { sendMotor("STOP"); return; }
-  if (nav.isMoving && !nav.isAvoiding) {
+  bool isTurning = (randomState == RANDOM_TURN || lookState != LOOK_IDLE || avoidState == AVOID_TURN);
+  if (nav.isMoving && !nav.isAvoiding && !isTurning) {
     if (abs(dFront - nav.lastFrontDist) < 5) {
       if (nav.stuckStart == 0) nav.stuckStart = millis();
       else if (millis() - nav.stuckStart > 3000) { handleStuck(); return; }
@@ -997,39 +1348,88 @@ void makeAutonomousDecision() {
   } else {
     if      (dFront > 0 && dFront < OBS_SLOW) sendMotor("SLOW");
     else if (dFront > OBS_SLOW)               sendMotor("NORMAL");
-    if (random(1000) > 992) {
-      (random(2) == 0) ? sendMotor("LEFT") : sendMotor("RIGHT");
-      delay(180);
-      sendMotor("FORWARD");
-    }
+    // Random turn handled in loop() now
+  }
+}
+
+// Non-blocking random turn
+void handleRandomTurn() {
+  if (randomState == RANDOM_IDLE && nav.isMoving && random(1000) > 992) {
+    (random(2) == 0) ? sendMotor("LEFT") : sendMotor("RIGHT");
+    navTimer = millis() + 180;
+    randomState = RANDOM_TURN;
+  }
+  if (randomState == RANDOM_TURN && millis() >= navTimer) {
+    sendMotor("FORWARD");
+    randomState = RANDOM_IDLE;
   }
 }
 
 // Collision avoidance with sensor-freshness guard (< 600ms old)
 void collisionAvoidance() {
+  if (!autonomousMode) { avoidState = AVOID_IDLE; nav.isAvoiding = false; return; }
   if (millis() - lastSenseTs > 600) return;  // stale data — don't react
 
-  if (sens.us && dFront > 0 && dFront < OBS_STOP && !nav.isAvoiding) {
+  if (sens.us && dFront > 0 && dFront < OBS_STOP && !nav.isAvoiding && avoidState == AVOID_IDLE) {
     nav.isAvoiding = true; nav.avoidStart = millis(); nav.avoidAttempts++;
-    dbg("[AVOID] Emergency stop");
-    sendMotor("STOP"); delay(100);
-    bool lc = (dLeft  < 0 || dLeft  > SIDE_MIN);
-    bool rc = (dRight < 0 || dRight > SIDE_MIN);
-    sendMotor("BACKWARD"); delay(700);
-    sendMotor("STOP");     delay(150);
-    if      (lc && (!rc || dLeft > dRight)) { sendMotor("LEFT");  delay(T90); }
-    else if (rc)                             { sendMotor("RIGHT"); delay(T90); }
-    else                                     { sendMotor("LEFT");  delay(T90 * 2); }
-    if (autonomousMode) { sendMotor("FORWARD"); nav.isMoving = true; }
-    nav.isAvoiding = false;
+    sendMotor("STOP");
+    navTimer = millis() + 100;
+    avoidState = AVOID_STOP;
+    return;
   }
 
-  if (sens.ir && irFront && !nav.isAvoiding) {
-    dbg("[AVOID] Front IR");
-    sendMotor("STOP");     delay(100);
-    sendMotor("BACKWARD"); delay(500);
-    sendMotor("RIGHT");    delay(T45);
+  if (avoidState == AVOID_STOP && millis() >= navTimer) {
+    bool lc = (dLeft  < 0 || dLeft  > SIDE_MIN);
+    bool rc = (dRight < 0 || dRight > SIDE_MIN);
+    sendMotor("BACKWARD");
+    navTimer = millis() + 700;
+    avoidState = AVOID_BACK;
+    return;
+  }
+  if (avoidState == AVOID_BACK && millis() >= navTimer) {
+    sendMotor("STOP");
+    navTimer = millis() + 150;
+    avoidState = AVOID_STOP2;
+    return;
+  }
+  if (avoidState == AVOID_STOP2 && millis() >= navTimer) {
+    if      (lc && (!rc || dLeft > dRight)) { sendMotor("LEFT");  navTimer = millis() + T90; }
+    else if (rc)                             { sendMotor("RIGHT"); navTimer = millis() + T90; }
+    else                                     { sendMotor("LEFT");  navTimer = millis() + (T90 * 2); }
+    avoidState = AVOID_TURN;
+    return;
+  }
+  if (avoidState == AVOID_TURN && millis() >= navTimer) {
+    if (autonomousMode) { sendMotor("FORWARD"); nav.isMoving = true; }
+    nav.isAvoiding = false;
+    nav.lastAvoidEnd = millis();
+    avoidState = AVOID_IDLE;
+    return;
+  }
+
+  if (sens.ir && irFront && !nav.isAvoiding && avoidState == AVOID_IDLE) {
+    sendMotor("STOP");
+    navTimer = millis() + 100;
+    avoidState = AVOID_STOP;
+    return;
+  }
+  // Reuse AVOID_STOP for IR
+  if (avoidState == AVOID_STOP && millis() >= navTimer) {
+    sendMotor("BACKWARD");
+    navTimer = millis() + 500;
+    avoidState = AVOID_BACK;
+    return;
+  }
+  if (avoidState == AVOID_BACK && millis() >= navTimer) {
+    sendMotor("RIGHT");
+    navTimer = millis() + T45;
+    avoidState = AVOID_TURN;
+    return;
+  }
+  if (avoidState == AVOID_TURN && millis() >= navTimer) {
     sendMotor("FORWARD");
+    avoidState = AVOID_IDLE;
+    return;
   }
 
   if (nav.isReversing && sens.us && dRear > 0 && dRear < 15) {
@@ -1037,13 +1437,12 @@ void collisionAvoidance() {
   }
 
   if (nav.avoidAttempts > 5) {
-    dbg("[AVOID] Too many — stopping auto");
-    autonomousMode    = false;
+    autonomousMode = false;
     nav.avoidAttempts = 0;
     sendMotor("STOP");
-    toS9("AUDIO:NAVIGATION_FAILED");
+    toS9("EVENT:NAVIGATION_FAILED");
   }
-  if (!nav.isAvoiding && millis() - nav.avoidStart > 10000) nav.avoidAttempts = 0;
+  if (nav.avoidAttempts > 0 && millis() - nav.lastAvoidEnd > 10000) nav.avoidAttempts = 0;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1051,16 +1450,17 @@ void collisionAvoidance() {
 // ════════════════════════════════════════════════════════════════════
 void initPins() {
   // Analog inputs
-  pinMode(VOLTAGE_SENSOR, INPUT); pinMode(TEMP_SENSOR_1, INPUT); pinMode(TEMP_SENSOR_2, INPUT);
+  pinMode(VOLTAGE_SENSOR, INPUT); pinMode(TEMP_SENSOR_1, INPUT); pinMode(BOOST_VOLT_SENSOR, INPUT);
   pinMode(FLAME_AO, INPUT); pinMode(LDR_AO, INPUT); pinMode(SOUND_AO, INPUT);
   pinMode(GAS_AO,   INPUT);
 
   // Digital inputs
   pinMode(FLAME_DO, INPUT); pinMode(LDR_DO, INPUT);
   pinMode(REAR_IR,  INPUT); pinMode(FRONT_IR, INPUT);
-  pinMode(LEFT_IR,  INPUT); pinMode(RIGHT_IR, INPUT);
+  if (LEFT_IR  >= 0) pinMode(LEFT_IR,  INPUT);
+  if (RIGHT_IR >= 0) pinMode(RIGHT_IR, INPUT);
   pinMode(TILT_SENSOR,   INPUT);
-  pinMode(PIR_PIN,       INPUT);
+  if (PIR_PIN  >= 0) pinMode(PIR_PIN,  INPUT);
   pinMode(UNHINGED_SW,   INPUT_PULLUP);
   pinMode(MOMENTARY_BTN, INPUT_PULLUP);
   pinMode(GESTURE_INT,   INPUT);
@@ -1093,17 +1493,43 @@ void startupSequence() {
   digitalWrite(FAN_PIN, HIGH); delay(400); digitalWrite(FAN_PIN, LOW);
 }
 
+bool waitForR3Ready() {
+  unsigned long timeout = millis() + 2500;
+  String response = "";
+  while (millis() < timeout) {
+    if (motorComm.available()) {
+      char c = motorComm.read();
+      if (c == '\r' || c == '\n') {
+        if (response.indexOf("R3:READY") != -1 || response.indexOf("PONG") != -1) {
+          return true;
+        }
+        response = "";
+      } else response += c;
+    }
+  }
+  dbg("[WARN] R3 ready timeout — proceeding");
+  return false;
+}
 // ════════════════════════════════════════════════════════════════════
-//  SETUP
+//  MEGA SETUP — NOW WITH BOOT LOCK (replace your current setup())
 // ════════════════════════════════════════════════════════════════════
 void setup() {
-  Serial.begin(115200);    // → Samsung S9
-  Serial1.begin(115200);   // → UNO R4 WiFi
-  Serial2.begin(9600);     // → GPS NEO-6M
-  Serial3.begin(115200);   // → ESP32
-  motorComm.begin(9600);   // → UNO R3 Motor Shield
+  // ABSOLUTE FIRST THING: open comms and HAMMER the R3 with immediate STOP
+  motorComm.begin(9600);
+  delay(150);
+  motorComm.println(F("MOTOR|S"));
+  motorComm.println(F("MOTOR|S"));
+  motorComm.println(F("MOTOR|S"));
 
-  delay(500);
+  Serial.begin(115200);
+  while (!Serial && millis() < 4000) {}
+  delay(250);
+
+  Serial1.begin(115200);
+  Serial2.begin(9600);
+  Serial3.begin(115200);
+
+  delay(400);
   Wire.begin();
   dht.begin();
   initPins();
@@ -1112,17 +1538,49 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(CURRENT_SENSOR), currentPulseISR, RISING);
 
   if (paj7620Init() == 0) { dbg("[INIT] PAJ7620 OK"); }
-  else                     { dbg("[INIT] PAJ7620 FAILED — gesture sensor absent"); }
+  else                     { dbg("[INIT] PAJ7620 FAILED"); }
 
   readAllSensors();
+
+  waitForR3Ready();
+
   startupSequence();
   systemReady = true;
+  nav.lastAvoidEnd = millis();
 
-  // Announce to all channels
+  // NEW BOOT LOCK — prevents early motor spam
+  bootStartTime = millis();
+  autonomousMode = false;   // force off on every boot
+
+  // ── E3: Explicit boot sequence ────────────────────────────────────
+  // Step 1: Tell S9 Mega is up
   toS9("SYSTEM|READY|" + String(FW_VERSION) + "|END");
-  Serial1.println(F("STAT|READY"));
-  Serial1.println(sensorStatusString());   // R4 sensor config screen initial state
-  Serial3.println(F("MEGA:BOOT"));         // ESP32 boot handshake
+
+  // Step 2: Tell R4 Mega is up with firmware version
+  {
+    String boot = F("MEGA_READY|FW:");
+    boot += FW_VERSION;
+    boot += F("|END");
+    Serial1.println(boot);
+  }
+  Serial1.println(sensorStatusString());
+
+  // Step 3: Tell ESP32 to announce itself
+  Serial3.println(F("MEGA:BOOT"));
+
+  // Step 4: Run R3 comm test, then report full status to R4
+  runR3CommTest();
+
+  // Step 5: Broadcast connection status to R4 startup screen
+  {
+    String connStatus = F("CONN_STATUS|");
+    connStatus += r3CommFail ? F("R3:FAIL|") : F("R3:OK|");
+    connStatus += F("MEGA:OK|FW:");
+    connStatus += FW_VERSION;
+    connStatus += F("|END");
+    Serial1.println(connStatus);
+  }
+
   dbg("[READY] BuddyBot " FW_VERSION);
 }
 
@@ -1130,6 +1588,16 @@ void setup() {
 //  MAIN LOOP
 // ════════════════════════════════════════════════════════════════════
 void loop() {
+  // BOOT LOCK — keep motors dead and quiet for first 5 seconds
+  if (millis() - bootStartTime < BOOT_LOCK_TIME) {
+    sendMotor("STOP");           // hammer stop during boot
+    drainMotorQueue();           // keep queue flushing
+    handleS9Communication();     // keep Android connected
+    handleR3Communication();
+    handleESP32Communication();
+    return;                      // skip all navigation/safety until stable
+  }
+
   if (!systemReady) { delay(50); return; }
   unsigned long now = millis();
 
@@ -1140,6 +1608,8 @@ void loop() {
   unhingedMode = (digitalRead(UNHINGED_SW) == LOW);
 
   handleS9Communication();
+  handleR4Communication();
+  handleR3Communication();
   handleESP32Communication();
   handleGPS();
   handleRF();
@@ -1148,6 +1618,20 @@ void loop() {
   if (s9Connected && (now - s9LastHB > S9_TIMEOUT)) {
     s9Connected = false;
     dbg("[S9] Disconnected");
+  }
+
+  // E1: R4 link watchdog — detect if R4 stopped pinging
+  if (r4Linked && r4LastPingMs > 0 && (now - r4LastPingMs > 30000)) {
+    if (debugVerbose) Serial.println(F("[R4] WATCHDOG: no PING_R4 in 30s — link lost"));
+    r4Linked     = false;
+    r4LastPingMs = 0;
+  }
+
+  // E1: R4 link watchdog — flag if no ping received in 30s
+  if (r4Linked && r4LastPingMs > 0 && (now - r4LastPingMs > 30000)) {
+    if (debugVerbose) Serial.println(F("[R4] WATCHDOG: no ping in 30s"));
+    r4Linked     = false;
+    r4LastPingMs = 0;
   }
 
   // Sensor + safety loop (500ms)
@@ -1178,10 +1662,13 @@ void loop() {
   if (autonomousMode && !emergencyStop && (now - lastNavDec > 200)) {
     lastNavDec = now;
     makeAutonomousDecision();
+    lookAndDecide();
+    handleStuck();
+    handleRandomTurn();
   }
 
   // Collision avoidance (50ms — fast loop)
-  if (now - lastAvoid > 50) {
+  if (autonomousMode && (now - lastAvoid > 50)) {
     lastAvoid = now;
     collisionAvoidance();
   }
@@ -1194,4 +1681,10 @@ void loop() {
 
   // RF code debounce reset
   if (now - lastRFTime > 500) lastRFCode = 0;
+
+  // ESP32 handshake re-send (5s interval) to catch late-boot ESP32
+  if (!esp32Ready && (now - lastEsp32Check > 5000)) {
+    lastEsp32Check = now;
+    Serial3.println(F("MEGA:BOOT"));
+  }
 }

@@ -1,4 +1,4 @@
-package com.buddybot.kids.services
+package com.buddybot.kids
 
 import android.Manifest
 import android.app.Notification

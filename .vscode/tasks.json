@@ -1,0 +1,27 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "BuddyBot: Full Hardware Audit",
+            "type": "shell",
+            "command": "arduino-cli compile --fqbn arduino:avr:mega BuddyBot_Mega_V29.ino && arduino-cli compile --fqbn arduino:renesas_uno:unor4wifi BuddyBot_R4_Dash.ino && arduino-cli compile --fqbn arduino:avr:uno BuddyBot_R3_Motors.ino",
+            "group": "test",
+            "problemMatcher": ["$gcc"],
+            "detail": "Compiles all 3 Arduino boards to catch logic/syntax errors."
+        },
+        {
+            "label": "BuddyBot: Build S9 App",
+            "type": "shell",
+            "command": "./gradlew.bat assembleDebug",
+            "group": "build",
+            "detail": "Builds the Android APK for the Samsung S9."
+        },
+        {
+            "label": "BuddyBot: Live Logcat (S9)",
+            "type": "shell",
+            "command": "adb logcat -s BuddyBotMainActivity,FaceCoordinator,EnvironmentMonitor -v time",
+            "isBackground": true,
+            "detail": "Streams real-time logs from the S9 to your VS Code terminal."
+        }
+    ]
+}

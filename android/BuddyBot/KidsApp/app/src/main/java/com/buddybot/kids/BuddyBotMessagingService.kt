@@ -1,4 +1,4 @@
-package com.buddybot.kids.services
+package com.buddybot.kids
 
 import android.util.Log
 import com.google.firebase.messaging.FirebaseMessagingService

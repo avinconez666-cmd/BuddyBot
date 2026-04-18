@@ -1,4 +1,4 @@
-package com.buddybot.kids.receivers
+package com.buddybot.kids
 
 import android.content.BroadcastReceiver
 import android.content.Context

@@ -82,26 +82,23 @@ uint8_t  currentSpeed  = 200;
 bool     motorsRunning = false;
 String   cmdBuf        = "";
 
+// Enums for pattern states
+enum DanceState { DANCE_IDLE, DANCE_SET_SPEED, DANCE_WIGGLE, DANCE_FORWARD, DANCE_STOP1, DANCE_BACKWARD, DANCE_STOP2, DANCE_SPIN, DANCE_DONE };
+enum DefenseState { DEFENSE_IDLE, DEFENSE_SET_SPEED, DEFENSE_LUNGE, DEFENSE_SPIN, DEFENSE_DONE };
+
+// Global state variables
+DanceState danceState = DANCE_IDLE;
+DefenseState defenseState = DEFENSE_IDLE;
+unsigned long patternTimer = 0;
+int patternCounter = 0;
+uint8_t savedSpeed = 200;
+
 // ════════════════════════════════════════════════════════════════════
 //  LOW-LEVEL MOTOR DRIVER  (from working reference sketch)
 // ════════════════════════════════════════════════════════════════════
 
 void shiftWrite(int output, int high_low) {
-  static int latch_copy             = 0;
-  static bool shift_register_init   = false;
-
-  if (!shift_register_init) {
-    pinMode(MOTORLATCH,  OUTPUT);
-    pinMode(MOTORENABLE, OUTPUT);
-    pinMode(MOTORDATA,   OUTPUT);
-    pinMode(MOTORCLK,    OUTPUT);
-    digitalWrite(MOTORDATA,   LOW);
-    digitalWrite(MOTORLATCH,  LOW);
-    digitalWrite(MOTORCLK,    LOW);
-    digitalWrite(MOTORENABLE, LOW);   // LOW = enabled
-    latch_copy           = 0;
-    shift_register_init  = true;
-  }
+  static int latch_copy = 0;
 
   bitWrite(latch_copy, output, high_low);
   shiftOut(MOTORDATA, MOTORCLK, MSBFIRST, latch_copy);
@@ -220,47 +217,107 @@ void setSpeed(uint8_t spd) {
 // ════════════════════════════════════════════════════════════════════
 
 void dancePattern() {
-  uint8_t saved = currentSpeed;
-
-  // Set dance speed
-  motor(1, M_FORWARD, 220); motor(2, M_FORWARD, 220);
-  motor(3, M_FORWARD, 220); motor(4, M_FORWARD, 220);
-
-  // Left-right wiggle x3
-  for (int i = 0; i < 3; i++) {
-    spinLeft();  delay(280);
-    spinRight(); delay(280);
+  if (danceState == DANCE_IDLE) {
+    savedSpeed = currentSpeed;
+    motor(1, M_FORWARD, 220); motor(2, M_FORWARD, 220);
+    motor(3, M_FORWARD, 220); motor(4, M_FORWARD, 220);
+    patternCounter = 0;
+    patternTimer = millis() + 280;
+    danceState = DANCE_WIGGLE;
+    spinLeft();
+    return;
   }
-  // Forward & back
-  moveForward();  delay(300);
-  stopAll();      delay(80);
-  moveBackward(); delay(300);
-  stopAll();      delay(80);
-  // Final spin
-  currentSpeed = 220;
-  spinLeft();  delay(650);
-  stopAll();
-
-  currentSpeed = saved;
-  megaSerial.println(F("ACK:DANCE:DONE"));
+  if (danceState == DANCE_WIGGLE && millis() >= patternTimer) {
+    patternCounter++;
+    if (patternCounter < 6) {  // 3 left + 3 right
+      if (patternCounter % 2 == 1) {
+        spinRight();
+      } else {
+        spinLeft();
+      }
+      patternTimer = millis() + 280;
+    } else {
+      moveForward();
+      patternTimer = millis() + 300;
+      danceState = DANCE_FORWARD;
+    }
+    return;
+  }
+  if (danceState == DANCE_FORWARD && millis() >= patternTimer) {
+    stopAll();
+    patternTimer = millis() + 80;
+    danceState = DANCE_STOP1;
+    return;
+  }
+  if (danceState == DANCE_STOP1 && millis() >= patternTimer) {
+    moveBackward();
+    patternTimer = millis() + 300;
+    danceState = DANCE_BACKWARD;
+    return;
+  }
+  if (danceState == DANCE_BACKWARD && millis() >= patternTimer) {
+    stopAll();
+    patternTimer = millis() + 80;
+    danceState = DANCE_STOP2;
+    return;
+  }
+  if (danceState == DANCE_STOP2 && millis() >= patternTimer) {
+    currentSpeed = 220;
+    spinLeft();
+    patternTimer = millis() + 650;
+    danceState = DANCE_SPIN;
+    return;
+  }
+  if (danceState == DANCE_SPIN && millis() >= patternTimer) {
+    stopAll();
+    currentSpeed = savedSpeed;
+    megaSerial.println(F("ACK:DANCE:DONE"));
+    danceState = DANCE_IDLE;
+    return;
+  }
 }
 
 void defensePattern() {
-  uint8_t saved = currentSpeed;
-  currentSpeed = 255;
-
-  // Aggressive lunge x4
-  for (int i = 0; i < 4; i++) {
-    moveForward();  delay(120);
-    moveBackward(); delay(120);
-    stopAll();      delay(40);
+  if (defenseState == DEFENSE_IDLE) {
+    savedSpeed = currentSpeed;
+    currentSpeed = 255;
+    patternCounter = 0;
+    patternTimer = millis() + 120;
+    defenseState = DEFENSE_LUNGE;
+    moveForward();
+    return;
   }
-  // Hard spin
-  spinLeft();  delay(750);
-  stopAll();
-
-  currentSpeed = saved;
-  megaSerial.println(F("ACK:DEFENSE:DONE"));
+  if (defenseState == DEFENSE_LUNGE && millis() >= patternTimer) {
+    patternCounter++;
+    if (patternCounter < 16) {  // 4 cycles of forward/back/stop
+      int step = patternCounter % 4;
+      if (step == 0) {
+        moveBackward();
+        patternTimer = millis() + 120;
+      } else if (step == 1) {
+        stopAll();
+        patternTimer = millis() + 40;
+      } else if (step == 2) {
+        moveForward();
+        patternTimer = millis() + 120;
+      } else {
+        stopAll();
+        patternTimer = millis() + 40;
+      }
+    } else {
+      spinLeft();
+      patternTimer = millis() + 750;
+      defenseState = DEFENSE_SPIN;
+    }
+    return;
+  }
+  if (defenseState == DEFENSE_SPIN && millis() >= patternTimer) {
+    stopAll();
+    currentSpeed = savedSpeed;
+    megaSerial.println(F("ACK:DEFENSE:DONE"));
+    defenseState = DEFENSE_IDLE;
+    return;
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -301,11 +358,11 @@ void processCommand(String cmd) {
 
   // ── PATTERNS ───────────────────────────────────────────────────
   if (cmd == "MOTOR|DANCE") {
-    dancePattern();
+    danceState = DANCE_IDLE;  // Will start on next loop
     return;
   }
   if (cmd == "DEFENSE") {
-    defensePattern();
+    defenseState = DEFENSE_IDLE;  // Will start on next loop
     return;
   }
 
@@ -366,10 +423,32 @@ void processCommand(String cmd) {
 // ════════════════════════════════════════════════════════════════════
 
 void setup() {
-  // SoftwareSerial to Mega — must match Mega's motorComm baud rate
+  // Disable motor outputs immediately, before anything else
+  // Motor stop will be sent via SoftwareSerial after initialization
   megaSerial.begin(9600);
+  
+  // ✅ FIX: Wait for serial link to stabilize before transmitting
+  delay(1000);
+  pinMode(MOTORENABLE, OUTPUT);
+  digitalWrite(MOTORENABLE, HIGH);  // HIGH = disabled
 
-  // Ensure all motors start stopped
+  pinMode(MOTORLATCH, OUTPUT);
+  digitalWrite(MOTORLATCH, LOW);
+  pinMode(MOTORCLK,   OUTPUT);
+  digitalWrite(MOTORCLK, LOW);
+  pinMode(MOTORDATA,  OUTPUT);
+  digitalWrite(MOTORDATA, LOW);
+
+  // Shift a clean zero pattern into the 74HC595 before enabling outputs
+  shiftOut(MOTORDATA, MOTORCLK, MSBFIRST, 0x00);
+  delayMicroseconds(5);
+  digitalWrite(MOTORLATCH, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(MOTORLATCH, LOW);
+
+  digitalWrite(MOTORENABLE, LOW);   // Enable outputs only after safe zero state
+
+  // Ensure all motors are released and PWM channels are zeroed
   stopAll();
 
   // Brief delay so Mega can boot and start listening
@@ -398,4 +477,8 @@ void loop() {
       if (cmdBuf.length() > 32) cmdBuf = "";
     }
   }
+
+  // Run pattern state machines
+  if (danceState != DANCE_IDLE) dancePattern();
+  if (defenseState != DEFENSE_IDLE) defensePattern();
 }

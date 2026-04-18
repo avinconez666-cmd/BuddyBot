@@ -57,28 +57,40 @@ const char* WIFI_SSID = "OPTUS_8B4FC8N";
 const char* WIFI_PASS = "alter62635dx";
 const char* BT_NAME   = "BuddyBot";
 
-#define MEGA_RX_PIN 16
-#define MEGA_TX_PIN 17
+// RXD0 = GPIO3, TXD0 = GPIO1 (shared with USB serial — see note in setup())
+#define MEGA_RX_PIN 3
+#define MEGA_TX_PIN 1
 
 WebServer      server(80);
 BluetoothSerial BT;
 
 struct Telemetry {
-  String status    = "OFFLINE";
-  String battery   = "0.0";
-  String mode      = "Manual";
-  String front     = "0";
-  String left      = "0";
-  String right     = "0";
-  String rear      = "0";
-  String temp      = "0.0";
-  String humidity  = "0";
-  String gas       = "0";
-  String flame     = "0";
-  bool   estop     = false;
-  bool   autoMode  = false;
-  unsigned long lastUpdate = 0;
+    String status    = "OFFLINE";
+    String battery   = "0.0";
+    String mode      = "Manual";
+    String front     = "0";
+    String left      = "0";
+    String right     = "0";
+    String rear      = "0";
+    String temp      = "0.0";
+    String humidity  = "0";
+    String gas       = "0";
+    String flame     = "0";
+    bool   estop     = false;
+    bool   autoMode  = false;
+    unsigned long lastUpdate = 0;
 } telem;
+
+// ════════════════════════════════════════════════════════════════════
+//  MISSING GLOBALS — these are referenced throughout but must be
+//  declared at file scope.  Their absence causes a compile failure
+//  which is WHY the ESP32 never runs and therefore never handshakes.
+// ════════════════════════════════════════════════════════════════════
+#define       ESP_FW_VER   "V2.0"        // firmware version string
+bool          wifiOK       = false;      // true once WiFi connects
+bool          btOnlyMode   = false;      // true if WiFi never connected
+bool          megaLinked   = false;      // true once any Mega byte received
+unsigned long megaLastRxMs = 0;         // millis() of last Mega RX byte
 
 // ─── HTML with flame alert, battery tier colour, sensor toggle UI ───
 const char HTML[] = R"rawliteral(
@@ -291,8 +303,8 @@ String lastSensStatus = "";
 
 void sendToMega(const String& cmd) {
   Serial2.println("CMD:" + cmd);
-  Serial.print("[ESP32] → Mega: CMD:");
-  Serial.println(cmd);
+  // Serial.print("[ESP32] → Mega: CMD:");
+  // Serial.println(cmd);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -336,8 +348,17 @@ void handleMegaSerial() {
       if (buf.length() > 0) {
         if (buf.startsWith("TELEM:")) {
           parseTelemetry(buf);
+        } else if (buf.startsWith("MEGA_READY|")) {
+          // Serial.print("[ESP32] Mega ready rcvd: "); Serial.println(buf);
+          Serial2.println("READY");
+          Serial2.print("ESP_FW:"); Serial2.println(ESP_FW_VER);
+          if (wifiOK) {
+            Serial2.print(F("WIFI_IP:")); Serial2.println(WiFi.localIP().toString());
+          } else {
+            Serial2.println("WIFI_IP:BT_ONLY");
+          }
         } else if (buf == "MEGA:BOOT") {
-          Serial.println("[ESP32] Mega boot detected — sending READY");
+          // Serial.println("[ESP32] Mega boot detected — sending READY");
           Serial2.println("READY");
         } else if (buf.startsWith("STATUS|")) {
           telem.estop    = (buf.indexOf("ESTOP:YES") >= 0);
@@ -349,14 +370,59 @@ void handleMegaSerial() {
           // Strip prefix and suffix, store for /status response
           int end = buf.indexOf("|END");
           lastSensStatus = (end > 0) ? buf.substring(8, end) : buf.substring(8);
-          Serial.print("[ESP32] Sensor status: "); Serial.println(lastSensStatus);
+          // Serial.print("[ESP32] Sensor status: "); Serial.println(lastSensStatus);
+        } else if (buf.startsWith("STAT:")) {
+          String tmp = buf.substring(5);
+          int idx = 0, start = 0;
+          String token;
+          for (int i = 0; i <= tmp.length(); i++) {
+            if (i == tmp.length() || tmp[i] == ':') {
+              token = tmp.substring(start, i);
+              if (idx == 0) telem.gas = token;
+              else if (idx == 1) telem.temp = token;
+              else if (idx == 2) telem.humidity = token;
+              else if (idx == 6) telem.flame = token;
+              else if (idx == 8) telem.battery = token;
+              else if (idx == 9) telem.battery = token;
+              start = i + 1;
+              idx++;
+            }
+          }
+          // Serial.print("[ESP32] STAT parsed: "); Serial.println(buf);
+        } else if (buf.startsWith("US:")) {
+          String tmp = buf.substring(3);
+          int idx = 0, start = 0;
+          String token;
+          for (int i = 0; i <= tmp.length(); i++) {
+            if (i == tmp.length() || tmp[i] == ',') {
+              token = tmp.substring(start, i);
+              if      (idx == 0) telem.front = token;
+              else if (idx == 1) telem.rear  = token;
+              else if (idx == 2) telem.left  = token;
+              else if (idx == 3) telem.right = token;
+              start = i + 1;
+              idx++;
+            }
+          }
+          // Serial.print("[ESP32] US parsed: "); Serial.println(buf);
+        } else if (buf.startsWith("ALERT:")) {
+          // Serial.print("[ESP32] Alert: "); Serial.println(buf.substring(6));
+        } else if (buf.startsWith("GESTURE:")) {
+          // Serial.print("[ESP32] Gesture: "); Serial.println(buf.substring(8));
+        } else if (buf.startsWith("BAT:")) {
+          // Serial.print("[ESP32] Battery event: "); Serial.println(buf.substring(4));
+        } else if (buf.startsWith("MODE:")) {
+          telem.mode = buf.substring(5);
+          // Serial.print("[ESP32] Mode: "); Serial.println(telem.mode);
         } else {
-          Serial.print("[ESP32] Mega: "); Serial.println(buf);
+          // Serial.print("[ESP32] Mega: "); Serial.println(buf);
         }
       }
       buf = "";
     } else if (c != '\r') {
       buf += c;
+      megaLastRxMs = millis();
+      megaLinked   = true;
       if (buf.length() > 100) buf = "";
     }
   }
@@ -372,13 +438,12 @@ void handleBluetooth() {
     if (c == '\n' || c == '\r') {
       btBuf.trim();
       if (btBuf.length() > 0) {
-        // Don't uppercase TOGGLE_SENSOR commands (ID values are already uppercase,
-        // but preserve case for potential future extensions)
-        String upper = btBuf;
-        upper.toUpperCase();
-        Serial.print("[BT] CMD: "); Serial.println(upper);
-        sendToMega(upper);
-        BT.println("OK:" + upper);
+        // TOGGLE_SENSOR commands are already in the right format; other commands uppercased
+        String cmd = btBuf;
+        if (!cmd.startsWith("TOGGLE_SENSOR:")) cmd.toUpperCase();
+        // Serial.print("[BT] CMD: "); Serial.println(cmd);
+        sendToMega(cmd);
+        BT.println("OK:" + cmd);
       }
       btBuf = "";
     } else {
@@ -414,6 +479,16 @@ const char* batTierStr() {
   return "OK";
 }
 
+// Escape quotes and backslashes for JSON embedding
+String escapeJsonString(const String& s) {
+  String result = "";
+  for (size_t i = 0; i < s.length(); i++) {
+    if (s[i] == '"' || s[i] == '\\') result += '\\';
+    result += s[i];
+  }
+  return result;
+}
+
 void handleStatus() {
   if (millis() - telem.lastUpdate > 5000 && telem.lastUpdate > 0)
     telem.status = "STALE";
@@ -434,7 +509,8 @@ void handleStatus() {
   json += "\"gas\":"       + telem.gas       + ",";
   json += "\"flame\":\""   + telem.flame     + "\"";
   if (lastSensStatus.length() > 0) {
-    json += ",\"sens_status\":\"" + lastSensStatus + "\"";
+    String safeSensStatus = escapeJsonString(lastSensStatus);
+    json += ",\"sens_status\":\"" + safeSensStatus + "\"";
   }
   json += "}";
 
@@ -458,33 +534,44 @@ void handleNotFound() { server.send(404, "text/plain", "Not found"); }
 //  SETUP
 // ════════════════════════════════════════════════════════════════════
 void setup() {
-  Serial.begin(115200);
-  Serial.println("\n=== BUDDYBOT ESP32 BRIDGE V2.0 ===");
+  // NOTE: RXD0 (GPIO3) and TXD0 (GPIO1) share UART0 with the USB-to-serial
+  // chip. Serial.print() output would corrupt the Mega link, so USB debug
+  // printing is DISABLED. To re-enable, switch back to GPIO16/GPIO17.
+  // Serial.begin(115200);
 
   Serial2.begin(115200, SERIAL_8N1, MEGA_RX_PIN, MEGA_TX_PIN);
-  Serial.println("[ESP32] Serial2 to Mega ready (GPIO16/17)");
 
   if (!BT.begin(BT_NAME)) {
-    Serial.println("[BT] Failed to start — continuing without BT");
+    // Serial.println("[BT] Failed to start — continuing without BT");
   } else {
-    Serial.print("[BT] Discoverable as: "); Serial.println(BT_NAME);
+    // Serial.print("[BT] Discoverable as: "); Serial.println(BT_NAME);
   }
 
-  Serial.print("[WIFI] Connecting to "); Serial.print(WIFI_SSID);
+  // Serial.print("[WIFI] Connecting to "); Serial.print(WIFI_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 40) {
-    delay(500); Serial.print("."); attempts++;
+    delay(500); /* Serial.print("."); */ attempts++;
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n[WIFI] Connected!");
-    Serial.print("[WIFI] IP: "); Serial.println(WiFi.localIP());
-    Serial.println("[WIFI] → Open that IP in your phone browser to control BuddyBot");
+    wifiOK = true;
+    // Serial.println("\n[WIFI] Connected!");
+    // Serial.print("[WIFI] IP: "); Serial.println(WiFi.localIP());
+    // Serial.println("[WIFI] → Open that IP in your phone browser to control BuddyBot");
+    // C2: Notify Mega of our IP so it can forward to R4 startup screen
+    Serial2.print(F("WIFI_IP:"));
+    Serial2.println(WiFi.localIP().toString());
+    // Serial.print("[ESP32] WiFi IP sent to Mega: "); Serial.println(WiFi.localIP());
   } else {
-    Serial.println("\n[WIFI] Failed to connect — check SSID/password");
+    // C3: BT-only fallback — WiFi failed, mark mode and notify Mega
+    wifiOK     = false;
+    btOnlyMode = true;
+    // Serial.println("\n[WIFI] Failed to connect — entering BT-only mode");
+    Serial2.println("WIFI_IP:BT_ONLY");   // tells R4 to show BT-only status
+    Serial2.println("BT_ONLY_MODE");
   }
 
   server.on("/",       handleRoot);
@@ -493,11 +580,11 @@ void setup() {
   server.on("/health", handleHealth);
   server.onNotFound(handleNotFound);
   server.begin();
-  Serial.println("[WIFI] Web server started on port 80");
+  // Serial.println("[WIFI] Web server started on port 80");
 
   delay(200);
   Serial2.println("READY");
-  Serial.println("[ESP32] Sent READY to Mega");
+  // Serial.println("[ESP32] Sent READY to Mega");
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -509,12 +596,32 @@ void loop() {
   handleBluetooth();
   delay(1);   // ← [FIX] yield to prevent hardware watchdog trigger
 
+  // C2: WiFi reconnect with IP re-broadcast
   static unsigned long lastWifiCheck = 0;
-  if (millis() - lastWifiCheck > 10000) {
+  static bool wasConnected = false;
+  if (millis() - lastWifiCheck > 15000) {
     lastWifiCheck = millis();
-    if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("[WIFI] Reconnecting...");
+    bool nowConnected = (WiFi.status() == WL_CONNECTED);
+    if (!nowConnected) {
+      wifiOK = false;
+      // Serial.println("[WIFI] Reconnecting...");
       WiFi.reconnect();
+      yield();
+    } else if (!wasConnected && nowConnected) {
+      wifiOK = true; btOnlyMode = false;
+      Serial2.print(F("WIFI_IP:")); Serial2.println(WiFi.localIP().toString());
+      // Serial.print("[WIFI] Reconnected — re-broadcast: "); Serial.println(WiFi.localIP());
+    }
+    wasConnected = nowConnected;
+  }
+
+  // E1: Mega watchdog
+  static unsigned long lastMegaWd = 0;
+  if (millis() - lastMegaWd > 10000) {
+    lastMegaWd = millis();
+    if (megaLinked && (millis() - megaLastRxMs > 15000)) {
+      // Serial.println("[ESP32] WATCHDOG: no Mega data in 15s");
+      megaLinked = false;
     }
   }
 }
