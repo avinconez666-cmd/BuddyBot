@@ -59,12 +59,14 @@ private val GlassBorder = Color(0x33FFFFFF)
 
 // ── Glow modifier helper ──────────────────────────────────────────────────────
 private fun Modifier.neonGlow(color: Color, radius: Float = 24f): Modifier = this.drawBehind {
+    // Guard against radius = 0 which occurs before layout is complete
+    val safeRadius = maxOf(1f, radius)
     drawCircle(
         brush = Brush.radialGradient(
             colors = listOf(color.copy(alpha = 0.35f), Color.Transparent),
-            radius = radius
+            radius = safeRadius
         ),
-        radius = radius
+        radius = safeRadius
     )
 }
 
