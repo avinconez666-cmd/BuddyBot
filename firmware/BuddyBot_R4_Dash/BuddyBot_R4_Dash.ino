@@ -1862,6 +1862,14 @@ void handleMegaLink() {
 
       bsMega.msgsOK++;
 
+      // [Phase 3B] Auto-pairing: Mega sends "PING" during setup() to verify link.
+      // R4 must reply "PONG" so Mega's r4Ready flag is set.
+      if (raw == "PING") {
+        Serial1.println(F("PONG"));
+        bsMega.linked = true;
+        continue;
+      }
+
       if (raw.startsWith("PONG_R4:")) {
         uint16_t seq = (uint16_t)raw.substring(8).toInt();
         if (seq == pingSeq) {

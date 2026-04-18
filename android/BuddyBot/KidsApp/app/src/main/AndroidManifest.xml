@@ -18,6 +18,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Phase 3: Battery optimization exemption so HotwordService survives Doze -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Phase 4: Call Daddy overlay — required for CallOverlayManager -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
 
     <uses-feature android:name="android.hardware.usb.host" />
     <uses-feature android:name="android.hardware.camera"          android:required="false" />

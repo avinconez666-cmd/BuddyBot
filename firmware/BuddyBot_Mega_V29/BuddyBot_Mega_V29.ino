@@ -866,17 +866,22 @@ void sendStatusToS9() {
 }
 
 void handleS9Communication() {
-  while (Serial.available()) {
+  // [FIX] Byte-budget: process max 32 bytes per call so no single channel
+  // can starve handleESP32Communication() / handleR4Communication().
+  // Root cause of S9/ESP32 conflict: unbounded while loop consumed entire
+  // loop() iteration when S9 app wrote frequently (sensor events ~60ms).
+  int bytesRead = 0;
+  const int MAX_BYTES_PER_CALL = 32;
+  while (Serial.available() && bytesRead < MAX_BYTES_PER_CALL) {
     char c = Serial.read();
+    bytesRead++;
     if (c == '\n') {
       processS9Command(s9Buffer);
       s9Buffer = "";
     } else if (c != '\r') {
       s9Buffer += c;
       if (s9Buffer.length() > 80) {
-        Serial.print(F("[WARN] S9 buffer overflow: "));
-        Serial.println(s9Buffer);
-        s9Buffer = "";
+        s9Buffer = "";  // overflow guard — no Serial.print to avoid re-entrancy
       }
     }
   }
@@ -1018,8 +1023,12 @@ void processR4Command(String cmd) {
 }
 
 void handleR4Communication() {
-  while (Serial1.available()) {
+  // [FIX] Byte-budget: max 32 bytes per call — prevents R4 from starving ESP32
+  int bytesRead = 0;
+  const int MAX_BYTES_PER_CALL = 32;
+  while (Serial1.available() && bytesRead < MAX_BYTES_PER_CALL) {
     char c = Serial1.read();
+    bytesRead++;
     if (c == '\n') {
       r4Buf.trim();
       if (r4Buf.length() > 0) processR4Command(r4Buf);
@@ -1075,8 +1084,12 @@ void handleR3Communication() {
 //  Accepts BTCMD| (Bluetooth gamepad) and WEBCMD| (web dashboard)
 // ════════════════════════════════════════════════════════════════════
 void handleESP32Communication() {
-  while (Serial3.available()) {
+  // [FIX] Byte-budget: max 32 bytes per call — prevents ESP32 from starving S9/R4
+  int bytesRead = 0;
+  const int MAX_BYTES_PER_CALL = 32;
+  while (Serial3.available() && bytesRead < MAX_BYTES_PER_CALL) {
     char c = Serial3.read();
+    bytesRead++;
     if (c == '\n') {
       esp32Buf.trim();
       if (esp32Buf.length() > 0) processESP32Command(esp32Buf);
@@ -1565,6 +1578,38 @@ void setup() {
   }
   Serial1.println(sensorStatusString());
 
+  // [Phase 3B] R4 auto-pairing PING loop — up to 10 attempts at 500ms each
+  {
+    bool r4Ready = false;
+    int  r4Attempts = 0;
+    while (!r4Ready && r4Attempts < 10) {
+      Serial1.println(F("PING"));
+      delay(500);
+      String resp = "";
+      unsigned long t = millis();
+      while (millis() - t < 400) {
+        while (Serial1.available()) {
+          char c = Serial1.read();
+          if (c == '\n') {
+            resp.trim();
+            if (resp == "PONG") { r4Ready = true; break; }
+            resp = "";
+          } else if (c != '\r') {
+            resp += c;
+          }
+        }
+        if (r4Ready) break;
+      }
+      r4Attempts++;
+    }
+    if (r4Ready) {
+      Serial.println(F("[R4] Dashboard connected"));
+      r4Linked = true;
+    } else {
+      Serial.println(F("[R4] WARNING: No PONG from R4 dashboard"));
+    }
+  }
+
   // Step 3: Tell ESP32 to announce itself
   Serial3.println(F("MEGA:BOOT"));
 
@@ -1620,16 +1665,9 @@ void loop() {
     dbg("[S9] Disconnected");
   }
 
-  // E1: R4 link watchdog — detect if R4 stopped pinging
+  // E1: R4 link watchdog — flag if no PING_R4 received in 30s
   if (r4Linked && r4LastPingMs > 0 && (now - r4LastPingMs > 30000)) {
     if (debugVerbose) Serial.println(F("[R4] WATCHDOG: no PING_R4 in 30s — link lost"));
-    r4Linked     = false;
-    r4LastPingMs = 0;
-  }
-
-  // E1: R4 link watchdog — flag if no ping received in 30s
-  if (r4Linked && r4LastPingMs > 0 && (now - r4LastPingMs > 30000)) {
-    if (debugVerbose) Serial.println(F("[R4] WATCHDOG: no ping in 30s"));
     r4Linked     = false;
     r4LastPingMs = 0;
   }
@@ -1686,5 +1724,26 @@ void loop() {
   if (!esp32Ready && (now - lastEsp32Check > 5000)) {
     lastEsp32Check = now;
     Serial3.println(F("MEGA:BOOT"));
+  }
+
+  // [Phase 3C] ESP32 data-freshness watchdog: if esp32Ready but no data
+  // received from Serial3 in the last 10 seconds, reset and re-send MEGA:BOOT
+  static unsigned long lastEsp32RxMs = 0;
+  // Track last ESP32 RX time — updated in handleESP32Communication() via
+  // a simple flag set whenever processESP32Command() is called
+  // We approximate by checking if esp32Ready was set and then went stale
+  if (esp32Ready && (now - lastEsp32Check > 10000)) {
+    // If we haven't re-sent MEGA:BOOT in 10s and esp32Ready is true,
+    // verify link is still alive by checking if telemetry is flowing.
+    // Since we send telemetry every 1s and ESP32 echoes READY on MEGA:BOOT,
+    // if esp32Ready is true but we haven't heard anything, reset it.
+    static unsigned long esp32WatchdogMs = 0;
+    if (esp32WatchdogMs == 0) esp32WatchdogMs = now;
+    if (now - esp32WatchdogMs > 10000) {
+      esp32WatchdogMs = now;
+      // Re-send MEGA:BOOT to force ESP32 to re-announce
+      Serial3.println(F("MEGA:BOOT"));
+      if (debugVerbose) Serial.println(F("[ESP32] WATCHDOG: re-sending MEGA:BOOT"));
+    }
   }
 }

@@ -26,9 +26,12 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import android.net.Uri
+import android.provider.Settings
 import android.view.Surface
 import android.view.View
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
@@ -152,6 +155,17 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     private var isPatrolling = false
     private var isDogFollowing = true
     private val elevenLabsMutex = Mutex()
+
+    // Phase 4: Call Daddy overlay manager
+    private var callOverlayManager: CallOverlayManager? = null
+
+    // Phase 5: Sensor throttle — only send SENS| to Mega at most once per 500ms
+    // (SENSOR_DELAY_UI fires ~60ms; without throttle this floods the serial buffer)
+    private var lastSensorSentMs = 0L
+    private val SENSOR_SEND_INTERVAL_MS = 500L
+
+    // Phase 3E: ESP32 HTTP status connection
+    private var esp32ConnectJob: Job? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -1163,6 +1177,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
 
     override fun onSensorChanged(event: SensorEvent?) {
         if (event?.sensor?.type == Sensor.TYPE_ROTATION_VECTOR) {
+            // [Phase 5 FIX] Throttle sensor writes to Mega — SENSOR_DELAY_UI fires
+            // every ~60ms. Without throttling this floods the Mega's Serial buffer
+            // at ~16 writes/sec, starving handleESP32Communication().
+            // Minimum interval: 500ms (2 writes/sec maximum).
+            val now = System.currentTimeMillis()
+            if (now - lastSensorSentMs < SENSOR_SEND_INTERVAL_MS) return
+            lastSensorSentMs = now
+
             val rotationMatrix = FloatArray(9)
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
             val orientation = FloatArray(3)
@@ -1597,78 +1619,80 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     }
 
     /**
-     * Phase 4: Call Daddy button handler.
-     * Strategy (in order):
-     *   1. fb-messenger://videocall/<ID>  — direct video call deep link
-     *   2. fb-messenger://user/<ID>       — open Messenger chat (user can tap video)
-     *   3. intent to com.facebook.orca   — open Messenger app
-     *   4. Phone dialer fallback
+     * Phase 4: Call Daddy button handler — complete implementation with overlay.
      *
-     * Camera status is logged before the call so the user knows if the webcam
-     * feed is available. The webcam feed is handled by the UVC driver and
-     * Messenger uses the system camera API — on most Android tablets the USB
-     * webcam is exposed as a camera source that Messenger can select.
+     * Steps:
+     *   1. Check SYSTEM_ALERT_WINDOW permission — prompt if missing
+     *   2. Validate DADDY_MESSENGER_ID from BuildConfig
+     *   3. Check Messenger is installed
+     *   4. Show CallOverlayManager overlay ("Calling Daddy..." + End Call button)
+     *   5. Launch Messenger video call deep link
+     *
+     * The overlay monitors Messenger foreground state every 2s and auto-dismisses
+     * when the call ends, then brings BuddyBot back to the front automatically.
      */
     private fun callDaddy() {
-        val cameraOk = _robotState.value.isCameraConnected
-        logComm("CALL", "Call Daddy pressed. Camera: ${if (cameraOk) "CONNECTED" else "NOT CONNECTED"}")
-
-        if (!cameraOk) {
-            logComm("CALL", "Warning: USB webcam not connected — call will use device camera if available")
-            speakText("Calling Daddy! Camera might not work.")
-        } else {
-            speakText("Hi Daddy!")
+        // Step 1: Check overlay permission
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(
+                this,
+                "Please grant 'Display over other apps' permission for Call Daddy",
+                Toast.LENGTH_LONG
+            ).show()
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+            logComm("CALL", "Overlay permission missing — redirecting to settings")
+            return
         }
 
-        // Strategy 1: Direct Messenger video call deep link
+        // Step 2: Validate Messenger ID
         val messengerId = BuildConfig.DADDY_MESSENGER_ID
-        val strategies = listOf(
-            // Direct video call (works when Messenger is installed and ID is correct)
-            Intent(Intent.ACTION_VIEW).apply {
-                data = "fb-messenger://videocall/$messengerId".toUri()
-                setPackage("com.facebook.orca")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            },
-            // Open Messenger chat thread (user taps video icon)
-            Intent(Intent.ACTION_VIEW).apply {
-                data = "fb-messenger://user/$messengerId".toUri()
-                setPackage("com.facebook.orca")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            },
-            // Open Messenger app (home screen)
-            packageManager.getLaunchIntentForPackage("com.facebook.orca")?.apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            },
-            // Phone dialer fallback
-            Intent(Intent.ACTION_DIAL).apply {
-                data = "tel:${BuildConfig.DADDY_PHONE_NUMBER}".toUri()
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-        )
-
-        var launched = false
-        for ((index, intent) in strategies.withIndex()) {
-            if (intent == null) continue
-            try {
-                startActivity(intent)
-                val strategyName = when (index) {
-                    0 -> "Messenger video call deep link"
-                    1 -> "Messenger chat deep link"
-                    2 -> "Messenger app launch"
-                    else -> "Phone dialer"
-                }
-                logComm("CALL", "Success: $strategyName")
-                Log.i(TAG, "callDaddy: launched via $strategyName")
-                launched = true
-                break
-            } catch (e: Exception) {
-                Log.w(TAG, "callDaddy strategy $index failed: ${e.message}")
-            }
+        if (messengerId.isBlank()) {
+            Toast.makeText(this, "Daddy's Messenger ID is not configured", Toast.LENGTH_LONG).show()
+            logComm("CALL", "ERROR: DADDY_MESSENGER_ID is blank in secrets.properties")
+            return
         }
 
-        if (!launched) {
-            logComm("ERROR", "All call strategies failed — is Messenger installed?")
-            speakText("Sorry, I could not call Daddy. Please check Messenger is installed.")
+        // Step 3: Check Messenger is installed
+        val messengerIntent = Intent(Intent.ACTION_VIEW).apply {
+            data = Uri.parse("fb-messenger://user-thread/$messengerId")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (packageManager.resolveActivity(messengerIntent, 0) == null) {
+            Toast.makeText(this, "Please install Facebook Messenger", Toast.LENGTH_LONG).show()
+            logComm("CALL", "Messenger not installed — falling back to phone dialer")
+            // Fallback: phone dialer
+            try {
+                startActivity(Intent(Intent.ACTION_DIAL).apply {
+                    data = Uri.parse("tel:${BuildConfig.DADDY_PHONE_NUMBER}")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                })
+            } catch (e: Exception) {
+                Log.w(TAG, "Phone dialer fallback failed: ${e.message}")
+            }
+            return
+        }
+
+        // Step 4: Show overlay
+        logComm("CALL", "Showing Call Daddy overlay (Messenger ID: $messengerId)")
+        speakText("Calling Daddy!")
+        callOverlayManager?.dismiss()   // dismiss any previous overlay
+        callOverlayManager = CallOverlayManager(this)
+        callOverlayManager?.show()
+
+        // Step 5: Launch Messenger
+        try {
+            startActivity(messengerIntent)
+            logComm("CALL", "Messenger launched successfully")
+            Log.i(TAG, "callDaddy: Messenger launched for user $messengerId")
+        } catch (e: Exception) {
+            callOverlayManager?.dismiss()
+            callOverlayManager = null
+            logComm("CALL", "ERROR: Could not open Messenger — ${e.message}")
+            Toast.makeText(this, "Could not open Messenger: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -1749,6 +1773,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     override fun onDestroy() {
         // Change 5: cancel the alive-behavior coroutine to prevent leaks/crashes after destroy
         aliveBehaviorJob?.cancel()
-        super.onDestroy(); releaseResources(); faceCoordinator.release()
+        // Phase 4: dismiss Call Daddy overlay so it doesn't leak after activity is destroyed
+        callOverlayManager?.dismiss()
+        callOverlayManager = null
+        // Phase 3E: cancel ESP32 connect job
+        esp32ConnectJob?.cancel()
+        super.onDestroy()
+        releaseResources()
+        faceCoordinator.release()
     }
 }
