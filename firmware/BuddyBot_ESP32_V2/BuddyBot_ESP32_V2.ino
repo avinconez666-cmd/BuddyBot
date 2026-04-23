@@ -57,9 +57,9 @@ const char* WIFI_SSID = "OPTUS_8B4FC8N";
 const char* WIFI_PASS = "alter62635dx";
 const char* BT_NAME   = "BuddyBot";
 
-// RXD0 = GPIO3, TXD0 = GPIO1 (shared with USB serial — see note in setup())
-#define MEGA_RX_PIN 3
-#define MEGA_TX_PIN 1
+// UART2: RX=GPIO16, TX=GPIO17 (dedicated hardware serial, no USB conflict)
+#define MEGA_RX_PIN 16
+#define MEGA_TX_PIN 17
 
 WebServer      server(80);
 BluetoothSerial BT;
@@ -302,8 +302,8 @@ const char HTML[] = R"rawliteral(
 String lastSensStatus = "";
 
 void sendToMega(const String& cmd) {
-  Serial2.println("CMD:" + cmd);
-  // Serial.print("[ESP32] → Mega: CMD:");
+  Serial2.println(cmd);  // Send command directly without "CMD:" prefix
+  // Serial.print("[ESP32] → Mega: ");
   // Serial.println(cmd);
 }
 
@@ -534,9 +534,9 @@ void handleNotFound() { server.send(404, "text/plain", "Not found"); }
 //  SETUP
 // ════════════════════════════════════════════════════════════════════
 void setup() {
-  // NOTE: RXD0 (GPIO3) and TXD0 (GPIO1) share UART0 with the USB-to-serial
-  // chip. Serial.print() output would corrupt the Mega link, so USB debug
-  // printing is DISABLED. To re-enable, switch back to GPIO16/GPIO17.
+  // NOTE: Using UART2 (GPIO16/GPIO17) for Mega communication.
+  // This is a dedicated hardware serial port with no USB conflict.
+  // USB debug printing is DISABLED to avoid serial corruption.
   // Serial.begin(115200);
 
   Serial2.begin(115200, SERIAL_8N1, MEGA_RX_PIN, MEGA_TX_PIN);

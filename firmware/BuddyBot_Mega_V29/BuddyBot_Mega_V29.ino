@@ -1126,7 +1126,25 @@ void processESP32Command(String cmd) {
     return;
   }
 
-  // ── Legacy CMD: format (from original V28 ESP32 firmware) ────────
+  // ── Direct commands (no prefix) — new ESP32 V2.0 format ──────────
+  // Handles: F, B, L, R, S, AUTO, DANCE, SLOW, NORMAL, FAST, ESTOP, CLEAR, TOGGLE_SENSOR:...
+  String upper = cmd;
+  upper.toUpperCase();
+  if      (upper == "F")      { autonomousMode = false; sendMotor("FORWARD"); return; }
+  else if (upper == "B")      { autonomousMode = false; sendMotor("BACKWARD"); return; }
+  else if (upper == "L")      { autonomousMode = false; sendMotor("LEFT"); return; }
+  else if (upper == "R")      { autonomousMode = false; sendMotor("RIGHT"); return; }
+  else if (upper == "S")      { autonomousMode = false; sendMotor("STOP"); return; }
+  else if (upper == "AUTO")   { autonomousMode = !autonomousMode; if (!autonomousMode) sendMotor("STOP"); return; }
+  else if (upper == "DANCE")  { motorCommPrintln(F("MOTOR|DANCE")); return; }
+  else if (upper == "SLOW")   { sendMotor("SLOW"); return; }
+  else if (upper == "NORMAL") { sendMotor("NORMAL"); return; }
+  else if (upper == "FAST")   { sendMotor("FAST"); return; }
+  else if (upper == "ESTOP")  { emergencyStop = true; sendMotor("STOP"); return; }
+  else if (upper == "CLEAR")  { emergencyStop = false; estopRetries = 0; estopT = 0; return; }
+  else if (cmd.startsWith("TOGGLE_SENSOR:")) { applyToggle(cmd); return; }
+
+  // ── Legacy CMD: format (backward compatibility) ────────────────
   if (cmd.startsWith("CMD:")) {
     String sub = cmd.substring(4);
     sub.toUpperCase();
@@ -1141,7 +1159,7 @@ void processESP32Command(String cmd) {
     else if (sub == "NORMAL") { sendMotor("NORMAL"); }
     else if (sub == "FAST")   { sendMotor("FAST"); }
     else if (sub == "ESTOP")  { emergencyStop = true; sendMotor("STOP"); }
-    else if (sub == "CLEAR")  { emergencyStop = false; estopRetries = 0; estopT = 0; }  // [FIX]
+    else if (sub == "CLEAR")  { emergencyStop = false; estopRetries = 0; estopT = 0; }
     else if (sub.startsWith("TOGGLE_SENSOR:")) { applyToggle(sub); }
     return;
   }

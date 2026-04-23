@@ -1,23 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    activity_main.xml — BuddyBot Kids
+    Layer order (bottom to top):
+      1. PlayerView     — ExoPlayer for intro / splash / transition videos
+      2. faceWebView    — WebView lipsync face (idle/talking states)
+      3. camera_view    — 1×1dp hidden surface for USB webcam driver
+      4. composeView    — Jetpack Compose overlay (HUD, buttons, dialogs)
+-->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <!-- Robot Face: ExoPlayer view for precise control over transitions -->
+    <!-- Layer 1: ExoPlayer — intro.mp4 (with audio), splash, mode transitions (muted) -->
     <androidx.media3.ui.PlayerView
         android:id="@+id/playerView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_gravity="center"
+        android:visibility="visible"
         app:resize_mode="fill"
         app:use_controller="false" />
 
+    <!-- Layer 2: WebView lipsync face — shown during idle / speaking states -->
+    <WebView
+        android:id="@+id/faceWebView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:background="#000000"
+        android:visibility="gone" />
+
     <!--
-        USB Webcam Preview Surface (libausbc)
-        Kept at 1x1dp so it occupies no visible space but provides a valid
-        surface for the library to render into for frame callbacks.
+        Layer 3: USB Webcam preview surface (libausbc)
+        1×1dp so it takes no visible space but provides a valid Surface for the
+        library's frame callback pipeline. Do not remove — the UVC driver requires
+        an active surface to deliver preview frames.
     -->
     <com.jiangdg.ausbc.widget.AspectRatioTextureView
         android:id="@+id/camera_view"
@@ -25,7 +44,7 @@
         android:layout_height="1dp"
         android:layout_gravity="top|start" />
 
-    <!-- Compose UI: all overlays, dialogs, settings, HUD -->
+    <!-- Layer 4: Compose UI — all overlays, buttons, dialogs, HUD elements -->
     <androidx.compose.ui.platform.ComposeView
         android:id="@+id/composeView"
         android:layout_width="match_parent"

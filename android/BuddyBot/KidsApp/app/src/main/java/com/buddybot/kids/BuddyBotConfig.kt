@@ -1,32 +1,17 @@
 /*
- * AI BACKEND FREE TIER LIMITS (as of 2026):
+ * ════════════════════════════════════════════════════════════
+ *  BuddyBotConfig.kt — centralised configuration constants
+ * ════════════════════════════════════════════════════════════
  *
- * GROQ (primary):
- *   - Free tier: 14,400 requests/day, 6,000 requests/minute
- *   - Model: llama-3.1-8b-instant (fastest) or llama-3.3-70b-versatile (smarter)
- *   - Sign up: console.groq.com
- *   - Cost: FREE
+ *  AI PRIORITY ORDER (cost-first):
+ *    1. Groq        — FREE  (14,400 req/day on free tier) — console.groq.com
+ *    2. Gemini      — FREE  (1,500 req/day on free tier)
+ *    3. Claude      — PAID  (last resort)
+ *    4. Offline     — hardcoded child-friendly fallback responses
  *
- * GEMINI 2.0 FLASH (secondary fallback):
- *   - Free tier: 1,500 requests/day, 15 requests/minute
- *   - Model: gemini-2.0-flash
- *   - Sign up: aistudio.google.com
- *   - Cost: FREE
- *
- * CLAUDE (last resort):
- *   - No free tier - costs per token
- *   - Only used when Groq and Gemini both fail
- *   - Cost: ~$0.003 per 1K input tokens (Haiku)
- *
- * ELEVENLABS TTS (premium voice):
- *   - Free tier: 10,000 characters/month
- *   - Disabled by default - toggle in Settings
- *   - Cost: $5/month for 30,000 chars on paid plan
- *
- * ANDROID TTS (operational speech):
- *   - Completely free, on-device
- *   - Used for all operational phrases and when premium voice is OFF
- *   - Cost: FREE
+ *  TTS ORDER:
+ *    • ElevenLabs   — premium voice (10,000 chars/month free)
+ *    • Android TTS  — fallback for operational phrases (free, on-device)
  */
 
 package com.buddybot.kids
@@ -35,60 +20,114 @@ import android.Manifest
 import android.os.Build
 
 object BuddyBotConfig {
+
+    // ── App / child settings ─────────────────────────────────────────────
     const val EXIT_PASSCODE = "1234"
     const val PRIORITY_USER = "AJ"
-    const val CHILD_NAME = "AJ"
-    const val CHILD_AGE = 3
+    const val CHILD_NAME    = "AJ"
+    const val CHILD_AGE     = 3
 
-    // AI Configuration - Dual Backend
-    const val ANTHROPIC_API_KEY = "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"
-    const val GEMINI_API_KEY = "AIzaSyAHl_qpH7b6iWdOQ6c4XYmhpNLYJZDUA00"
-    const val CLAUDE_MODEL = "claude-3-sonnet-20240229"
-    const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-
-    // Voice Configuration - ElevenLabs
-    const val ELEVENLABS_API_KEY = "f71d83de87e1adbc6ae322e7350a2bdb3b6a3edee14b6d9e29fa8953fca05afc"
-    const val ELEVENLABS_VOICE_ID = "XP4U9NPyLGdlseTzp9Hf"
-
+    // ── Hardware ─────────────────────────────────────────────────────────
     const val SERIAL_BAUD_RATE = 115200
-    const val WEBSOCKET_PORT = 81
-    const val WAKE_WORD = "hey buddy"
+    const val WEBSOCKET_PORT   = 81
+
+    // ── Voice / AI ───────────────────────────────────────────────────────
+    const val WAKE_WORD            = "hey buddy"
     const val SILENCE_THRESHOLD_MS = 2000L
 
+    // Model strings
+    const val CLAUDE_MODEL     = "claude-3-haiku-20240307"   // cheapest Claude tier
+    const val GROQ_MODEL_FAST  = "llama-3.1-8b-instant"     // fastest Groq model
+    const val GROQ_MODEL_SMART = "llama-3.3-70b-versatile"  // smarter Groq model
+    const val GEMINI_URL       = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    const val ELEVENLABS_VOICE_ID = "XP4U9NPyLGdlseTzp9Hf"  // ElevenLabs voice ID for BuddyBot
+
+    // ── BuildConfig key accessors ────────────────────────────────────────
+    // These are injected at build time from secrets.properties via Gradle.
+    // We use BuildConfig fields here; direct hardcoded values have been removed.
+
+    /**
+     * Returns true if the Groq API key looks like a real key (not a placeholder).
+     * Groq keys are long strings; "your_groq_key_here" is only 18 chars.
+     */
+    val isGroqConfigured: Boolean
+        get() = try {
+            val k = BuildConfig.GROQ_API_KEY
+            k.isNotBlank() &&
+                k != "your_groq_key_here" &&
+                !k.startsWith("your_") &&
+                k.length > 20
+        } catch (e: Exception) { false }
+
+    /**
+     * Returns true if the Gemini API key looks like a real key.
+     * Real Gemini keys start with "AIzaSy" and are ~39 chars.
+     */
+    val isGeminiConfigured: Boolean
+        get() = try {
+            val k = BuildConfig.GEMINI_API_KEY
+            k.isNotBlank() &&
+                k.startsWith("AIzaSy") &&
+                k.length >= 35
+        } catch (e: Exception) { false }
+
+    /**
+     * Returns true if a Claude API key is present.
+     * Claude keys start with "sk-ant-".
+     */
+    val isClaudeConfigured: Boolean
+        get() = try {
+            val k = BuildConfig.CLAUDE_API_KEY
+            k.isNotBlank() &&
+                k.startsWith("sk-ant-") &&
+                k.length > 30
+        } catch (e: Exception) { false }
+
+    /**
+     * Returns true if ElevenLabs API key is present (not default placeholder).
+     */
+    val isElevenLabsConfigured: Boolean
+        get() = try {
+            val k = BuildConfig.ELEVENLABS_API_KEY
+            k.isNotBlank() && k.length > 20
+        } catch (e: Exception) { false }
+
+    // ── Video assets ─────────────────────────────────────────────────────
     const val VIDEO_BASE_PATH = "/storage/emulated/0/BuddyBot/videos/"
 
     val VIDEO_STATES = mapOf(
-        "splash" to "splash",
-        "intro" to "intro",
-        "idle" to "idle",
-        "dog_transition" to "dog_transition",
-        "dog_idle" to "dog_idle",
-        "party_transition" to "party_transition",
-        "unhinged_idle" to "unhinged_idle",
+        "splash"               to "splash",
+        "intro"                to "intro",
+        "idle"                 to "idle",
+        "dog_transition"       to "dog_transition",
+        "dog_idle"             to "dog_idle",
+        "party_transition"     to "party_transition",
+        "unhinged_idle"        to "unhinged_idle",
         "bodyguard_transition" to "bodyguard_transition",
-        "bodyguard_looking" to "bodyguard_looking"
+        "bodyguard_looking"    to "bodyguard_looking"
     )
 
     val AUDIO_FILES = mapOf(
-        "STARTUP" to "startup",
-        "HELLO" to "hello",
-        "ALARM" to "alarm",
-        "EMERGENCY" to "emergency",
-        "HAZARD" to "hazard",
-        "INTRUDER" to "intruder_alert",
-        "BATTERY_CRITICAL" to "battery_low",
-        "OVERTEMP" to "overheat_warning",
-        "TILT" to "tilt_detected",
-        "OBSTACLE" to "obstacle",
-        "GUARDIAN_ACTIVATED" to "guardian_on",
+        "STARTUP"              to "startup",
+        "HELLO"                to "hello",
+        "ALARM"                to "alarm",
+        "EMERGENCY"            to "emergency",
+        "HAZARD"               to "hazard",
+        "INTRUDER"             to "intruder_alert",
+        "BATTERY_CRITICAL"     to "battery_low",
+        "OVERTEMP"             to "overheat_warning",
+        "TILT"                 to "tilt_detected",
+        "OBSTACLE"             to "obstacle",
+        "GUARDIAN_ACTIVATED"   to "guardian_on",
         "GUARDIAN_DEACTIVATED" to "guardian_off",
-        "MOTION_DETECTED" to "motion",
-        "ROAST_RANDOM" to "roast",
-        "SARCASTIC_WAVE" to "wave",
-        "BARK" to "bark"
+        "MOTION_DETECTED"      to "motion",
+        "ROAST_RANDOM"         to "roast",
+        "SARCASTIC_WAVE"       to "wave",
+        "BARK"                 to "bark"
     )
 
-    val REQUIRED_PERMISSIONS = mutableListOf(
+    // ── Required permissions ─────────────────────────────────────────────
+    val REQUIRED_PERMISSIONS: Array<String> = mutableListOf(
         Manifest.permission.CAMERA,
         Manifest.permission.RECORD_AUDIO,
         Manifest.permission.INTERNET,

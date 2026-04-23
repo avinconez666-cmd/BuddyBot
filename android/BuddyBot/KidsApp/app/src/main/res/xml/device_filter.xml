@@ -1,23 +1,60 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    device_filter.xml
+    USB device permission filter for BuddyBot Kids.
+
+    This file tells Android which USB devices to automatically prompt the user
+    for permission when they are connected. It covers:
+      • All genuine Arduino boards (VID 0x2341 = 9025)
+      • All Arduino.org boards  (VID 0x2A03 = 10755)
+      • ALL CH340 variants       (VID 0x1A86 = 6790)  ← catches Keyestudio Mega
+      • CP210x serial chips      (VID 0x10C4 / PID 0xEA60)
+      • FTDI chips               (VID 0x0403 / PID 0x6001)
+      • Prolific chips           (VID 0x067B / PID 0x2303)
+      • UVC webcams              (class 239 subclass 2, or class 14)
+      • Logitech C270 explicit   (VID 0x046D = 1133 / PID 0x0825 = 2085)
+
+    IMPORTANT: vendor-id and product-id values MUST be decimal integers.
+      0x1A86 (hex) = 6790  (decimal)
+      0x2341 (hex) = 9025  (decimal)
+      0x046D (hex) = 1133  (decimal)
+      0x0825 (hex) = 2085  (decimal)
+-->
 <resources>
-    <!-- ── USB Webcams ────────────────────────────────────────────────── -->
+
+    <!-- ── Genuine Arduino boards ────────────────────────────────────── -->
+    <!-- Arduino Mega 2560, Uno, Leonardo etc (ATmega16U2 USB chip) -->
+    <usb-device vendor-id="9025" />
+
+    <!-- Arduino.org variants -->
+    <usb-device vendor-id="10755" />
+
+    <!-- ── CH340 / CH341 — Keyestudio Mega 2560 Plus WiFi ────────────── -->
+    <!-- Catch ALL CH340 variants by matching VID only (no PID restriction). -->
+    <!-- Known PIDs: 0x7523 (29987), 0x7522, 0x55D3, 0x55D4 — this covers all. -->
+    <usb-device vendor-id="6790" />
+
+    <!-- ── CP210x — SparkFun and many Mega clones ─────────────────────── -->
+    <usb-device vendor-id="4292" product-id="60000" />
+
+    <!-- ── FTDI chips ─────────────────────────────────────────────────── -->
+    <usb-device vendor-id="1027" product-id="24577" />
+    <!-- FTDI FT232H -->
+    <usb-device vendor-id="1027" product-id="24592" />
+
+    <!-- ── Prolific PL2303 ────────────────────────────────────────────── -->
+    <usb-device vendor-id="1659" product-id="8963" />
+
+    <!-- ── USB Webcams ───────────────────────────────────────────────── -->
     <!-- Logitech C270: VID=0x046D (1133), PID=0x0825 (2085) -->
     <usb-device vendor-id="1133" product-id="2085" />
-    <!-- Catch all UVC cameras (Class 239/2 or 14) -->
+    <!-- All Logitech webcams (catches C920, C922, etc.) -->
+    <usb-device vendor-id="1133" />
+    <!-- UVC cameras by device class (239 = Miscellaneous, subclass 2 = IAD) -->
     <usb-device class="239" subclass="2" />
+    <!-- UVC Video Interface class 14 (0x0E) -->
     <usb-device class="14" />
+    <!-- Microsoft LifeCam -->
+    <usb-device vendor-id="1118" />
 
-    <!-- ── Arduino / Serial Chips ────────────────────────────────────── -->
-    <!-- Arduino Genuine: VID=0x2341 (9025) -->
-    <usb-device vendor-id="9025" />
-    <!-- Arduino.org: VID=0x2A03 (10755) -->
-    <usb-device vendor-id="10755" />
-    <!-- CH340: VID=0x1A86 (6790), PID=0x7523 (29987) -->
-    <usb-device vendor-id="6790" product-id="29987" />
-    <!-- CP210x: VID=0x10C4 (4292), PID=0xEA60 (60000) -->
-    <usb-device vendor-id="4292" product-id="60000" />
-    <!-- FTDI: VID=0x0403 (1027), PID=0x6001 (24577) -->
-    <usb-device vendor-id="1027" product-id="24577" />
-    <!-- Prolific: VID=0x067B (1659), PID=0x2303 (8963) -->
-    <usb-device vendor-id="1659" product-id="8963" />
 </resources>

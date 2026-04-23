@@ -208,7 +208,7 @@ class HotwordService : Service() {
                         broadcastHotword()
                         // Short pause so MainActivity can take over the mic
                         scope.launch {
-                            delay(1500)
+                            delay(4000) // give MainActivity full time to capture command
                             scheduleRestart()
                         }
                     } else {
@@ -226,7 +226,7 @@ class HotwordService : Service() {
                         isListening = false
                         broadcastHotword()
                         scope.launch {
-                            delay(1500)
+                            delay(4000) // give MainActivity full time to capture command
                             scheduleRestart()
                         }
                     }
@@ -240,7 +240,7 @@ class HotwordService : Service() {
                     val delay = when (error) {
                         SpeechRecognizer.ERROR_NO_MATCH,
                         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 300L
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 2000L
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 3500L
                         else -> restartDelayMs.also {
                             restartDelayMs = (restartDelayMs * 2).coerceAtMost(MAX_RESTART_DELAY_MS)
                         }

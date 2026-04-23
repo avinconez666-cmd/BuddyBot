@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>BuddyBot Face</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+#face-container {
+  width: min(90vw, 90vh);
+  height: min(90vw, 90vh);
+  position: relative;
+}
+svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+#status-bar {
+  position: fixed;
+  bottom: 8px;
+  left: 0; right: 0;
+  text-align: center;
+  font-family: monospace;
+  font-size: 10px;
+  color: rgba(0,212,255,0.3);
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+<div id="face-container">
+<svg id="robot-face" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Outer atmosphere glow -->
+  <circle cx="200" cy="200" r="192" fill="none" stroke="#00d4ff" stroke-width="1" opacity="0.15"/>
+  <!-- Glow ring (animated) -->
+  <circle cx="200" cy="200" r="185" fill="none" stroke="#00d4ff" stroke-width="2.5" opacity="0.35" id="glow-ring"/>
+  <!-- Main head -->
+  <circle cx="200" cy="200" r="178" fill="#050d1a"/>
+  <circle cx="200" cy="200" r="178" fill="url(#headGrad)" opacity="0.6"/>
+  <!-- Subtle panel lines -->
+  <path d="M 50 200 Q 200 180 350 200" stroke="#00d4ff" stroke-width="0.5" fill="none" opacity="0.15"/>
+  <path d="M 200 50 Q 180 200 200 350" stroke="#00d4ff" stroke-width="0.5" fill="none" opacity="0.1"/>
+  <!-- Head border -->
+  <circle cx="200" cy="200" r="178" fill="none" stroke="#00d4ff" stroke-width="1.5" opacity="0.5"/>
+
+  <!-- Defs -->
+  <defs>
+    <radialGradient id="headGrad" cx="40%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#0d2040" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#020810" stop-opacity="1"/>
+    </radialGradient>
+    <radialGradient id="irisGradL" cx="40%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#80f0ff" stop-opacity="1"/>
+      <stop offset="60%" stop-color="#00d4ff" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#0066aa" stop-opacity="1"/>
+    </radialGradient>
+    <radialGradient id="irisGradR" cx="40%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#80f0ff" stop-opacity="1"/>
+      <stop offset="60%" stop-color="#00d4ff" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#0066aa" stop-opacity="1"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="leftEyeClip">
+      <ellipse cx="138" cy="158" rx="33" ry="33"/>
+    </clipPath>
+    <clipPath id="rightEyeClip">
+      <ellipse cx="262" cy="158" rx="33" ry="33"/>
+    </clipPath>
+  </defs>
+
+  <!-- Antenna -->
+  <line x1="200" y1="22" x2="200" y2="60" stroke="#00d4ff" stroke-width="3" opacity="0.8"/>
+  <line x1="192" y1="32" x2="178" y2="22" stroke="#00d4ff" stroke-width="2" opacity="0.5"/>
+  <line x1="208" y1="32" x2="222" y2="22" stroke="#00d4ff" stroke-width="2" opacity="0.5"/>
+  <circle cx="200" cy="16" r="9" fill="#00d4ff" id="antenna-dot" filter="url(#glow)"/>
+  <circle cx="178" cy="18" r="5" fill="#00d4ff" opacity="0.6"/>
+  <circle cx="222" cy="18" r="5" fill="#00d4ff" opacity="0.6"/>
+
+  <!-- Ear bolts left -->
+  <circle cx="24" cy="185" r="14" fill="#050d1a" stroke="#00d4ff" stroke-width="1.5" opacity="0.7"/>
+  <circle cx="24" cy="185" r="6" fill="#00d4ff" opacity="0.3"/>
+  <line x1="18" y1="185" x2="30" y2="185" stroke="#00d4ff" stroke-width="1.5" opacity="0.6"/>
+  <line x1="24" y1="179" x2="24" y2="191" stroke="#00d4ff" stroke-width="1.5" opacity="0.6"/>
+
+  <!-- Ear bolts right -->
+  <circle cx="376" cy="185" r="14" fill="#050d1a" stroke="#00d4ff" stroke-width="1.5" opacity="0.7"/>
+  <circle cx="376" cy="185" r="6" fill="#00d4ff" opacity="0.3"/>
+  <line x1="370" y1="185" x2="382" y2="185" stroke="#00d4ff" stroke-width="1.5" opacity="0.6"/>
+  <line x1="376" y1="179" x2="376" y2="191" stroke="#00d4ff" stroke-width="1.5" opacity="0.6"/>
+
+  <!-- Forehead decorative panel -->
+  <rect x="148" y="82" width="104" height="6" rx="3" fill="#00d4ff" opacity="0.25"/>
+  <rect x="160" y="92" width="80" height="3" rx="1.5" fill="#00d4ff" opacity="0.15"/>
+  <circle cx="148" cy="85" r="3" fill="#00d4ff" opacity="0.5"/>
+  <circle cx="252" cy="85" r="3" fill="#00d4ff" opacity="0.5"/>
+
+  <!-- ═══ LEFT EYE ═══ -->
+  <g id="left-eye-group">
+    <!-- Eye socket -->
+    <ellipse cx="138" cy="158" rx="36" ry="36" fill="#020810" stroke="#00d4ff" stroke-width="1.5" opacity="0.8"/>
+    <!-- Iris -->
+    <ellipse cx="138" cy="158" rx="24" ry="24" fill="url(#irisGradL)" id="left-iris" filter="url(#glow)"/>
+    <!-- Pupil -->
+    <circle cx="138" cy="158" r="11" fill="#000d1a"/>
+    <!-- Pupil depth -->
+    <circle cx="138" cy="158" r="7" fill="#000508"/>
+    <!-- Highlight -->
+    <circle cx="130" cy="150" r="5" fill="#ffffff" opacity="0.7"/>
+    <circle cx="133" cy="147" r="2" fill="#ffffff" opacity="0.4"/>
+    <!-- Iris ring detail -->
+    <ellipse cx="138" cy="158" rx="24" ry="24" fill="none" stroke="#80f0ff" stroke-width="0.8" opacity="0.4"/>
+    <!-- Blink rect — animates height via JS -->
+    <rect id="left-blink" x="102" y="122" width="72" height="0" rx="4" fill="#050d1a"/>
+    <!-- Blink border -->
+    <rect id="left-blink-border" x="102" y="122" width="72" height="0" rx="4" fill="none" stroke="#00d4ff" stroke-width="1" opacity="0.5"/>
+  </g>
+
+  <!-- ═══ RIGHT EYE ═══ -->
+  <g id="right-eye-group">
+    <!-- Eye socket -->
+    <ellipse cx="262" cy="158" rx="36" ry="36" fill="#020810" stroke="#00d4ff" stroke-width="1.5" opacity="0.8"/>
+    <!-- Iris -->
+    <ellipse cx="262" cy="158" rx="24" ry="24" fill="url(#irisGradR)" id="right-iris" filter="url(#glow)"/>
+    <!-- Pupil -->
+    <circle cx="262" cy="158" r="11" fill="#000d1a"/>
+    <!-- Pupil depth -->
+    <circle cx="262" cy="158" r="7" fill="#000508"/>
+    <!-- Highlight -->
+    <circle cx="254" cy="150" r="5" fill="#ffffff" opacity="0.7"/>
+    <circle cx="257" cy="147" r="2" fill="#ffffff" opacity="0.4"/>
+    <!-- Iris ring detail -->
+    <ellipse cx="262" cy="158" rx="24" ry="24" fill="none" stroke="#80f0ff" stroke-width="0.8" opacity="0.4"/>
+    <!-- Blink rect -->
+    <rect id="right-blink" x="226" y="122" width="72" height="0" rx="4" fill="#050d1a"/>
+    <rect id="right-blink-border" x="226" y="122" width="72" height="0" rx="4" fill="none" stroke="#00d4ff" stroke-width="1" opacity="0.5"/>
+  </g>
+
+  <!-- Nose / sensor array -->
+  <rect x="186" y="196" width="28" height="14" rx="7" fill="#00d4ff" opacity="0.35"/>
+  <circle cx="196" cy="203" r="3" fill="#00d4ff" opacity="0.6"/>
+  <circle cx="204" cy="203" r="3" fill="#00d4ff" opacity="0.6"/>
+
+  <!-- Cheek blush indicators -->
+  <ellipse cx="90" cy="232" rx="22" ry="14" fill="#ff4499" opacity="0.15" id="left-cheek"/>
+  <ellipse cx="310" cy="232" rx="22" ry="14" fill="#ff4499" opacity="0.15" id="right-cheek"/>
+
+  <!-- ═══ MOUTH ═══ -->
+  <g id="mouth-group">
+    <!-- Mouth background panel -->
+    <rect x="124" y="252" width="152" height="62" rx="28" fill="#020810" stroke="#00d4ff" stroke-width="1.5" opacity="0.8" id="mouth-bg"/>
+    <!-- Inner mouth cavity (grows when speaking) -->
+    <ellipse id="mouth-cavity" cx="200" cy="272" rx="0" ry="0" fill="#110000"/>
+    <!-- Upper teeth (appear when open) -->
+    <rect id="upper-teeth" x="172" y="255" width="56" height="0" rx="5" fill="#e8e8e8" opacity="0"/>
+    <!-- Lower teeth -->
+    <rect id="lower-teeth" x="178" y="299" width="44" height="0" rx="4" fill="#d0d0d0" opacity="0"/>
+    <!-- Tongue hint (very open) -->
+    <ellipse id="tongue" cx="200" cy="295" rx="0" ry="0" fill="#cc3333" opacity="0.8"/>
+    <!-- Mouth curve line (lip shape) -->
+    <path id="mouth-upper-lip"
+          d="M 148 272 Q 175 262 200 264 Q 225 262 252 272"
+          stroke="#00d4ff" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.9"/>
+    <path id="mouth-lower-lip"
+          d="M 148 272 Q 175 282 200 280 Q 225 282 252 272"
+          stroke="#00d4ff" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.6"/>
+    <!-- Corner dots -->
+    <circle cx="148" cy="272" r="3" fill="#00d4ff" opacity="0.7" id="mouth-corner-l"/>
+    <circle cx="252" cy="272" r="3" fill="#00d4ff" opacity="0.7" id="mouth-corner-r"/>
+  </g>
+
+  <!-- Chin detail panel -->
+  <rect x="162" y="336" width="76" height="6" rx="3" fill="#00d4ff" opacity="0.2"/>
+  <rect x="172" y="345" width="56" height="3" rx="1.5" fill="#00d4ff" opacity="0.12"/>
+  <!-- Bottom circuit traces -->
+  <line x1="138" y1="342" x2="162" y2="342" stroke="#00d4ff" stroke-width="1" opacity="0.2"/>
+  <line x1="238" y1="342" x2="262" y2="342" stroke="#00d4ff" stroke-width="1" opacity="0.2"/>
+</svg>
+</div>
+
+<div id="status-bar" id="status">BUDDYBOT v2.0 | NORMAL MODE</div>
+
+<!-- Audio element for ElevenLabs playback -->
+<audio id="buddy-audio" crossorigin="anonymous" preload="auto"></audio>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════
+//  VISEME TABLE — mouth shapes for each phoneme
+// ═══════════════════════════════════════════════
+const VISEME = {
+  'sil': { open:0,  cavity:0,  upperLip:"M148,272 Q175,262 200,264 Q225,262 252,272", lowerLip:"M148,272 Q175,282 200,280 Q225,282 252,272", cornerY:272, teeth:0,  tongue:0  },
+  'PP':  { open:3,  cavity:2,  upperLip:"M150,270 Q175,260 200,262 Q225,260 250,270", lowerLip:"M150,270 Q175,282 200,282 Q225,282 250,270", cornerY:270, teeth:0,  tongue:0  },
+  'FF':  { open:5,  cavity:4,  upperLip:"M148,268 Q175,258 200,260 Q225,258 252,268", lowerLip:"M150,275 L200,278 L250,275",                  cornerY:270, teeth:6,  tongue:0  },
+  'TH':  { open:8,  cavity:6,  upperLip:"M146,266 Q175,256 200,258 Q225,256 254,266", lowerLip:"M148,278 Q175,286 200,284 Q225,286 252,278", cornerY:270, teeth:8,  tongue:5  },
+  'DD':  { open:13, cavity:10, upperLip:"M144,264 Q175,252 200,255 Q225,252 256,264", lowerLip:"M146,282 Q175,293 200,291 Q225,293 254,282", cornerY:271, teeth:10, tongue:6  },
+  'kk':  { open:15, cavity:12, upperLip:"M142,263 Q175,250 200,253 Q225,250 258,263", lowerLip:"M144,283 Q175,295 200,293 Q225,295 256,283", cornerY:271, teeth:12, tongue:0  },
+  'CH':  { open:10, cavity:8,  upperLip:"M145,265 Q175,254 200,256 Q225,254 255,265", lowerLip:"M147,280 Q175,290 200,288 Q225,290 253,280", cornerY:271, teeth:8,  tongue:4  },
+  'SS':  { open:6,  cavity:5,  upperLip:"M148,268 Q175,258 200,260 Q225,258 252,268", lowerLip:"M150,278 Q175,285 200,283 Q225,285 250,278", cornerY:270, teeth:6,  tongue:3  },
+  'nn':  { open:4,  cavity:3,  upperLip:"M149,269 Q175,260 200,262 Q225,260 251,269", lowerLip:"M150,276 Q175,283 200,281 Q225,283 250,276", cornerY:271, teeth:3,  tongue:0  },
+  'RR':  { open:17, cavity:13, upperLip:"M140,262 Q175,248 200,251 Q225,248 260,262", lowerLip:"M142,284 Q175,297 200,295 Q225,297 258,284", cornerY:271, teeth:0,  tongue:8  },
+  'aa':  { open:24, cavity:18, upperLip:"M138,260 Q175,244 200,247 Q225,244 262,260", lowerLip:"M140,287 Q175,303 200,300 Q225,303 260,287", cornerY:272, teeth:14, tongue:12 },
+  'E':   { open:15, cavity:11, upperLip:"M140,263 Q175,251 200,254 Q225,251 260,263", lowerLip:"M142,282 Q175,294 200,292 Q225,294 258,282", cornerY:270, teeth:12, tongue:6  },
+  'I':   { open:8,  cavity:6,  upperLip:"M144,266 Q175,256 200,258 Q225,256 256,266", lowerLip:"M146,278 Q175,286 200,284 Q225,286 254,278", cornerY:270, teeth:8,  tongue:3  },
+  'O':   { open:21, cavity:17, upperLip:"M152,262 Q175,246 200,249 Q225,246 248,262", lowerLip:"M152,286 Q175,301 200,299 Q225,301 248,286", cornerY:272, teeth:0,  tongue:5  },
+  'U':   { open:18, cavity:14, upperLip:"M154,263 Q175,249 200,252 Q225,249 246,263", lowerLip:"M154,284 Q175,298 200,296 Q225,298 246,284", cornerY:272, teeth:0,  tongue:3  },
+};
+
+// Mode colour map
+const MODE_COLOURS = {
+  NORMAL:    { primary:'#00d4ff', secondary:'#0066aa', glow:'#004466' },
+  DOG:       { primary:'#33ff33', secondary:'#008800', glow:'#003300' },
+  BODYGUARD: { primary:'#ff9500', secondary:'#885000', glow:'#442800' },
+  UNHINGED:  { primary:'#bf00ff', secondary:'#660088', glow:'#330044' },
+  PARTY:     { primary:'#ffdd00', secondary:'#886600', glow:'#443300' },
+};
+
+// ═══ STATE ═══
+let currentMode = 'NORMAL';
+let currentColours = MODE_COLOURS.NORMAL;
+let targetOpen = 0;
+let currentOpen = 0;
+let audioCtx = null;
+let analyser = null;
+let audioSource = null;
+let isAnalysing = false;
+let animationFrameId = null;
+let isSpeaking = false;
+
+// Smooth lerp
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// ═══ MOUTH ANIMATION ═══
+function getVisemeForOpen(openAmount) {
+  if (openAmount < 2)  return VISEME.sil;
+  if (openAmount < 5)  return VISEME.PP;
+  if (openAmount < 9)  return VISEME.nn;
+  if (openAmount < 14) return VISEME.E;
+  if (openAmount < 18) return VISEME.DD;
+  if (openAmount < 22) return VISEME.O;
+  return VISEME.aa;
+}
+
+function applyMouthShape(openAmount) {
+  const v = getVisemeForOpen(openAmount);
+  const col = currentColours.primary;
+  const t = clamp(openAmount / 24, 0, 1); // 0=closed, 1=max open
+
+  // Upper lip
+  document.getElementById('mouth-upper-lip').setAttribute('d', v.upperLip);
+  document.getElementById('mouth-upper-lip').setAttribute('stroke', col);
+  // Lower lip
+  document.getElementById('mouth-lower-lip').setAttribute('d', v.lowerLip);
+  document.getElementById('mouth-lower-lip').setAttribute('stroke', col);
+  // Corner dots Y position
+  document.getElementById('mouth-corner-l').setAttribute('cy', v.cornerY);
+  document.getElementById('mouth-corner-r').setAttribute('cy', v.cornerY);
+  document.getElementById('mouth-corner-l').setAttribute('fill', col);
+  document.getElementById('mouth-corner-r').setAttribute('fill', col);
+
+  // Cavity
+  const cavX = 50 * t;
+  const cavY = openAmount * 0.5;
+  document.getElementById('mouth-cavity').setAttribute('rx', cavX.toFixed(1));
+  document.getElementById('mouth-cavity').setAttribute('ry', cavY.toFixed(1));
+  document.getElementById('mouth-cavity').setAttribute('cy', (265 + openAmount * 0.35).toFixed(1));
+
+  // Teeth - upper
+  const teethH = v.teeth * t;
+  const upperTeeth = document.getElementById('upper-teeth');
+  upperTeeth.setAttribute('height', teethH.toFixed(1));
+  upperTeeth.setAttribute('opacity', teethH > 0 ? '0.92' : '0');
+  upperTeeth.setAttribute('y', (255).toFixed(1));
+  upperTeeth.setAttribute('x', (200 - 28 * t).toFixed(1));
+  upperTeeth.setAttribute('width', (56 * t).toFixed(1));
+
+  // Teeth - lower
+  if (openAmount > 10) {
+    const lowerH = (openAmount - 10) * 0.4 * t;
+    const lowerTeeth = document.getElementById('lower-teeth');
+    lowerTeeth.setAttribute('height', lowerH.toFixed(1));
+    lowerTeeth.setAttribute('opacity', lowerH > 0 ? '0.7' : '0');
+    lowerTeeth.setAttribute('y', (openAmount > 14 ? 290 : 295).toFixed(1));
+  } else {
+    document.getElementById('lower-teeth').setAttribute('height', '0');
+    document.getElementById('lower-teeth').setAttribute('opacity', '0');
+  }
+
+  // Tongue (only visible at large open amounts)
+  if (openAmount > 16) {
+    const tongueRx = (openAmount - 16) * 1.4;
+    const tongueRy = (openAmount - 16) * 0.7;
+    document.getElementById('tongue').setAttribute('rx', tongueRx.toFixed(1));
+    document.getElementById('tongue').setAttribute('ry', tongueRy.toFixed(1));
+    document.getElementById('tongue').setAttribute('cy', (292 - openAmount * 0.1).toFixed(1));
+    document.getElementById('tongue').setAttribute('opacity', '0.7');
+  } else {
+    document.getElementById('tongue').setAttribute('rx', '0');
+    document.getElementById('tongue').setAttribute('ry', '0');
+    document.getElementById('tongue').setAttribute('opacity', '0');
+  }
+
+  // Cheek blush pulses when talking
+  const cheekOpacity = 0.12 + t * 0.2;
+  document.getElementById('left-cheek').setAttribute('opacity', cheekOpacity.toFixed(2));
+  document.getElementById('right-cheek').setAttribute('opacity', cheekOpacity.toFixed(2));
+
+  // Mouth background border
+  document.getElementById('mouth-bg').setAttribute('stroke', col);
+}
+
+// Main animation loop
+function animateLoop() {
+  currentOpen = lerp(currentOpen, targetOpen, 0.25);
+  applyMouthShape(currentOpen);
+
+  // Gentle decay
+  if (!isAnalysing) {
+    targetOpen *= 0.82;
+  }
+
+  animationFrameId = requestAnimationFrame(animateLoop);
+}
+
+// ═══ AUDIO ANALYSIS (amplitude-based lipsync) ═══
+function setupAudioAnalysis(audioElement) {
+  if (isAnalysing) return; // already set up
+  try {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    if (audioSource) {
+      try { audioSource.disconnect(); } catch(e) {}
+    }
+    audioSource = audioCtx.createMediaElementSource(audioElement);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.8;
+    audioSource.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    isAnalysing = true;
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    function analyzeFrame() {
+      if (!isAnalysing) return;
+      analyser.getByteFrequencyData(dataArray);
+      // Weighted sum: vocal frequency range (250Hz-3kHz) maps to bins 4-48 at 44100Hz/256
+      let sum = 0;
+      const start = 4, end = 48;
+      for (let i = start; i < end; i++) sum += dataArray[i];
+      const avg = sum / ((end - start) * 255);
+      // Map 0-1 amplitude to 0-24 open range with boosted sensitivity
+      targetOpen = Math.pow(avg, 0.6) * 28;
+      requestAnimationFrame(analyzeFrame);
+    }
+    analyzeFrame();
+  } catch(e) {
+    console.log('Audio analysis init failed:', e.message);
+  }
+}
+
+// ═══ BLINK ANIMATION ═══
+function animateBlink() {
+  const leftBlink = document.getElementById('left-blink');
+  const leftBorder = document.getElementById('left-blink-border');
+  const rightBlink = document.getElementById('right-blink');
+  const rightBorder = document.getElementById('right-blink-border');
+  const closeMs = 120;
+  const openMs = 100;
+
+  // Close eyes
+  leftBlink.style.transition  = `height ${closeMs}ms ease-in`;
+  rightBlink.style.transition = `height ${closeMs}ms ease-in`;
+  leftBorder.style.transition  = `height ${closeMs}ms ease-in`;
+  rightBorder.style.transition = `height ${closeMs}ms ease-in`;
+  leftBlink.setAttribute('height', '72');
+  rightBlink.setAttribute('height', '72');
+  leftBorder.setAttribute('height', '72');
+  rightBorder.setAttribute('height', '72');
+
+  // Open eyes
+  setTimeout(() => {
+    leftBlink.style.transition  = `height ${openMs}ms ease-out`;
+    rightBlink.style.transition = `height ${openMs}ms ease-out`;
+    leftBorder.style.transition  = `height ${openMs}ms ease-out`;
+    rightBorder.style.transition = `height ${openMs}ms ease-out`;
+    leftBlink.setAttribute('height', '0');
+    rightBlink.setAttribute('height', '0');
+    leftBorder.setAttribute('height', '0');
+    rightBorder.setAttribute('height', '0');
+  }, closeMs + 30);
+
+  // Schedule next blink: 3-6 seconds
+  setTimeout(animateBlink, 3200 + Math.random() * 2800);
+}
+
+// ═══ ANTENNA PULSE ═══
+function startAntennaPulse() {
+  const antennaDot = document.getElementById('antenna-dot');
+  const glowRing = document.getElementById('glow-ring');
+  let time = 0;
+  setInterval(() => {
+    time += 0.04;
+    const pulse = 0.5 + 0.4 * Math.sin(time);
+    antennaDot.setAttribute('opacity', pulse.toFixed(2));
+    const ringPulse = 0.2 + 0.2 * Math.sin(time * 0.7);
+    glowRing.setAttribute('opacity', ringPulse.toFixed(2));
+  }, 50);
+}
+
+// ═══ EYE WANDER (subtle) ═══
+function startEyeWander() {
+  function moveEyes() {
+    const maxOffset = 4;
+    const ox = (Math.random() - 0.5) * maxOffset * 2;
+    const oy = (Math.random() - 0.5) * maxOffset;
+    document.getElementById('left-iris').setAttribute('cx', (138 + ox).toFixed(1));
+    document.getElementById('left-iris').setAttribute('cy', (158 + oy).toFixed(1));
+    document.getElementById('right-iris').setAttribute('cx', (262 + ox).toFixed(1));
+    document.getElementById('right-iris').setAttribute('cy', (158 + oy).toFixed(1));
+    setTimeout(moveEyes, 2500 + Math.random() * 3500);
+  }
+  setTimeout(moveEyes, 3000);
+}
+
+// ═══ APPLY MODE COLOURS ═══
+function applyModeColours(modeName) {
+  currentColours = MODE_COLOURS[modeName] || MODE_COLOURS.NORMAL;
+  const col = currentColours.primary;
+  const sec = currentColours.secondary;
+
+  // Glow ring
+  document.getElementById('glow-ring').setAttribute('stroke', col);
+  // Antenna dot
+  document.getElementById('antenna-dot').setAttribute('fill', col);
+  // Left iris gradient stop
+  const stopL0 = document.querySelector('#irisGradL stop:first-child');
+  const stopL1 = document.querySelector('#irisGradL stop:nth-child(2)');
+  const stopR0 = document.querySelector('#irisGradR stop:first-child');
+  const stopR1 = document.querySelector('#irisGradR stop:nth-child(2)');
+  if (stopL0) {
+    stopL0.setAttribute('stop-color', lightenColor(col, 50));
+    stopL1.setAttribute('stop-color', col);
+    stopR0.setAttribute('stop-color', lightenColor(col, 50));
+    stopR1.setAttribute('stop-color', col);
+  }
+  document.getElementById('mouth-bg').setAttribute('stroke', col);
+  document.getElementById('mouth-upper-lip').setAttribute('stroke', col);
+  document.getElementById('mouth-corner-l').setAttribute('fill', col);
+  document.getElementById('mouth-corner-r').setAttribute('fill', col);
+
+  // Update status bar
+  const statusEl = document.getElementById('status-bar');
+  if (statusEl) {
+    statusEl.textContent = `BUDDYBOT v2.0 | ${modeName} MODE`;
+    statusEl.style.color = col.replace(')', ',0.3)').replace('rgb', 'rgba').replace('#', 'rgba(');
+  }
+}
+
+function lightenColor(hex, amount) {
+  try {
+    const num = parseInt(hex.slice(1), 16);
+    const r = Math.min(255, (num >> 16) + amount);
+    const g = Math.min(255, ((num >> 8) & 0xff) + amount);
+    const b = Math.min(255, (num & 0xff) + amount);
+    return `#${((1<<24)|(r<<16)|(g<<8)|b).toString(16).slice(1)}`;
+  } catch(e) { return hex; }
+}
+
+// ═══ PUBLIC API — called from Kotlin via JavascriptInterface ═══
+window.BuddyBot = {
+  /**
+   * Set robot mode (NORMAL|DOG|BODYGUARD|UNHINGED|PARTY)
+   * Called: webView.evaluateJavascript("window.BuddyBot.setMode('DOG')", null)
+   */
+  setMode: function(mode) {
+    currentMode = mode;
+    applyModeColours(mode);
+  },
+
+  /**
+   * Set speaking state — starts/stops lipsync animation
+   * Called: webView.evaluateJavascript("window.BuddyBot.setSpeaking(true)", null)
+   */
+  setSpeaking: function(speaking) {
+    isSpeaking = speaking;
+    if (!speaking) {
+      // Smoothly close mouth
+      targetOpen = 0;
+    }
+  },
+
+  /**
+   * Feed audio URL for amplitude-based lipsync
+   * Called: webView.evaluateJavascript("window.BuddyBot.playAudio('file:///...')", null)
+   */
+  playAudio: function(url) {
+    const audio = document.getElementById('buddy-audio');
+    audio.src = url;
+    audio.load();
+    setupAudioAnalysis(audio);
+    audio.play().catch(function(e) {
+      console.log('Audio autoplay blocked:', e.message, '— lipsync only');
+    });
+  },
+
+  /**
+   * Set a specific viseme (for Wawa-Lipsync integration if bundled)
+   * Called: webView.evaluateJavascript("window.BuddyBot.setViseme('aa', '0.9')", null)
+   */
+  setViseme: function(visemeName, weight) {
+    const shape = VISEME[visemeName];
+    if (shape) {
+      const w = parseFloat(weight) || 1.0;
+      targetOpen = shape.open * w;
+    }
+  },
+
+  /**
+   * Trigger a blink
+   */
+  blink: function() {
+    animateBlink();
+  },
+
+  /**
+   * Set amplitude directly (0.0 - 1.0) — for custom audio analysis
+   */
+  setAmplitude: function(amp) {
+    targetOpen = parseFloat(amp) * 26;
+  }
+};
+
+// ═══ AUDIO ELEMENT EVENT HANDLERS ═══
+const buddyAudio = document.getElementById('buddy-audio');
+buddyAudio.addEventListener('play', function() {
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  isSpeaking = true;
+  isAnalysing = true;
+});
+buddyAudio.addEventListener('ended', function() {
+  isSpeaking = false;
+  isAnalysing = false;
+  targetOpen = 0;
+});
+buddyAudio.addEventListener('pause', function() {
+  isAnalysing = false;
+  targetOpen = 0;
+});
+
+// ═══ STARTUP ═══
+window.addEventListener('DOMContentLoaded', function() {
+  applyModeColours('NORMAL');
+  animateLoop();
+  setTimeout(animateBlink, 2000 + Math.random() * 1500);
+  startAntennaPulse();
+  startEyeWander();
+
+  // Notify Android that WebView is ready
+  if (window.AndroidBridge && window.AndroidBridge.onWebViewReady) {
+    window.AndroidBridge.onWebViewReady();
+  }
+});
+</script>
+</body>
+</html>

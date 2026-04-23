@@ -799,9 +799,10 @@ private fun AISettingsCard(robotState: RobotState) {
 
         // Active AI service indicator
         val (aiLabel, aiColor) = when (robotState.aiService) {
-            AIService.CLAUDE  -> "Claude 3 Sonnet" to NeonPurple
-            AIService.GEMINI  -> "Gemini 1.5 Flash" to NeonCyan
-            AIService.OFFLINE -> "Offline Mode" to NeonOrange
+            AIService.GROQ -> "Groq Llama 3 (Free)" to NeonGreen
+            AIService.GEMINI -> "Gemini 2.0 Flash (Free)" to NeonCyan
+            AIService.CLAUDE -> "Claude Haiku (Paid)" to NeonPurple
+            AIService.OFFLINE -> "Offline Fallback" to NeonOrange
         }
 
         Row(

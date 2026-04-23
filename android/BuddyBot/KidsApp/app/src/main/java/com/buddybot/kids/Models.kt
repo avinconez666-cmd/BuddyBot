@@ -10,8 +10,15 @@ enum class CommunicationMode {
     USB_SERIAL, WEBSOCKET, DISCONNECTED
 }
 
+/**
+ * AI service enum — GROQ added as the default free-tier option.
+ * Priority order: GROQ → GEMINI → CLAUDE → OFFLINE
+ */
 enum class AIService {
-    CLAUDE, GEMINI, OFFLINE
+    GROQ,       // Free — Llama 3 via Groq API (console.groq.com)
+    GEMINI,     // Free — Gemini 2.0 Flash via Google AI Studio
+    CLAUDE,     // Paid — Claude Haiku / Sonnet (last resort)
+    OFFLINE     // No network — hardcoded child-friendly responses
 }
 
 data class RobotState(
@@ -32,7 +39,8 @@ data class RobotState(
     val requestedMode: RobotMode? = null,
     val showCameraFeed: Boolean = false,
     val communicationMode: CommunicationMode = CommunicationMode.DISCONNECTED,
-    val aiService: AIService = AIService.CLAUDE,
+    // Default OFFLINE — updates to GROQ/GEMINI/CLAUDE on first successful AI call
+    val aiService: AIService = AIService.OFFLINE,
     val batteryVoltage: Float = 0f,
     val batteryPercent: Int = 100,
     val temperature: Float = 25f,
@@ -46,14 +54,12 @@ data class RobotState(
     val eventBanner: Pair<String, BannerLevel>? = null
 )
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Phase 5: Detection result types for face recognition and object detection
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Phase 5: Detection result types ────────────────────────────────────────
 
 /**
  * Result from face detection + recognition pipeline.
- * @param bounds  Bounding box in camera pixel coordinates (640x480)
- * @param name    Recognised person name, or null if unknown
+ * @param bounds      Bounding box in camera pixel coordinates (640×480)
+ * @param name        Recognised person name, or null if unknown
  * @param confidence  Cosine similarity score (0..1), 0 if unknown
  */
 data class FaceResult(
@@ -64,8 +70,8 @@ data class FaceResult(
 
 /**
  * Result from object detection pipeline.
- * @param bounds  Bounding box in camera pixel coordinates (640x480)
- * @param label   Object class label (e.g. "person", "dog")
+ * @param bounds      Bounding box in camera pixel coordinates (640×480)
+ * @param label       Object class label (e.g. "person", "dog")
  * @param confidence  Detection confidence score (0..1)
  */
 data class DetectedObjectResult(

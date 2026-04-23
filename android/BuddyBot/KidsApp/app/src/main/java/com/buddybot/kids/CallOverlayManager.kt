@@ -14,34 +14,37 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
- * CallOverlayManager — Phase 4: Call Daddy overlay
+ * CallOverlayManager V2
  *
- * Shows a full-screen "Calling Daddy..." overlay on top of Messenger so that
- * a 3-year-old can see the call is in progress and tap "End Call" to return
- * to BuddyBot.
+ * Shows a slim banner at the BOTTOM of the screen while Messenger is running a call.
+ * The banner includes an "End Call" button that dismisses the overlay and returns to
+ * BuddyBot Kids.
  *
- * Requires SYSTEM_ALERT_WINDOW permission (declared in AndroidManifest.xml).
- * The caller must check Settings.canDrawOverlays(context) before calling show().
+ * Uses TYPE_APPLICATION_OVERLAY (requires SYSTEM_ALERT_WINDOW permission).
  *
- * The overlay monitors whether Messenger is still in the foreground every 2s.
- * When Messenger is dismissed (call ended / user navigated away), the overlay
- * is automatically dismissed and BuddyBot is brought back to the front.
+ * Lifecycle:
+ *   1. show()        → adds window overlay, starts monitoring Messenger
+ *   2. callMonitor   → every 2s checks if Messenger is still foreground
+ *   3. dismiss()     → removes overlay, returns to BuddyBot
  */
 class CallOverlayManager(private val context: Context) {
 
     private var windowManager: WindowManager? = null
     private var overlayView: LinearLayout? = null
     private val handler = Handler(Looper.getMainLooper())
-    private var isShowing = false
+    var isShowing = false
+        private set
+    private var callStartTimeMs = 0L
 
-    // Polls every 2s to detect when Messenger leaves the foreground
     private val callMonitor = object : Runnable {
         override fun run() {
-            if (!isMessengerInForeground()) {
+            val elapsed = System.currentTimeMillis() - callStartTimeMs
+            // Wait at least 5 s before checking so Messenger has time to fully open
+            if (elapsed > 5_000L && !isMessengerInForeground()) {
                 dismiss()
                 bringBuddyBotToFront()
             } else {
-                handler.postDelayed(this, 2000)
+                handler.postDelayed(this, 2_000L)
             }
         }
     }
@@ -50,68 +53,67 @@ class CallOverlayManager(private val context: Context) {
         if (isShowing) return
         windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
+        // ── Banner layout ─────────────────────────────────────────────────
         val layout = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.argb(200, 0, 0, 0))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.MATCH_PARENT
-            )
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.argb(225, 0, 40, 10))
+            setPadding(32, 18, 32, 18)
         }
 
         val callingText = TextView(context).apply {
-            text = "📞 Calling Daddy..."
-            textSize = 32f
+            text = "📹  Calling Dad..."
+            textSize = 17f
             setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 60)
         }
 
-        val endCallButton = Button(context).apply {
-            text = "❌ End Call"
-            textSize = 24f
+        val endCallBtn = Button(context).apply {
+            text = "✕  End Call"
+            textSize = 13f
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.RED)
-            setPadding(60, 40, 60, 40)
+            setBackgroundColor(Color.argb(220, 200, 20, 20))
+            setPadding(36, 12, 36, 12)
+            isAllCaps = false
             setOnClickListener {
                 dismiss()
                 bringBuddyBotToFront()
             }
         }
 
-        layout.addView(callingText)
-        layout.addView(endCallButton)
+        layout.addView(callingText,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        layout.addView(endCallBtn)
 
+        // ── Window params — slim banner pinned to bottom ──────────────────
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
-        )
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.FILL_HORIZONTAL
+        }
 
         overlayView = layout
         try {
             windowManager?.addView(layout, params)
             isShowing = true
-            // Start monitoring Messenger foreground state after 2s
-            handler.postDelayed(callMonitor, 2000)
+            callStartTimeMs = System.currentTimeMillis()
+            handler.postDelayed(callMonitor, 2_000L)
         } catch (e: Exception) {
-            // Overlay permission may have been revoked — fail silently
+            // Permission may have been revoked — fail silently
             overlayView = null
+            isShowing = false
         }
     }
 
     fun dismiss() {
         handler.removeCallbacks(callMonitor)
         overlayView?.let {
-            try {
-                windowManager?.removeView(it)
-            } catch (e: Exception) {
-                // Already removed — ignore
-            }
+            try { windowManager?.removeView(it) } catch (e: Exception) { }
         }
         overlayView = null
         isShowing = false
@@ -131,12 +133,13 @@ class CallOverlayManager(private val context: Context) {
 
     private fun bringBuddyBotToFront() {
         try {
-            val intent = Intent(context, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
+            context.startActivity(
+                Intent(context, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                            Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
         } catch (e: Exception) {
-            // Activity may already be in front — ignore
+            // Already in front — ignore
         }
     }
 }

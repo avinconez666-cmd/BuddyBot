@@ -1,8 +1,11 @@
 @echo off
 REM Build script for BuddyBot Kids - Automatically uses Java 17 if available
 
-REM Check for java-17 in Program Files
-if exist "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot" (
+REM Priority: User provided JDK path
+if exist "D:\MOVED_PROGRAMS\Eclipse Adoptium\jdk-17.0.18+8" (
+    set JAVA_HOME=D:\MOVED_PROGRAMS\Eclipse Adoptium\jdk-17.0.18+8
+    echo Using Java 17 from: %JAVA_HOME%
+) else if exist "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot" (
     set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot
     echo Using Java 17 from: %JAVA_HOME%
 ) else if exist "C:\Program Files\Eclipse Adoptium\jdk-11.0.28.6-hotspot" (
@@ -24,7 +27,7 @@ echo.
 echo Building BuddyBot Kids...
 echo.
 
-gradlew.bat clean assembleDebug %*
+call gradlew.bat clean assembleDebug %*
 
 if %ERRORLEVEL% EQU 0 (
     echo.
@@ -38,4 +41,3 @@ if %ERRORLEVEL% EQU 0 (
     echo Try installing Java 17: https://adoptium.net/
     exit /b 1
 )
-

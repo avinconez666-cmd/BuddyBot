@@ -31,6 +31,7 @@ import android.provider.Settings
 import android.view.Surface
 import android.view.View
 import android.view.WindowManager
+import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -173,6 +174,15 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         if (permissions.all { it.value }) initializeApp() else finish()
     }
 
+    private val hotwordReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == HotwordService.ACTION_HOTWORD_DETECTED) {
+                Log.d(TAG, "🎤 Hotword broadcast received!")
+                runOnUiThread { onHotwordDetected() }
+            }
+        }
+    }
+
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -222,8 +232,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         super.onCreate(savedInstanceState)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        window.attributes.layoutInDisplayCutoutMode =
-            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
         window.setFlags(
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
@@ -250,7 +262,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         setContentView(R.layout.activity_main)
         
         val playerView = findViewById<androidx.media3.ui.PlayerView>(R.id.playerView)
-        faceCoordinator = FaceCoordinator(this, playerView, lifecycleScope)
+        val faceWebView = findViewById<WebView>(R.id.faceWebView)
+        faceWebView.settings.javaScriptEnabled = true
+        faceWebView.settings.mediaPlaybackRequiresUserGesture = false
+        faceCoordinator = FaceCoordinator(this, playerView, lifecycleScope, faceWebView)
 
         val filter = IntentFilter(ACTION_USB_PERMISSION).also {
             // Phase 4: listen for hot-plug attach/detach so webcam auto-connects
@@ -258,6 +273,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             it.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
         ContextCompat.registerReceiver(this, usbReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
+
+        ContextCompat.registerReceiver(
+            this,
+            hotwordReceiver,
+            IntentFilter(HotwordService.ACTION_HOTWORD_DETECTED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         setupComposeUI()
         checkAndRequestPermissions()
@@ -335,6 +357,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             }
             
             try {
+                val prefs = getSharedPreferences("BuddyBot", MODE_PRIVATE)
+                val savedIP = prefs.getString("buddybotIP", "") ?: ""
+                if (savedIP.isNotEmpty()) {
+                    _robotState.value = _robotState.value.copy(buddybotIP = savedIP)
+                    Log.d(TAG, "Loaded saved IP: $savedIP")
+                    logComm("COMM", "✅ Loaded saved IP: $savedIP")
+                }
                 arduinoComms.onMessageReceived = { handleArduinoMessage(it) }
                 arduinoComms.initialize(_robotState.value.buddybotIP)
                 Log.d(TAG, "initializeApp: Arduino communications initialized")
@@ -601,12 +630,20 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         }
     }
 
+    private fun onHotwordDetected() {
+        if (isProcessingCommand || _robotState.value.isSpeaking) return
+        Log.d(TAG, "Hotword triggered — capturing command")
+        isProcessingCommand = true
+        isListeningForWakeWord = false
+        speakText("Yeah?")
+        Handler(Looper.getMainLooper()).postDelayed({ startCommandListening() }, 1200)
+    }
+
     private fun startSequence(playIntro: Boolean) {
         _robotState.value = _robotState.value.copy(showIntroDialog = false)
         if (playIntro) {
-            faceCoordinator.playVideoOnce("intro") {
-                playSplashThenMain()
-            }
+            // Use playIntroVideo() which sets volume = 1f (WITH audio)
+            faceCoordinator.playIntroVideo { playSplashThenMain() }
         } else {
             playSplashThenMain()
         }
@@ -1249,12 +1286,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
 
     private fun startContinuousListening() {
         if (isProcessingCommand) return
+        // HotwordService handles wake-word detection via broadcast —
+        // don't start a competing recognizer that will fight for the mic
         isListeningForWakeWord = true
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-        }
-        speechRecognizer?.startListening(intent)
+        Log.d(TAG, "startContinuousListening: deferred to HotwordService")
+        // speechRecognizer NOT started here — HotwordService broadcasts trigger us
     }
 
     private fun startListening() {
@@ -1378,49 +1414,48 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     }
 
     private suspend fun getAIResponse(userInput: String): String = withContext(Dispatchers.IO) {
-        // 1. Try Groq first (free, fastest)
-        if (BuildConfig.GROQ_API_KEY.isNotBlank()) {
+        // 1. Groq — free, fastest
+        if (BuddyBotConfig.isGroqConfigured) {
             try {
                 val response = callGroqAPI(userInput)
                 if (response.isNotEmpty()) {
-                    val limited = limitWords(response, 15)
-                    Log.d(TAG, "[AI] Groq response (${response.split(" ").size} words) → limited to (${limited.split(" ").size} words): $limited")
-                    return@withContext limited
+                    withContext(Dispatchers.Main) {
+                        _robotState.value = _robotState.value.copy(aiService = AIService.GROQ)
+                    }
+                    return@withContext limitWords(response, 15)
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Groq failed: ${e.message}")
-            }
+            } catch (e: Exception) { Log.w(TAG, "Groq failed: ${e.message}") }
+        } else {
+            Log.w(TAG, "Groq not configured — get free key at console.groq.com")
         }
-
-        // 2. Try Gemini (free fallback)
-        if (BuildConfig.GEMINI_API_KEY.isNotBlank()) {
+        // 2. Gemini — free fallback
+        if (BuddyBotConfig.isGeminiConfigured) {
             try {
                 val response = callGeminiAPI(userInput)
                 if (response.isNotEmpty()) {
-                    val limited = limitWords(response, 15)
-                    Log.d(TAG, "[AI] Gemini response (${response.split(" ").size} words) → limited to (${limited.split(" ").size} words): $limited")
-                    return@withContext limited
+                    withContext(Dispatchers.Main) {
+                        _robotState.value = _robotState.value.copy(aiService = AIService.GEMINI)
+                    }
+                    return@withContext limitWords(response, 15)
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Gemini failed: ${e.message}")
-            }
+            } catch (e: Exception) { Log.w(TAG, "Gemini failed: ${e.message}") }
         }
-
-        // 3. Try Claude (paid, last resort)
-        if (BuildConfig.CLAUDE_API_KEY.isNotBlank()) {
+        // 3. Claude — paid last resort
+        if (BuddyBotConfig.isClaudeConfigured) {
             try {
                 val response = callClaudeAPI(userInput)
                 if (response.isNotEmpty()) {
-                    val limited = limitWords(response, 15)
-                    Log.d(TAG, "[AI] Claude response (${response.split(" ").size} words) → limited to (${limited.split(" ").size} words): $limited")
-                    return@withContext limited
+                    withContext(Dispatchers.Main) {
+                        _robotState.value = _robotState.value.copy(aiService = AIService.CLAUDE)
+                    }
+                    return@withContext limitWords(response, 15)
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Claude failed: ${e.message}")
-            }
+            } catch (e: Exception) { Log.w(TAG, "Claude failed: ${e.message}") }
         }
-
         // 4. Offline fallback
+        withContext(Dispatchers.Main) {
+            _robotState.value = _robotState.value.copy(aiService = AIService.OFFLINE)
+        }
         return@withContext getOfflineFallbackResponse(userInput)
     }
 
@@ -1544,7 +1579,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 })
         }
         val request = Request.Builder().url("https://api.anthropic.com/v1/messages")
-            .addHeader("x-api-key", BuddyBotConfig.ANTHROPIC_API_KEY)
+            .addHeader("x-api-key", BuildConfig.CLAUDE_API_KEY)
             .addHeader("anthropic-version", "2023-06-01")
             .post(requestBody.toString().toRequestBody("application/json".toMediaType())).build()
         val response = httpClient.newCall(request).execute()
@@ -1579,7 +1614,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 })
         }
         val request =
-            Request.Builder().url("${BuddyBotConfig.GEMINI_URL}?key=${BuddyBotConfig.GEMINI_API_KEY}")
+            Request.Builder().url("${BuddyBotConfig.GEMINI_URL}?key=${BuildConfig.GEMINI_API_KEY}")
                 .post(requestBody.toString().toRequestBody("application/json".toMediaType())).build()
         val response = httpClient.newCall(request).execute()
         return if (response.isSuccessful) {
@@ -1659,7 +1694,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         val request = Request.Builder()
             .url("https://api.elevenlabs.io/v1/text-to-speech/${BuddyBotConfig.ELEVENLABS_VOICE_ID}")
             .addHeader("Accept", "audio/mpeg")
-            .addHeader("xi-api-key", BuddyBotConfig.ELEVENLABS_API_KEY)
+            .addHeader("xi-api-key", BuildConfig.ELEVENLABS_API_KEY)
             .post(requestBody.toString().toRequestBody("application/json".toMediaType())).build()
         val response = httpClient.newCall(request).execute()
         if (response.isSuccessful) {
@@ -1804,10 +1839,15 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     }
 
     private fun updateIP(ip: String) {
-        _robotState.value = _robotState.value.copy(buddybotIP = ip); getSharedPreferences(
-            "BuddyBot",
-            MODE_PRIVATE
-        ).edit { putString("buddybotIP", ip) }
+        val trimmed = ip.trim()
+        if (trimmed.isEmpty()) return
+        _robotState.value = _robotState.value.copy(buddybotIP = trimmed)
+        getSharedPreferences("BuddyBot", MODE_PRIVATE).edit { putString("buddybotIP", trimmed) }
+        logComm("COMM", "IP saved: $trimmed — connecting WebSocket…")
+        lifecycleScope.launch {
+            delay(300)
+            arduinoComms.initializeWebSocket(trimmed)
+        }
     }
 
     private fun logComm(source: String, message: String) {
@@ -1822,6 +1862,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             unregisterReceiver(usbReceiver)
         } catch (e: Exception) {
         }
+        try { unregisterReceiver(hotwordReceiver) } catch (e: Exception) { }
         // FIX #8: close the UVC camera client on destroy so the driver fully releases
         // the camera hardware. Without this the camera stays open across app restarts,
         // causing "camera already in use" crashes on the next launch.

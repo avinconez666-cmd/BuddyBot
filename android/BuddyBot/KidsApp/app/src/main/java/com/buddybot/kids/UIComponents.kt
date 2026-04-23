@@ -126,8 +126,8 @@ fun BuddyBotOverlay(
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
+                .align(Alignment.TopStart) // ← was TopEnd
+                .padding(start = 80.dp, top = 12.dp) // offset right of gear icon
         ) {
             Box(
                 modifier = Modifier
