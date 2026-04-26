@@ -35,7 +35,7 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
     }
 
     private var usbSerial: UsbSerialDevice? = null
-    private var webSocket: WebSocket? = null
+    private var httpIp: String = ""
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -48,12 +48,14 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
 
     private val serialBuffer = StringBuilder()
 
-    // WebSocket backoff
-    private var webSocketRetryCount = 0
-    private var webSocketRetryJob: Job? = null
-    private val MAX_WEBSOCKET_RETRIES = 10
+    // HTTP retry backoff
+    private var httpRetryCount = 0
+    private var httpRetryJob: Job? = null
+    private val MAX_HTTP_RETRIES = 10
     private val INITIAL_RETRY_DELAY_MS = 1000L
     private val MAX_RETRY_DELAY_MS = 30_000L
+
+    private var httpPollJob: Job? = null
 
     // Serial health
     @Volatile private var lastSerialRxMs = System.currentTimeMillis()
@@ -170,12 +172,12 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
             if (communicationMode.value == CommunicationMode.DISCONNECTED) {
                 log("USB serial not found after 6s — retry #2")
                 initializeUSBSerial()
-                // Try WebSocket fallback if IP is configured
+                // Try HTTP fallback if IP is configured
                 delay(2000)
                 if (communicationMode.value == CommunicationMode.DISCONNECTED &&
                     buddybotIP.isNotEmpty()) {
-                    log("Starting WebSocket fallback to $buddybotIP")
-                    initializeWebSocket(buddybotIP)
+                    log("Starting HTTP fallback to $buddybotIP")
+                    initializeHttp(buddybotIP)
                 }
             }
         }
@@ -308,68 +310,109 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    //  WEBSOCKET
+    //  HTTP
     // ────────────────────────────────────────────────────────────────────────
-    fun initializeWebSocket(ip: String) {
+    fun initializeHttp(ip: String) {
         if (ip.isBlank()) {
-            log("WebSocket: IP not configured — skipping")
+            log("HTTP: IP not configured — skipping")
             return
         }
-        log("Connecting WebSocket: ws://$ip:${BuddyBotConfig.WEBSOCKET_PORT}")
+        log("Connecting HTTP: http://$ip")
 
-        webSocketRetryJob?.cancel()
-        webSocketRetryCount = 0
+        httpRetryJob?.cancel()
+        httpRetryCount = 0
+        httpIp = ip
 
-        try {
-            val request = Request.Builder()
-                .url("ws://$ip:${BuddyBotConfig.WEBSOCKET_PORT}")
-                .build()
-
-            webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    log("✅ WebSocket CONNECTED to $ip")
+        scope.launch(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url("http://$ip/health")
+                    .build()
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    log("✅ HTTP CONNECTED to $ip")
                     communicationMode.value = CommunicationMode.WEBSOCKET
-                    webSocketRetryCount = 0
-                }
-
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    log("[RECV] WS ← Mega: $text")
-                    onMessageReceived?.invoke(text.trim())
-                }
-
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    log("❌ WebSocket FAILURE: ${t.message}")
+                    httpRetryCount = 0
+                    startHttpPolling(ip)
+                } else {
+                    log("❌ HTTP health check failed: ${response.code}")
                     communicationMode.value = CommunicationMode.DISCONNECTED
-                    scheduleWebSocketReconnect(ip)
+                    scheduleHttpReconnect(ip)
                 }
-
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    log("WebSocket CLOSED ($code: $reason)")
-                    communicationMode.value = CommunicationMode.DISCONNECTED
-                    scheduleWebSocketReconnect(ip)
-                }
-            })
-        } catch (e: Exception) {
-            log("WebSocket init error: ${e.message}")
-            communicationMode.value = CommunicationMode.DISCONNECTED
-            scheduleWebSocketReconnect(ip)
+            } catch (e: Exception) {
+                log("HTTP init error: ${e.message}")
+                communicationMode.value = CommunicationMode.DISCONNECTED
+                scheduleHttpReconnect(ip)
+            }
         }
     }
 
-    private fun scheduleWebSocketReconnect(ip: String) {
-        if (webSocketRetryCount >= MAX_WEBSOCKET_RETRIES) {
-            log("WebSocket: max retries reached — giving up")
+    private fun startHttpPolling(ip: String) {
+        httpPollJob?.cancel()
+        httpPollJob = scope.launch(Dispatchers.IO) {
+            while (isActive && communicationMode.value == CommunicationMode.WEBSOCKET) {
+                try {
+                    val request = Request.Builder()
+                        .url("http://$ip/status")
+                        .build()
+                    val response = httpClient.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: ""
+                        parseHttpStatus(body)
+                    }
+                } catch (e: Exception) {
+                    log("HTTP poll error: ${e.message}")
+                }
+                delay(1500)
+            }
+        }
+    }
+
+    private fun parseHttpStatus(json: String) {
+        try {
+            val obj = org.json.JSONObject(json)
+            // Mode update
+            if (obj.has("mode")) {
+                onMessageReceived?.invoke("MODE:${obj.getString("mode")}")
+            }
+            // Ultrasonic distances
+            val front = if (obj.has("front")) obj.getInt("front") else -1
+            val rear  = if (obj.has("rear"))  obj.getInt("rear")  else -1
+            val left  = if (obj.has("left"))  obj.getInt("left")  else -1
+            val right = if (obj.has("right")) obj.getInt("right") else -1
+            if (front != -1 || rear != -1 || left != -1 || right != -1) {
+                onMessageReceived?.invoke("US:$front,$rear,$left,$right")
+            }
+            // Battery telemetry
+            val voltage = if (obj.has("voltage")) obj.getString("voltage") else
+                          if (obj.has("battery")) obj.getString("battery") else "0.0"
+            val pct = if (obj.has("batteryPercent")) obj.getString("batteryPercent") else
+                      if (obj.has("pct")) obj.getString("pct") else "0"
+            onMessageReceived?.invoke("TELE:$voltage,$pct,0")
+            // Gas / flame alerts
+            val gas = if (obj.has("gas")) obj.getString("gas") else "0"
+            val flame = if (obj.has("flame")) obj.getString("flame") else "0"
+            if (gas != "0") onMessageReceived?.invoke("ALERT:GAS_ALERT")
+            if (flame == "1") onMessageReceived?.invoke("ALERT:FLAME_DETECTED")
+        } catch (e: Exception) {
+            log("HTTP status parse error: ${e.message}")
+        }
+    }
+
+    private fun scheduleHttpReconnect(ip: String) {
+        if (httpRetryCount >= MAX_HTTP_RETRIES) {
+            log("HTTP: max retries reached — giving up")
             return
         }
-        webSocketRetryCount++
-        val delayMs = calculateBackoff(webSocketRetryCount)
-        log("WebSocket retry #$webSocketRetryCount in ${delayMs}ms")
+        httpRetryCount++
+        val delayMs = calculateBackoff(httpRetryCount)
+        log("HTTP retry #$httpRetryCount in ${delayMs}ms")
 
-        webSocketRetryJob?.cancel()
-        webSocketRetryJob = scope.launch {
+        httpRetryJob?.cancel()
+        httpRetryJob = scope.launch {
             delay(delayMs)
             if (communicationMode.value == CommunicationMode.DISCONNECTED) {
-                initializeWebSocket(ip)
+                initializeHttp(ip)
             }
         }
     }
@@ -402,7 +445,7 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
     fun sendCommand(command: String) {
         val clean = command.trimEnd('\r', '\n')
         if (clean.isEmpty()) return
-        val cmd = "$clean\n"
+        val payload = "CMD:$clean\n"
         when (communicationMode.value) {
             CommunicationMode.USB_SERIAL -> {
                 if (usbSerial?.isOpen() != true) {
@@ -410,7 +453,7 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
                     return
                 }
                 try {
-                    usbSerial?.write(cmd.toByteArray(Charsets.UTF_8))
+                    usbSerial?.write(payload.toByteArray(Charsets.UTF_8))
                     log("[SEND] USB → Mega: $clean")
                 } catch (e: IOException) {
                     Log.e(TAG, "Serial write failed: ${e.message}")
@@ -419,8 +462,21 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
                 }
             }
             CommunicationMode.WEBSOCKET -> {
-                webSocket?.send(clean)
-                log("[SEND] WS → Mega: $clean")
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val cmdParam = if (payload.startsWith("CMD:")) payload.substring(4).trim() else payload.trim()
+                        val url = "http://$httpIp/cmd?c=${java.net.URLEncoder.encode(cmdParam, "UTF-8")}"
+                        val request = Request.Builder().url(url).build()
+                        val response = httpClient.newCall(request).execute()
+                        if (response.isSuccessful) {
+                            log("[SEND] HTTP → ESP32: $clean")
+                        } else {
+                            log("[SEND] HTTP error: ${response.code}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "HTTP send failed: ${e.message}")
+                    }
+                }
             }
             CommunicationMode.DISCONNECTED ->
                 log("[WARN] sendCommand ignored (disconnected): $clean")
@@ -437,12 +493,12 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
 
     fun close() {
         serialHealthJob?.cancel()
-        webSocketRetryJob?.cancel()
+        httpRetryJob?.cancel()
+        httpPollJob?.cancel()
         communicationMode.value = CommunicationMode.DISCONNECTED
         try { usbSerial?.close() } catch (e: Exception) { }
         usbSerial = null
-        try { webSocket?.close(1000, "Closing") } catch (e: Exception) { }
-        webSocket = null
+        httpIp = ""
         log("Communications closed")
     }
 

@@ -60,6 +60,8 @@
 #include "paj7620.h"
 #include <util/atomic.h>
 bool r3CommFail = false;
+bool debugVerbose = true;
+// ===========================================
 // ════════════════════════════════════════════════════════════════════
 //  CONFIGURATION
 // ════════════════════════════════════════════════════════════════════
@@ -167,10 +169,10 @@ void runR3CommTest() {
 
   motorComm.println(F("PING"));
   if (waitForR3Line("PONG", 2000, response)) {
-    Serial.println(F("R3 COMM OK"));
+    if (debugVerbose) Serial.println(F("R3 COMM OK"));
     Serial1.println(F("R3 COMM OK"));
   } else {
-    Serial.println(F("R3 COMM FAIL — check wiring on pins 10/11 and A0/A1"));
+    if (debugVerbose) Serial.println(F("R3 COMM FAIL — check wiring on pins 10/11 and A0/A1"));
     Serial1.println(F("R3 COMM FAIL — check wiring on pins 10/11 and A0/A1"));
     r3CommFail = true;
   }
@@ -178,10 +180,10 @@ void runR3CommTest() {
   if (!r3CommFail) {
     motorComm.println(F("MOTOR|S"));
     if (waitForR3Line("ACK:MOTOR|S", 2000, response)) {
-      Serial.println(F("ACK:MOTOR|S received"));
+    if (debugVerbose) Serial.println(F("ACK:MOTOR|S received"));
       Serial1.println(F("ACK:MOTOR|S received"));
     } else {
-      Serial.println(F("ACK:MOTOR|S timeout"));
+    if (debugVerbose) Serial.println(F("ACK:MOTOR|S timeout"));
       Serial1.println(F("ACK:MOTOR|S timeout"));
     }
 
@@ -355,14 +357,13 @@ bool autonomousMode = false;
 bool unhingedMode   = false;
 bool lightsAuto     = true;
 bool fanAuto        = true;
-bool debugVerbose   = DEBUG_VERBOSE;
 int  estopRetries   = 0;
 const int MAX_ESTOP = 3;
 unsigned long estopT = 0;   // [FIX] file-scope so manual CLEAR commands can reset it
 
 // R4 link tracking (E1 watchdog, B1 ping)
 unsigned long r4LastPingMs  = 0;   // millis() of last PING_R4 received
-uint8_t       r4PingSeq     = 0;   // last ping sequence echoed
+uint16_t       r4PingSeq     = 0;   // last ping sequence echoed
 bool          r4Linked      = false;
 
 // S9 connection tracking
@@ -533,8 +534,6 @@ void readAllSensors() {
     float h = dht.readHumidity();
     if (!isnan(t)) ambTemp  = t;
     if (!isnan(h)) humidity = h;
-    lc = (dLeft  > SIDE_MIN && dLeft  != -1);
-    rc = (dRight > SIDE_MIN && dRight != -1);
   }
 
   // ── Analog environmental sensors ────────────────────────────────
@@ -563,6 +562,8 @@ void readAllSensors() {
   } else {
     dFront = dLeft = dRight = dRear = -1;
   }
+  lc = (dLeft  > SIDE_MIN && dLeft  != -1);
+  rc = (dRight > SIDE_MIN && dRight != -1);
 
   // ── IR obstacle sensors ──────────────────────────────────────────
   irFront = sens.ir ? (digitalRead(FRONT_IR) == LOW) : false;
@@ -890,7 +891,7 @@ void handleS9Communication() {
 void processS9Command(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
-  Serial.print(F("[RECV] S9 Command: ")); Serial.println(cmd);
+  if (debugVerbose) { Serial.print(F("[RECV] S9 Command: ")); Serial.println(cmd); }
   s9LastHB    = millis();
   s9Connected = true;
 
@@ -902,7 +903,7 @@ void processS9Command(String cmd) {
   if (cmd == "MOTOR:S")     { sendMotor("STOP");     toS9("ACK|MOTOR:S|END"); return; }
   if (cmd == "MOTOR:DANCE") {
     mQueue.pending = false;
-    motorCommPrintln(F("MOTOR:DANCE"));
+    motorCommPrintln(F("MOTOR|DANCE"));
     toS9("ACK|DANCE|END");
     return;
   }
@@ -997,7 +998,7 @@ void processR4Command(String cmd) {
   // ── B1: PING_R4 handshake — reply with PONG_R4:<seq> ────────────
   if (cmd.startsWith("PING_R4:")) {
     r4LastPingMs = millis();
-    r4PingSeq    = (uint8_t)cmd.substring(8).toInt();
+    r4PingSeq    = (uint16_t)cmd.substring(8).toInt();
     Serial1.print(F("PONG_R4:"));
     Serial1.println(r4PingSeq);
     if (debugVerbose) { Serial.print(F("[R4] PING seq=")); Serial.println(r4PingSeq); }
@@ -1105,6 +1106,13 @@ void processESP32Command(String cmd) {
   if (debugVerbose) { Serial.print(F("[ESP32] RX: ")); Serial.println(cmd); }
 
   if (cmd == "READY") { esp32Ready = true; return; }
+
+  if (cmd.startsWith("WIFI_IP:")) {
+    Serial1.println(cmd);
+    toS9("ESP_IP:" + cmd.substring(8));
+    return;
+  }
+if (cmd.startsWith("ESP_FW:")) { return; }
 
   // ── Bluetooth gamepad commands: BTCMD|MOTOR|F etc. ───────────────
   if (cmd.startsWith("BTCMD|")) {
@@ -1718,8 +1726,6 @@ void loop() {
   if (autonomousMode && !emergencyStop && (now - lastNavDec > 200)) {
     lastNavDec = now;
     makeAutonomousDecision();
-    lookAndDecide();
-    handleStuck();
     handleRandomTurn();
   }
 

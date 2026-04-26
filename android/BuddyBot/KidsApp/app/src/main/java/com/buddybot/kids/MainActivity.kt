@@ -453,13 +453,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 parseUltrasonicData(msg)
             } else if (msg.startsWith("GESTURE:")) {
                 handleGesture(msg)
+            } else if (msg.startsWith("MODE:")) {
+                parseMode(msg.substring(5))?.let {
+                    _robotState.value = _robotState.value.copy(currentMode = it)
+                }
             } else if (msg.startsWith("REQ_MODE:")) {
-                val parts = msg.split(":")
-                if (parts.size >= 2) {
-                    val modeStr = parts[1]
-                    RobotMode.values().find { it.name == modeStr }?.let {
-                        _robotState.value = _robotState.value.copy(showPinEntry = true, requestedMode = it)
-                    }
+                parseMode(msg.substring(9))?.let {
+                    _robotState.value = _robotState.value.copy(showPinEntry = true, requestedMode = it)
                 }
             }
         } catch (e: Exception) {
@@ -879,10 +879,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                                     CommunicationMode.WEBSOCKET -> {
                                         val ip = _robotState.value.buddybotIP
                                         if (ip.isNotEmpty()) {
-                                            logComm("COMM", "Connecting WebSocket to $ip")
-                                            arduinoComms.initializeWebSocket(ip)
+                                            logComm("COMM", "Connecting HTTP to $ip")
+                                            arduinoComms.initializeHttp(ip)
                                         } else {
-                                            logComm("COMM", "No IP configured for WebSocket")
+                                            logComm("COMM", "No IP configured for HTTP")
                                         }
                                     }
                                     CommunicationMode.USB_SERIAL -> {
@@ -902,8 +902,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                             onTestWebSocket = {
                                 val ip = _robotState.value.buddybotIP
                                 if (ip.isNotEmpty()) {
-                                    logComm("TEST", "Testing WebSocket to $ip...")
-                                    arduinoComms.initializeWebSocket(ip)
+                                    logComm("TEST", "Testing HTTP to $ip...")
+                                    arduinoComms.initializeHttp(ip)
                                 } else {
                                     logComm("TEST", "No IP set - configure IP first")
                                 }
@@ -1133,6 +1133,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 isMlProcessing.set(false)
             }
         }
+    }
+
+    private fun parseMode(modeStr: String): RobotMode? {
+        val normalized = when (modeStr.trim().uppercase()) {
+            "GUARD DOG" -> "DOG"
+            else -> modeStr.trim().uppercase()
+        }
+        return RobotMode.values().find { it.name == normalized }
     }
 
     private fun setRobotMode(newMode: RobotMode) {
@@ -1843,10 +1851,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         if (trimmed.isEmpty()) return
         _robotState.value = _robotState.value.copy(buddybotIP = trimmed)
         getSharedPreferences("BuddyBot", MODE_PRIVATE).edit { putString("buddybotIP", trimmed) }
-        logComm("COMM", "IP saved: $trimmed — connecting WebSocket…")
+        logComm("COMM", "IP saved: $trimmed — connecting HTTP…")
         lifecycleScope.launch {
             delay(300)
-            arduinoComms.initializeWebSocket(trimmed)
+            arduinoComms.initializeHttp(trimmed)
         }
     }
 

@@ -44,15 +44,6 @@ class MainViewModel(
             msg.startsWith("STAT:") -> parseStat(msg.substring(5))
             msg.startsWith("DIAG|") -> parseDiag(msg.substring(5))
             msg.startsWith("ALERT:") -> handleAlert(msg.substring(6))
-            msg.startsWith("MODE:") -> {
-                val modeStr = msg.substring(5).trim()
-                try {
-                    val mode = RobotMode.valueOf(modeStr)
-                    _robotState.update { it.copy(currentMode = mode) }
-                } catch (e: Exception) {
-                    logComm("SYS", "Invalid mode from Mega: $modeStr")
-                }
-            }
             msg == "PONG" -> logComm("SYS", "Arduino Heartbeat: PONG")
             msg.startsWith("DIAG:") -> logComm("DIAG", msg.substring(5))
         }
