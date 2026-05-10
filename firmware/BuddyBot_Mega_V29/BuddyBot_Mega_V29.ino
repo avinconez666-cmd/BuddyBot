@@ -41,9 +41,9 @@
  *  ──────────────────────────────────────────────────
  *  Serial   (USB, pins 0/1)   115200  ↔ Samsung S9 Android app
  *  Serial1  (pins 18 TX/19 RX) 115200  ↔ UNO R4 WiFi (R4 Serial1: D1/D0)
- *  Serial2  (pins 17 TX/16 RX)   9600  ↔ GPS NEO-6M (TinyGPS++)
+ *  Serial2  (pins 16 RX/17 TX)   9600  ↔ UNO R3 Motor Shield A0(RX)/A1(TX)
  *  Serial3  (pins 14 TX/15 RX) 115200  ↔ ESP32 GPIO16(RX)/GPIO17(TX)
- *  SoftwareSerial(10 RX / 11 TX) 9600  ↔ UNO R3 Motor Shield A0(RX)/A1(TX)
+ *  SoftwareSerial(10 RX / 11 TX) 9600  ↔ GPS NEO-6M (TinyGPS++)
  *
  *  SENSOR TOGGLE IDs
  *  ──────────────────
@@ -100,8 +100,12 @@ const unsigned long RF_AUTO = 5400;
 //  PIN DEFINITIONS
 // ════════════════════════════════════════════════════════════════════
 
-// SoftwareSerial → UNO R3 Motor Shield
-SoftwareSerial motorComm(10, 11);  // RX=10 ← R3 A1(TX), TX=11 → R3 A0(RX)  ✅ FIXED PIN ORDER
+// Hardware Serial2 → UNO R3 Motor Shield (pins 16 RX / 17 TX)
+// Motor control promoted to hardware serial for reliability — GPS moved to SoftwareSerial.
+#define motorComm Serial2
+
+// SoftwareSerial → GPS NEO-6M (low baud, one-directional — ideal for SW serial)
+SoftwareSerial gpsSerial(10, 11);  // RX=10 ← GPS TX,  TX=11 → GPS RX (unused)
 
 void motorCommPrintln(const __FlashStringHelper *msg) {
   if (!r3CommFail) motorComm.println(msg);
@@ -1190,11 +1194,11 @@ void processMotorOrModeCmd(String cmd) {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  GPS  (Serial2 at 9600 baud — TinyGPS++)
+//  GPS  (SoftwareSerial pins 10/11 at 9600 baud — TinyGPS++)
 // ════════════════════════════════════════════════════════════════════
 void handleGPS() {
   if (!sens.gps) return;
-  while (Serial2.available()) gps.encode(Serial2.read());
+  while (gpsSerial.available()) gps.encode(gpsSerial.read());
   if (gps.location.isUpdated()) {
     gps_lat = gps.location.lat();
     gps_lon = gps.location.lng();
@@ -1545,7 +1549,8 @@ void setup() {
   delay(250);
 
   Serial1.begin(115200);
-  Serial2.begin(9600);
+  Serial2.begin(9600);          // UNO R3 Motor Shield — already called above, re-init is harmless
+  gpsSerial.begin(9600);        // GPS NEO-6M via SoftwareSerial
   Serial3.begin(115200);
 
   delay(400);
