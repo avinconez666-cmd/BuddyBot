@@ -52,10 +52,9 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <BluetoothSerial.h>
+#include "wifi_config.h"   // ⚠ gitignored — copy wifi_config.h.example and fill in credentials
 
-const char* WIFI_SSID = "OPTUS_8B4FC8N";
-const char* WIFI_PASS = "alter62635dx";
-const char* BT_NAME   = "BuddyBot";
+const char* BT_NAME = "BuddyBot";
 
 // UART2: RX=GPIO16, TX=GPIO17 (dedicated hardware serial, no USB conflict)
 #define MEGA_RX_PIN 1'/6

@@ -31,3 +31,7 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# BuddyBot secrets — never commit these
+secrets.properties
+wifi_config.h

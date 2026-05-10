@@ -60,7 +60,7 @@
 #include "paj7620.h"
 #include <util/atomic.h>
 bool r3CommFail = false;
-bool debugVerbose = true;
+bool debugVerbose = DEBUG_VERBOSE;   // ← controlled by #define below; override at runtime via DEBUG:ON/OFF
 // ===========================================
 // ════════════════════════════════════════════════════════════════════
 //  CONFIGURATION
@@ -380,6 +380,7 @@ unsigned long lastNavDec  = 0;
 unsigned long lastAvoid   = 0;
 unsigned long lastSenseTs = 0;   // freshness timestamp for collisionAvoidance()
 unsigned long lastEsp32Check = 0; // ESP32 handshake re-send timer
+unsigned long lastEsp32RxMs  = 0; // millis() of last byte received from ESP32
 unsigned long bootStartTime = 0;
 const unsigned long BOOT_LOCK_TIME = 5000;  // 5 seconds boot quiet period
 unsigned long uptimeSec   = 0;
@@ -1104,6 +1105,7 @@ void handleESP32Communication() {
 
 void processESP32Command(String cmd) {
   if (debugVerbose) { Serial.print(F("[ESP32] RX: ")); Serial.println(cmd); }
+  lastEsp32RxMs = millis();   // ← keep watchdog fed on every valid ESP32 message
 
   if (cmd == "READY") { esp32Ready = true; return; }
 
@@ -1409,7 +1411,10 @@ void collisionAvoidance() {
   if (!autonomousMode) { avoidState = AVOID_IDLE; nav.isAvoiding = false; return; }
   if (millis() - lastSenseTs > 600) return;  // stale data — don't react
 
-  if (sens.us && dFront > 0 && dFront < OBS_STOP && !nav.isAvoiding && avoidState == AVOID_IDLE) {
+  // Trigger avoidance from either ultrasonic OR front IR — unified entry point
+  bool usTrigger = (sens.us  && dFront > 0 && dFront < OBS_STOP);
+  bool irTrigger = (sens.ir  && irFront);
+  if ((usTrigger || irTrigger) && !nav.isAvoiding && avoidState == AVOID_IDLE) {
     nav.isAvoiding = true; nav.avoidStart = millis(); nav.avoidAttempts++;
     sendMotor("STOP");
     navTimer = millis() + 100;
@@ -1442,31 +1447,6 @@ void collisionAvoidance() {
     if (autonomousMode) { sendMotor("FORWARD"); nav.isMoving = true; }
     nav.isAvoiding = false;
     nav.lastAvoidEnd = millis();
-    avoidState = AVOID_IDLE;
-    return;
-  }
-
-  if (sens.ir && irFront && !nav.isAvoiding && avoidState == AVOID_IDLE) {
-    sendMotor("STOP");
-    navTimer = millis() + 100;
-    avoidState = AVOID_STOP;
-    return;
-  }
-  // Reuse AVOID_STOP for IR
-  if (avoidState == AVOID_STOP && millis() >= navTimer) {
-    sendMotor("BACKWARD");
-    navTimer = millis() + 500;
-    avoidState = AVOID_BACK;
-    return;
-  }
-  if (avoidState == AVOID_BACK && millis() >= navTimer) {
-    sendMotor("RIGHT");
-    navTimer = millis() + T45;
-    avoidState = AVOID_TURN;
-    return;
-  }
-  if (avoidState == AVOID_TURN && millis() >= navTimer) {
-    sendMotor("FORWARD");
     avoidState = AVOID_IDLE;
     return;
   }
@@ -1750,24 +1730,11 @@ void loop() {
     Serial3.println(F("MEGA:BOOT"));
   }
 
-  // [Phase 3C] ESP32 data-freshness watchdog: if esp32Ready but no data
-  // received from Serial3 in the last 10 seconds, reset and re-send MEGA:BOOT
-  static unsigned long lastEsp32RxMs = 0;
-  // Track last ESP32 RX time — updated in handleESP32Communication() via
-  // a simple flag set whenever processESP32Command() is called
-  // We approximate by checking if esp32Ready was set and then went stale
-  if (esp32Ready && (now - lastEsp32Check > 10000)) {
-    // If we haven't re-sent MEGA:BOOT in 10s and esp32Ready is true,
-    // verify link is still alive by checking if telemetry is flowing.
-    // Since we send telemetry every 1s and ESP32 echoes READY on MEGA:BOOT,
-    // if esp32Ready is true but we haven't heard anything, reset it.
-    static unsigned long esp32WatchdogMs = 0;
-    if (esp32WatchdogMs == 0) esp32WatchdogMs = now;
-    if (now - esp32WatchdogMs > 10000) {
-      esp32WatchdogMs = now;
-      // Re-send MEGA:BOOT to force ESP32 to re-announce
-      Serial3.println(F("MEGA:BOOT"));
-      if (debugVerbose) Serial.println(F("[ESP32] WATCHDOG: re-sending MEGA:BOOT"));
-    }
+  // [Phase 3C] ESP32 data-freshness watchdog — fires if esp32Ready but Serial3
+  // has been silent for >10 s.  lastEsp32RxMs is updated by processESP32Command().
+  if (esp32Ready && (millis() - lastEsp32RxMs > 10000)) {
+    esp32Ready = false;                              // force re-handshake
+    Serial3.println(F("MEGA:BOOT"));
+    if (debugVerbose) Serial.println(F("[ESP32] WATCHDOG: link stale — re-sending MEGA:BOOT"));
   }
 }

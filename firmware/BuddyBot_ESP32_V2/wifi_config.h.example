@@ -1,0 +1,6 @@
+/*
+ * wifi_config.h.example — commit this; copy to wifi_config.h and fill in real values
+ */
+#pragma once
+#define WIFI_SSID  "YOUR_WIFI_SSID"
+#define WIFI_PASS  "YOUR_WIFI_PASSWORD"

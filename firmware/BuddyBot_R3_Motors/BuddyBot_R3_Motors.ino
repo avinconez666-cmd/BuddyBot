@@ -80,6 +80,7 @@ SoftwareSerial megaSerial(A0, A1);
 // ── State
 uint8_t  currentSpeed  = 200;
 bool     motorsRunning = false;
+uint8_t  currentDirection = M_FORWARD;  // tracks last dir so setSpeed() doesn't override it
 String   cmdBuf        = "";
 
 // Enums for pattern states
@@ -168,6 +169,7 @@ void stopAll() {
 }
 
 void moveForward() {
+  currentDirection = M_FORWARD;
   motor(1, M_FORWARD, currentSpeed);
   motor(2, M_FORWARD, currentSpeed);
   motor(3, M_FORWARD, currentSpeed);
@@ -176,6 +178,7 @@ void moveForward() {
 }
 
 void moveBackward() {
+  currentDirection = M_BACKWARD;
   motor(1, M_BACKWARD, currentSpeed);
   motor(2, M_BACKWARD, currentSpeed);
   motor(3, M_BACKWARD, currentSpeed);
@@ -203,12 +206,12 @@ void spinRight() {
 
 void setSpeed(uint8_t spd) {
   currentSpeed = spd;
-  // If motors are already moving, update speed live
+  // Update speed live without overriding current direction
   if (motorsRunning) {
-    motor(1, M_FORWARD, currentSpeed);
-    motor(2, M_FORWARD, currentSpeed);
-    motor(3, M_FORWARD, currentSpeed);
-    motor(4, M_FORWARD, currentSpeed);
+    motor(1, currentDirection, currentSpeed);
+    motor(2, currentDirection, currentSpeed);
+    motor(3, currentDirection, currentSpeed);
+    motor(4, currentDirection, currentSpeed);
   }
 }
 
