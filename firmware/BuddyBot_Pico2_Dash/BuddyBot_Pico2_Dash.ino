@@ -1003,9 +1003,6 @@ void setup() {
   Wire.setClock(400000);   // 400 kHz fast-mode
 
   // ── TFT display (SPI0 via TFT_eSPI) ──────────────────────────────
-  // RP2040: must start SPI with explicit pins before tft.init()
-  SPI.begin();
-
   // Manual hardware reset pulse — ensures display is out of reset
   // before TFT_eSPI sends the init sequence
   pinMode(PIN_RST, OUTPUT);
