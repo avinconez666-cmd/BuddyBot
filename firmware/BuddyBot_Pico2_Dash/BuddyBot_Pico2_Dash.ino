@@ -48,6 +48,7 @@
 
 #include <TFT_eSPI.h>
 #include <Wire.h>
+#include <SPI.h>
 
 // ════════════════════════════════════════════════════════════════════
 //  COLOUR PALETTE  (BuddyBot Orbital HMI theme — RGB565)
@@ -88,6 +89,7 @@ TFT_eSPI tft = TFT_eSPI();
 
 // ── Pins ──────────────────────────────────────────────────────────
 #define PIN_BL      22   // backlight (HIGH = on)
+#define PIN_RST     20   // display hardware reset (mirrors TFT_RST in User_Setup.h)
 #define PIN_CTP_SDA 26
 #define PIN_CTP_SCL 27
 #define PIN_CTP_INT 28
@@ -1001,9 +1003,25 @@ void setup() {
   Wire.setClock(400000);   // 400 kHz fast-mode
 
   // ── TFT display (SPI0 via TFT_eSPI) ──────────────────────────────
+  // RP2040: must start SPI with explicit pins before tft.init()
+  SPI.begin();
+
+  // Manual hardware reset pulse — ensures display is out of reset
+  // before TFT_eSPI sends the init sequence
+  pinMode(PIN_RST, OUTPUT);
+  digitalWrite(PIN_RST, HIGH); delay(10);
+  digitalWrite(PIN_RST, LOW);  delay(50);
+  digitalWrite(PIN_RST, HIGH); delay(150);
+
   tft.init();
   tft.setRotation(1);      // landscape: 480 x 320
+
+  // Diagnostic: flash red then green to confirm init worked
+  // If you see these colours the display is alive — replace with C_BG after confirmed
+  tft.fillScreen(TFT_RED);   delay(300);
+  tft.fillScreen(TFT_GREEN); delay(300);
   tft.fillScreen(C_BG);
+
   tft.setTextDatum(TL_DATUM);
 
   // ── Mega UART (UART0: GP0=TX, GP1=RX) ────────────────────────────
