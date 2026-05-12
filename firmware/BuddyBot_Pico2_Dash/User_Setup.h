@@ -41,6 +41,9 @@
 #define LOAD_GFXFF
 #define SMOOTH_FONT
 
+// Suppress TFT_eSPI resistive touch warning — we use FT6336U via I2C, not SPI touch
+#define TOUCH_CS -1
+
 // ── SPI speed ─────────────────────────────────────────────────────────
 // 40MHz is the ST7796S rated maximum. Drop to 27MHz if you see artefacts.
 #define SPI_FREQUENCY        40000000

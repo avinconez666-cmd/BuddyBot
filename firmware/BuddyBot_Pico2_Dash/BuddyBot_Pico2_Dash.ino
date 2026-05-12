@@ -579,7 +579,7 @@ void drawGamesMenu(Touch& t) {
 // ════════════════════════════════════════════════════════════════════
 //  GAME HELPERS — feedback flash + next round
 // ════════════════════════════════════════════════════════════════════
-void gameCorrect(Screen s, int newMax) {
+void gameCorrect(uint8_t s, int newMax) {
   gScore++;
   tft.fillRect(0, CNT_Y + 34, SCR_W, CNT_H - 34, C_MINT);
   tft.setTextColor(C_BLACK, C_MINT); tft.setTextSize(4);
@@ -640,7 +640,7 @@ void drawGameColor(Touch& t) {
     tft.drawRoundRect(bx, by, bw, bh, 10, C_WHITE);
     if (hit(t, bx, by, bw, bh)) {
       t.pressed = false;
-      (i == gTarget) ? gameCorrect(SCR_GAME_COLOR, 4) : gameWrong();
+      (i == gTarget) ? gameCorrect((uint8_t)SCR_GAME_COLOR, 4) : gameWrong();
       screenDirty = true; return;
     }
   }
@@ -686,7 +686,7 @@ void drawGameShape(Touch& t) {
     drawShapeIcon(bx + bw / 2, by + bh / 2, bh / 3 - 4, i, C_CYAN);
     if (hit(t, bx, by, bw, bh)) {
       t.pressed = false;
-      (i == gTarget) ? gameCorrect(SCR_GAME_SHAPE, 3) : gameWrong();
+      (i == gTarget) ? gameCorrect((uint8_t)SCR_GAME_SHAPE, 3) : gameWrong();
       screenDirty = true; return;
     }
   }
@@ -733,7 +733,7 @@ void drawGameCount(Touch& t) {
     tft.setCursor(bx + (bw - tw) / 2, by + (bh - 32) / 2); tft.print(nb);
     if (hit(t, bx, by, bw, bh)) {
       t.pressed = false;
-      (i + 1 == gTarget) ? gameCorrect(SCR_GAME_COUNT, 5) : gameWrong();
+      (i + 1 == gTarget) ? gameCorrect((uint8_t)SCR_GAME_COUNT, 5) : gameWrong();
       screenDirty = true; return;
     }
   }
