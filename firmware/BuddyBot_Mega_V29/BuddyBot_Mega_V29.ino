@@ -59,14 +59,15 @@
 #include <RCSwitch.h>
 #include "paj7620.h"
 #include <util/atomic.h>
-bool r3CommFail = false;
-bool debugVerbose = DEBUG_VERBOSE;   // ← controlled by #define below; override at runtime via DEBUG:ON/OFF
-// ===========================================
+
 // ════════════════════════════════════════════════════════════════════
 //  CONFIGURATION
 // ════════════════════════════════════════════════════════════════════
 #define DEBUG_VERBOSE   false
 #define FW_VERSION      "V30.0"
+
+bool r3CommFail   = false;
+bool debugVerbose = DEBUG_VERBOSE;   // override at runtime via DEBUG:ON/OFF
 
 const String PRIORITY_USER = "AJ";
 
