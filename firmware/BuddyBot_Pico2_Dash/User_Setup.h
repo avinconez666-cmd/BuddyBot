@@ -12,8 +12,8 @@
 
 #define USER_SETUP_LOADED    1
 
-// RP2040: use PIO-based SPI — works on any GPIO pins, more reliable than hardware SPI
-#define RP2040_PIO_SPI
+// RP2040: use hardware SPI0 — pins GP16/18/19 map to SPI0 peripheral
+#define TFT_SPI_PORT 0
 
 // ── Driver ───────────────────────────────────────────────────────────
 #define ST7796_DRIVER
@@ -50,4 +50,4 @@
 // ── SPI speed ─────────────────────────────────────────────────────────
 // 40MHz is the ST7796S rated maximum. Drop to 27MHz if you see artefacts.
 #define SPI_FREQUENCY        20000000  // Reduced from 40MHz — increase once display confirmed working
-//#define SPI_READ_FREQUENCY   20000000  // Not used in RP2040_PIO_SPI mode
+#define SPI_READ_FREQUENCY   10000000
