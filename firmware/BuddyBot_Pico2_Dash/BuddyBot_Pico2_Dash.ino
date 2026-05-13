@@ -797,28 +797,35 @@ void setup(){
   delay(500);
   displayInit();
 
-  // Diagnostic flash — proves display is alive
-  fillScreen(C_RED);   delay(200);
-  fillScreen(C_GREEN); delay(200);
-  fillScreen(C_BG);
+  // Diagnostic flash — colour at each setup step so we can see where it crashes
+  fillScreen(C_RED);   delay(300);   // Step 1 - display OK
+  fillScreen(C_GREEN); delay(300);   // Step 2 - display OK
 
-  // Touch
+  fillScreen(C_AMBER);               // STEP 3: Touch RST
   pinMode(PIN_CTP_RST,OUTPUT);
   digitalWrite(PIN_CTP_RST,LOW);delay(20);
   digitalWrite(PIN_CTP_RST,HIGH);delay(100);
   pinMode(PIN_CTP_INT,INPUT);
+  delay(200);
+
+  fillScreen(C_CYAN);                // STEP 4: Wire init
   Wire.setSDA(PIN_CTP_SDA);
   Wire.setSCL(PIN_CTP_SCL);
   Wire.begin();
   Wire.setClock(400000);
+  delay(200);
 
-  // Mega link
+  fillScreen(C_PURP);                // STEP 5: Serial1 init
   Serial1.setTX(0);Serial1.setRX(1);
   MEGA_SERIAL.begin(115200);
   delay(200);
+
+  fillScreen(C_MINT);                // STEP 6: all setup done
+  delay(400);
+  fillScreen(C_BG);                  // Normal background — entering loop
+
   MEGA_SERIAL.println("PONG");
   MEGA_SERIAL.println("PING_R4:0");
-
   randomSeed(analogRead(A0));
   scrDirty=true;
 }
