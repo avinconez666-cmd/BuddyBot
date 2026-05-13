@@ -981,6 +981,10 @@ void handleMegaSerial() {
 //  SETUP
 // ════════════════════════════════════════════════════════════════════
 void setup() {
+  // Allow USB stack to enumerate before doing anything else.
+  // Without this, Windows shows "device malfunctioned" if setup() crashes early.
+  delay(1500);
+
   // ── Backlight on immediately so the screen isn't dark during init ──
   pinMode(PIN_BL, OUTPUT);
   digitalWrite(PIN_BL, HIGH);
