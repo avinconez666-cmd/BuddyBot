@@ -809,10 +809,10 @@ void setup(){
   delay(200);
 
   fillScreen(C_CYAN);                // STEP 4: Wire init
-  // Earle Philhower: pass pins directly to Wire.begin()
-  Wire.begin(PIN_CTP_SDA, PIN_CTP_SCL);
-  Wire.setClock(400000);
-  delay(200);
+  Wire.setSDA(PIN_CTP_SDA);
+  Wire.setSCL(PIN_CTP_SCL);
+  Wire.begin();
+  delay(200);                         // No Wire.setClock — default 100kHz is safe
 
   fillScreen(C_PURP);                // STEP 5: Serial1 init
   Serial1.setTX(0);Serial1.setRX(1);
