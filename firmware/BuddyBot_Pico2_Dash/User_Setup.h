@@ -15,6 +15,9 @@
 // RP2040: use hardware SPI0 — pins GP16/18/19 map to SPI0 peripheral
 #define TFT_SPI_PORT 0
 
+// Force TFT_eSPI to use the Arduino SPI library (same as working test sketch)
+#define USE_ARDUINO_SPI_LIBRARY
+
 // ── Driver ───────────────────────────────────────────────────────────
 #define ST7796_DRIVER
 
