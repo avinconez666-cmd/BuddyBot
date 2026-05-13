@@ -360,15 +360,15 @@ void drawButton(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t bg,uint16_t bor
 
 Touch readTouch() {
   Touch t={0,0,false};
-  Wire.beginTransmission(CTP_ADDR);
-  Wire.write(0x02);
-  if(Wire.endTransmission(false)!=0) return t;
-  Wire.requestFrom(CTP_ADDR,6);
-  if(Wire.available()<6) return t;
-  uint8_t n=Wire.read()&0x0F;
-  uint8_t xH=Wire.read(),xL=Wire.read();
-  uint8_t yH=Wire.read(),yL=Wire.read();
-  Wire.read();
+  Wire1.beginTransmission(CTP_ADDR);
+  Wire1.write(0x02);
+  if(Wire1.endTransmission(false)!=0) return t;
+  Wire1.requestFrom(CTP_ADDR,6);
+  if(Wire1.available()<6) return t;
+  uint8_t n=Wire1.read()&0x0F;
+  uint8_t xH=Wire1.read(),xL=Wire1.read();
+  uint8_t yH=Wire1.read(),yL=Wire1.read();
+  Wire1.read();
   if(n==0||n>2) return t;
   int16_t rx=((xH&0x0F)<<8)|xL;
   int16_t ry=((yH&0x0F)<<8)|yL;
@@ -808,11 +808,12 @@ void setup(){
   pinMode(PIN_CTP_INT,INPUT);
   delay(200);
 
-  fillScreen(C_CYAN);                // STEP 4: Wire init
-  Wire.setSDA(PIN_CTP_SDA);
-  Wire.setSCL(PIN_CTP_SCL);
-  Wire.begin();
-  delay(200);                         // No Wire.setClock — default 100kHz is safe
+  fillScreen(C_CYAN);                // STEP 4: Wire1 init (GP26/27 are I2C1 pins)
+  Wire1.setSDA(PIN_CTP_SDA);
+  Wire1.setSCL(PIN_CTP_SCL);
+  Wire1.begin();
+  Wire1.setClock(400000);
+  delay(200);
 
   fillScreen(C_PURP);                // STEP 5: Serial1 init
   Serial1.setTX(0);Serial1.setRX(1);
