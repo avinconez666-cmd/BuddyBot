@@ -14,6 +14,21 @@
 #include <SPI.h>
 #include <Wire.h>
 
+// Forward declarations — required because Arduino IDE auto-prototype
+// generation fails on user-defined struct types in function signatures
+struct Touch { int16_t x, y; bool pressed; };
+Touch readTouch();
+bool  hit(const Touch& t, int16_t x, int16_t y, int16_t w, int16_t h);
+bool  drawBackBtn(Touch& t);
+void  drawMain(Touch& t);
+void  drawRadar(Touch& t);
+void  drawGamesMenu(Touch& t);
+void  drawGameColor(Touch& t);
+void  drawGameShape(Touch& t);
+void  drawGameCount(Touch& t);
+void  drawInfo(Touch& t);
+void  drawAlert(Touch& t);
+
 // ── Pin map ───────────────────────────────────────────────────────
 #define PIN_BL       22
 #define PIN_CS       17
@@ -341,7 +356,7 @@ void drawButton(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t bg,uint16_t bor
 //  TOUCH (FT6336U I2C — identical to original)
 // ════════════════════════════════════════════════════════════════════
 #define CTP_ADDR 0x38
-struct Touch { int16_t x,y; bool pressed; };
+// Touch struct declared above as forward declaration;
 
 Touch readTouch() {
   Touch t={0,0,false};
