@@ -809,9 +809,8 @@ void setup(){
   delay(200);
 
   fillScreen(C_CYAN);                // STEP 4: Wire init
-  Wire.setSDA(PIN_CTP_SDA);
-  Wire.setSCL(PIN_CTP_SCL);
-  Wire.begin();
+  // Earle Philhower: pass pins directly to Wire.begin()
+  Wire.begin(PIN_CTP_SDA, PIN_CTP_SCL);
   Wire.setClock(400000);
   delay(200);
 
