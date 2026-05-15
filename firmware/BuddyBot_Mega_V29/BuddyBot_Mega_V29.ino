@@ -198,12 +198,12 @@ void runR3CommTest() {
 }
 
 // Analog sensors
-#define VOLTAGE_SENSOR  A14   // Battery voltage divider
-#define TEMP_SENSOR_1   A6    // Thermistor 1 (battery temp)
-#define BOOST_VOLT_SENSOR A9  // Boost converter output — voltage divider input
+#define VOLTAGE_SENSOR  A6   // Battery voltage divider
+#define TEMP_SENSOR_1   A7   // Thermistor 1 (battery temp) — NTC on voltage divider to GND
+#define BOOST_VOLT_SENSOR -1   // Boost converter output — voltage divider input
 #define FLAME_AO        A3    // Flame sensor analog output
-#define LDR_AO          A2    // Light-dependent resistor
-#define SOUND_AO        A1    // Sound sensor analog
+#define LDR_AO          A4    // Light-dependent resistor
+#define SOUND_AO        A5    // Sound sensor analog
 #define GAS_AO          A12    // Gas/MQ analog
 
 // I2C interrupt
