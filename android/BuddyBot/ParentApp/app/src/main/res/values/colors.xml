@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_deep">#020810</color>
+    <color name="surface">#060F1E</color>
+    <color name="card">#0A1628</color>
+    <color name="border">#0D2545</color>
+    <color name="cyan">#00D4FF</color>
+    <color name="mint">#00FF9D</color>
+    <color name="amber">#FFB800</color>
+    <color name="coral">#FF3355</color>
+    <color name="purple">#7C3AED</color>
+    <color name="white_soft">#C8E0FF</color>
+    <color name="gray_light">#5A7A9A</color>
+    <color name="gray_dark">#2A4060</color>
+</resources>
