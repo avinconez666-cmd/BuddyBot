@@ -833,6 +833,8 @@ void handleMegaLine(String& line){
   else if(line.startsWith("STATUS|")||line.startsWith("MEGA_READY|")||line.startsWith("SYSTEM|READY|")) parseStatus(line);
   else if(line.startsWith("MODE:"))      T.mode=line.substring(5);
   else if(line=="PING")                  MEGA_SERIAL.println("PONG");
+  else if(line.startsWith("CONN_STATUS|"))  parseStatus(line);   // boot status from Mega
+  else if(line.startsWith("SENS_ST|"))      parseSensStatus(line);
   else if(line.startsWith("BAT:WARN"))   raisAlert("Battery Low","Charge soon",C_AMBER);
   else if(line.startsWith("BAT:LOW"))    raisAlert("Battery Critical","Plug in NOW",C_CORAL);
   else if(line.startsWith("SAFETY:FLAME"))raisAlert("FLAME DETECTED","Check area",C_CORAL);
