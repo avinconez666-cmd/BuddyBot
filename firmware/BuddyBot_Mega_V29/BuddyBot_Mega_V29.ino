@@ -7,16 +7,16 @@
  *
  *  CHANGES FROM V28
  *  ─────────────────
- *  [FIX]  STAT: packet field order corrected to match R4 V24 parser
+ *  [FIX]  STAT: packet field order corrected to match Pico V3 parser
  *         exactly: gas:temp:hum:haz:pir:tilt:flame:ir:volt:pct:amps
- *         V28 had GPS fields at wrong indices causing R4 display errors.
- *  [FIX]  sendTelemetryToR4() now sends STAT + US + PWR + STATUS| in
- *         one function so R4 HUD always has a complete picture.
+ *         V28 had GPS fields at wrong indices causing Pico display errors.
+ *  [FIX]  sendTelemetryToPico() now sends STAT + US + PWR + STATUS| in
+ *         one function so Pico HUD always has a complete picture.
  *  [FIX]  applyToggle() now normalises "CURRENT" → sens.current
  *         (V28 missed this — it was present in V2 only).
  *  [NEW]  Serial channel map clarified and locked:
  *           Serial  (USB)     ↔ Samsung S9
- *           Serial1 (18/19)   ↔ UNO R4 WiFi (D0/D1)
+ *           Serial1 (18/19)   ↔ Raspberry Pi Pico (GP0/GP1)
  *           Serial2 (16/17)   ↔ GPS NEO-6M (9600 baud)
  *           Serial3 (14/15)   ↔ ESP32
  *           SoftwareSerial(10/11) ↔ UNO R3 Motor Shield
@@ -25,10 +25,10 @@
  *           - WEBCMD|MOTOR|<dir> and WEBCMD|MODE|<code> handled
  *           - WEBCMD|SAFETY|CLR handled
  *           - sendTelemetryToESP32() sends JSON-friendly TELEM: string
- *  [NEW]  SENS_ST| broadcast pushed to R4 on every sensor toggle and
- *         on startup — R4 V24 sensor config screen stays in sync.
+ *  [NEW]  SENS_ST| broadcast pushed to Pico on every sensor toggle and
+ *         on startup — Pico V3 sensor config screen stays in sync.
  *  [NEW]  BAT:WARN / BAT:LOW / BAT:CRITICAL pushed to ESP32 (Serial3)
- *         as well as R4 (Serial1) for web dashboard colour updates.
+ *         as well as Pico (Serial1) for web dashboard colour updates.
  *  [NEW]  MODE: echo sent to ESP32 on every mode change.
  *  [KEPT] All V28 features preserved:
  *           Non-blocking motor queue, ESTOP auto-recovery (3x retry),
@@ -40,7 +40,7 @@
  *  SERIAL CHANNEL MAP (authoritative — do not change)
  *  ──────────────────────────────────────────────────
  *  Serial   (USB, pins 0/1)   115200  ↔ Samsung S9 Android app
- *  Serial1  (pins 18 TX/19 RX) 115200  ↔ UNO R4 WiFi (R4 Serial1: D1/D0)
+ *  Serial1  (pins 18 TX/19 RX) 115200  ↔ Raspberry Pi Pico (GP0=RX/GP1=TX)
  *  Serial2  (pins 16 RX/17 TX)   9600  ↔ UNO R3 Motor Shield A0(RX)/A1(TX)
  *  Serial3  (pins 14 TX/15 RX) 115200  ↔ ESP32 GPIO16(RX)/GPIO17(TX)
  *  SoftwareSerial(10 RX / 11 TX) 9600  ↔ GPS NEO-6M (TinyGPS++)
@@ -199,7 +199,7 @@ void runR3CommTest() {
 
 // Analog sensors
 #define VOLTAGE_SENSOR  A14   // Battery voltage divider
-#define TEMP_SENSOR_1   A0    // Thermistor 1 (battery temp)
+#define TEMP_SENSOR_1   A6    // Thermistor 1 (battery temp)
 #define BOOST_VOLT_SENSOR A9  // Boost converter output — voltage divider input
 #define FLAME_AO        A3    // Flame sensor analog output
 #define LDR_AO          A2    // Light-dependent resistor
@@ -219,29 +219,29 @@ void runR3CommTest() {
 #define MOMENTARY_BTN    A11    // Push button — toggle auto mode
 #define FLAME_DO         7    // Flame sensor digital output (LOW = flame)
 #define LDR_DO           5    // LDR threshold output
-#define UNHINGED_SW     12    // Physical switch — unhinged mode
-#define TILT_SENSOR     23    // Tilt/vibration sensor (HIGH = tilt)
+#define UNHINGED_SW     A1    // Physical switch — unhinged mode
+#define TILT_SENSOR     45    // Tilt/vibration sensor (HIGH = tilt)
 #define PIR_PIN         -1    // PIR motion sensor (HIGH = motion)
 #define DHT_PIN         38    // DHT11 data
 #define GAS_DO          32    // Gas sensor digital output (HIGH = gas)
 #define RF_PIN          36    // 433MHz RF receiver
-#define CURRENT_SENSOR  30    // Current sensor pulse input (interrupt)
+#define CURRENT_SENSOR  27    // Current sensor pulse input (interrupt)
 
 // IR obstacle sensors (LOW = obstacle detected)
-#define REAR_IR   22
-#define FRONT_IR  26
+#define REAR_IR   31
+#define FRONT_IR  22    //done
 #define LEFT_IR   -1
 #define RIGHT_IR  -1
 
 // Ultrasonic sensors (4x HC-SR04)
-#define FRONT_TRIG  29
-#define FRONT_ECHO  28
+#define FRONT_TRIG  43
+#define FRONT_ECHO  49
 #define LEFT_TRIG   42
-#define LEFT_ECHO   44
-#define RIGHT_TRIG  48
-#define RIGHT_ECHO  50
-#define REAR_TRIG   3
-#define REAR_ECHO   2
+#define LEFT_ECHO   44  // done
+#define RIGHT_TRIG  40
+#define RIGHT_ECHO  42
+#define REAR_TRIG   53
+#define REAR_ECHO   47
 
 // ════════════════════════════════════════════════════════════════════
 //  OBJECTS
@@ -270,7 +270,7 @@ struct SensorFlags {
 
 } sens;
 
-// Returns the SENS_ST| string that R4 V24 expects
+// Returns the SENS_ST| string that Pico V3 expects
 // Format: SENS_ST|DHT:1|LIGHT:1|...|CUR:1|GPS:1|END
 String sensorStatusString() {
   String s = F("SENS_ST|");
@@ -289,7 +289,7 @@ String sensorStatusString() {
 }
 
 // Parse and apply a TOGGLE_SENSOR:<ID>:<ON|OFF> command
-// Accepts commands from S9, R4 (TOGGLE_SENSOR format), or ESP32
+// Accepts commands from S9, Pico (TOGGLE_SENSOR format), or ESP32
 void applyToggle(const String& cmd) {
   int c1 = cmd.indexOf(':');
   int c2 = cmd.indexOf(':', c1 + 1);
@@ -317,7 +317,7 @@ void applyToggle(const String& cmd) {
   toS9("ACK|" + cmd + "|END");
   String st = sensorStatusString();
   toS9(st);
-  Serial1.println(st);   // R4 sensor config screen
+  Serial1.println(st);   // Pico sensor config screen
   Serial3.println(st);   // ESP32 web dashboard
 }
 
@@ -366,10 +366,10 @@ int  estopRetries   = 0;
 const int MAX_ESTOP = 3;
 unsigned long estopT = 0;   // [FIX] file-scope so manual CLEAR commands can reset it
 
-// R4 link tracking (E1 watchdog, B1 ping)
-unsigned long r4LastPingMs  = 0;   // millis() of last PING_R4 received
-uint16_t       r4PingSeq     = 0;   // last ping sequence echoed
-bool          r4Linked      = false;
+// Pico link tracking (E1 watchdog, B1 ping)
+unsigned long picoLastPingMs = 0;   // millis() of last PING_R4 received from Pico
+uint16_t      picoPingSeq    = 0;   // last Pico ping sequence echoed
+bool          picoLinked    = false;
 
 // S9 connection tracking
 bool          s9Connected = false;
@@ -406,8 +406,8 @@ String lastFace = "";
 String        esp32Buf   = "";
 bool          esp32Ready = false;
 
-// R4 dashboard
-String        r4Buf      = "";
+// Pico dashboard
+String        picoBuf    = "";
 
 // R3 motor shield responses
 String        r3Buf      = "";
@@ -469,8 +469,8 @@ uint8_t calcCRC(const String& s) {
   for (uint16_t i = 0; i < s.length(); i++) c ^= (uint8_t)s[i];
   return c;
 }
-// Send to R4 with checksum suffix — R4 strips and validates before parsing
-void toR4(const String& msg) {
+// Send to Pico with checksum suffix — Pico strips and validates before parsing
+void toPico(const String& msg) {
   char hex[3];
   sprintf(hex, "%02X", calcCRC(msg));
   Serial1.print(msg);
@@ -608,15 +608,15 @@ void updatePower() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  TELEMETRY — R4 (Serial1)
+//  TELEMETRY — Pico (Serial1)
 //
-//  STAT packet field order MUST match R4 V24 parser indices:
+//  STAT packet field order MUST match Pico V3 parser indices:
 //  idx: 0=gas  1=temp  2=hum  3=haz  4=pir  5=tilt  6=flame  7=ir
 //       8=volt  9=pct  10=amps
 //  [FIX] V28 had GPS at wrong indices. Removed from STAT — GPS is in
 //  STATUS| string instead, which Android also parses.
 // ════════════════════════════════════════════════════════════════════
-void sendTelemetryToR4() {
+void sendTelemetryToPico() {
   // ── STAT: ─────────────────────────────────────────────────────────
   int haz = (emergencyStop || flameDetected || tiltDetected) ? 1 : 0;
 
@@ -644,7 +644,7 @@ void sendTelemetryToR4() {
   Serial1.println(u);
   toS9(u);
 
-  // ── PWR: (R4 parser: idx 0=volt 1=amps 4=pct) ────────────────────
+  // ── PWR: (Pico parser: idx 0=volt 1=amps 4=pct) ───────────────────
   String p = F("PWR:");
   p += String(battVolt, 2); p += ':';
   p += String(currentAmps, 2); p += ':';
@@ -698,7 +698,7 @@ void sendTelemetryToESP32() {
   Serial3.println(t);
 
   // Also push a compact STAT string so ESP32 web dashboard can parse it
-  // (same format as R4 STAT: above)
+  // (same format as Pico STAT: above)
   int haz = (emergencyStop || flameDetected || tiltDetected) ? 1 : 0;
   String s = F("STAT:");
   s += String(gasLevel);          s += ':';
@@ -725,7 +725,7 @@ void sendTelemetryToESP32() {
 
 // ════════════════════════════════════════════════════════════════════
 //  TIERED BATTERY WARNINGS
-//  Sends BAT:WARN / BAT:LOW / BAT:CRITICAL to R4 AND ESP32
+//  Sends BAT:WARN / BAT:LOW / BAT:CRITICAL to Pico AND ESP32
 //  on tier-change events only — no spamming.
 // ════════════════════════════════════════════════════════════════════
 void checkBatteryTiers() {
@@ -795,7 +795,7 @@ void checkSafety() {
   static bool lastFlameState = false;
   if (flameDetected && !lastFlameState && sens.flame) {
     toS9("EVENT:HAZARD");
-    Serial1.println(F("SAFETY:FLAME_ALERT"));   // R4 overlay
+    Serial1.println(F("SAFETY:FLAME_ALERT"));   // Pico overlay
     Serial3.println(F("ALERT:FLAME_DETECTED"));  // ESP32 dashboard
     flameBeepCount = 2;
     flameBeepTimer = millis();
@@ -874,7 +874,7 @@ void sendStatusToS9() {
 
 void handleS9Communication() {
   // [FIX] Byte-budget: process max 32 bytes per call so no single channel
-  // can starve handleESP32Communication() / handleR4Communication().
+  // can starve handleESP32Communication() / handlePicoComm().
   // Root cause of S9/ESP32 conflict: unbounded while loop consumed entire
   // loop() iteration when S9 app wrote frequently (sensor events ~60ms).
   int bytesRead = 0;
@@ -943,11 +943,11 @@ void processS9Command(String cmd) {
     return;
   }
 
-  // ── Mode forwarding (S9 → R4 + ESP32) ───────────────────────────
+  // ── Mode forwarding (S9 → Pico + ESP32) ────────────────────────
   if (cmd.startsWith("MODE:")) {
     String mode = cmd.substring(5);
     toS9("ACK|MODE:" + mode + "|END");
-    Serial1.print(F("MODE:")); Serial1.println(mode);   // → R4
+    Serial1.print(F("MODE:")); Serial1.println(mode);   // → Pico
     Serial3.print(F("MODE:")); Serial3.println(mode);   // → ESP32
     return;
   }
@@ -961,7 +961,7 @@ void processS9Command(String cmd) {
   if (cmd == "LIGHTS:OFF")  { digitalWrite(LEFT_HEADLIGHT, LOW);  digitalWrite(RIGHT_HEADLIGHT, LOW);  lightsAuto=false; return; }
   if (cmd == "LIGHTS:AUTO") { lightsAuto = true; return; }
 
-  // ── Face / object detection passthrough to R4 ────────────────────
+  // ── Face / object detection passthrough to Pico ───────────────────
   if (cmd.startsWith("FACE:")) { lastFace = cmd.substring(5); return; }
   if (cmd.startsWith("OBJ:"))  { Serial1.println(cmd); return; }
   if (cmd.startsWith("SENS|")) { Serial1.println(cmd); return; }
@@ -991,58 +991,58 @@ void processS9Command(String cmd) {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  R4 DASHBOARD COMMUNICATION  (Serial1 receive — Mega was write-only before V29)
+//  PICO DASHBOARD COMMUNICATION  (Serial1 — bidirectional)
 //  Accepts:
-//    MODE:<name>              — mode selected on R4 touchscreen
-//    TOGGLE_SENSOR:<ID>:<ON|OFF> — sensor toggle from R4 sensor config screen
+//    MODE:<name>              — mode selected on Pico touchscreen
+//    TOGGLE_SENSOR:<ID>:<ON|OFF> — sensor toggle from Pico sensor config screen
 // ════════════════════════════════════════════════════════════════════
-void processR4Command(String cmd) {
-  if (debugVerbose) { Serial.print(F("[R4] RX: ")); Serial.println(cmd); }
+void processPicoCommand(String cmd) {
+  if (debugVerbose) { Serial.print(F("[PICO] RX: ")); Serial.println(cmd); }
 
-  r4Linked = true;
+  picoLinked = true;
 
   // ── B1: PING_R4 handshake — reply with PONG_R4:<seq> ────────────
   if (cmd.startsWith("PING_R4:")) {
-    r4LastPingMs = millis();
-    r4PingSeq    = (uint16_t)cmd.substring(8).toInt();
+    picoLastPingMs = millis();
+    picoPingSeq    = (uint16_t)cmd.substring(8).toInt();
     Serial1.print(F("PONG_R4:"));
-    Serial1.println(r4PingSeq);
-    if (debugVerbose) { Serial.print(F("[R4] PING seq=")); Serial.println(r4PingSeq); }
+    Serial1.println(picoPingSeq);
+    if (debugVerbose) { Serial.print(F("[PICO] PING seq=")); Serial.println(picoPingSeq); }
     return;
   }
 
-  // ── Mode change from R4 touchscreen ──────────────────────────────
+  // ── Mode change from Pico touchscreen ─────────────────────────────
   if (cmd.startsWith("MODE:")) {
     String mode = cmd.substring(5);
-    Serial1.print(F("MODE:")); Serial1.println(mode);   // echo back to R4 for confirmation
+    Serial1.print(F("MODE:")); Serial1.println(mode);   // echo back to Pico for confirmation
     toS9("REQ_MODE:" + mode);
     Serial3.print(F("MODE:")); Serial3.println(mode);   // forward to ESP32 web UI
     return;
   }
 
-  // ── Sensor toggle from R4 config screen ──────────────────────────
+  // ── Sensor toggle from Pico config screen ──────────────────────────
   if (cmd.startsWith("TOGGLE_SENSOR:")) {
-    applyToggle(cmd);   // applies, ACKs to S9, and pushes SENS_ST| back to R4 + ESP32
+    applyToggle(cmd);   // applies, ACKs to S9, and pushes SENS_ST| back to Pico + ESP32
     return;
   }
 
-  if (debugVerbose) { Serial.print(F("[R4] Unknown cmd: ")); Serial.println(cmd); }
+  if (debugVerbose) { Serial.print(F("[PICO] Unknown cmd: ")); Serial.println(cmd); }
 }
 
-void handleR4Communication() {
-  // [FIX] Byte-budget: max 32 bytes per call — prevents R4 from starving ESP32
+void handlePicoComm() {
+  // Byte-budget: max 32 bytes per call — prevents Pico from starving ESP32
   int bytesRead = 0;
   const int MAX_BYTES_PER_CALL = 32;
   while (Serial1.available() && bytesRead < MAX_BYTES_PER_CALL) {
     char c = Serial1.read();
     bytesRead++;
     if (c == '\n') {
-      r4Buf.trim();
-      if (r4Buf.length() > 0) processR4Command(r4Buf);
-      r4Buf = "";
+      picoBuf.trim();
+      if (picoBuf.length() > 0) processPicoCommand(picoBuf);
+      picoBuf = "";
     } else if (c != '\r') {
-      r4Buf += c;
-      if (r4Buf.length() > 80) r4Buf = "";   // overflow guard
+      picoBuf += c;
+      if (picoBuf.length() > 80) picoBuf = "";   // overflow guard
     }
   }
 }
@@ -1091,7 +1091,7 @@ void handleR3Communication() {
 //  Accepts BTCMD| (Bluetooth gamepad) and WEBCMD| (web dashboard)
 // ════════════════════════════════════════════════════════════════════
 void handleESP32Communication() {
-  // [FIX] Byte-budget: max 32 bytes per call — prevents ESP32 from starving S9/R4
+  // Byte-budget: max 32 bytes per call — prevents ESP32 from starving S9/Pico
   int bytesRead = 0;
   const int MAX_BYTES_PER_CALL = 32;
   while (Serial3.available() && bytesRead < MAX_BYTES_PER_CALL) {
@@ -1581,7 +1581,7 @@ void setup() {
   // Step 1: Tell S9 Mega is up
   toS9("SYSTEM|READY|" + String(FW_VERSION) + "|END");
 
-  // Step 2: Tell R4 Mega is up with firmware version
+  // Step 2: Tell Pico that Mega is up — sends MEGA_READY|FW:xxx|END
   {
     String boot = F("MEGA_READY|FW:");
     boot += FW_VERSION;
@@ -1590,11 +1590,11 @@ void setup() {
   }
   Serial1.println(sensorStatusString());
 
-  // [Phase 3B] R4 auto-pairing PING loop — up to 10 attempts at 500ms each
+  // Pico auto-pairing PING loop — up to 10 attempts at 500ms each
   {
-    bool r4Ready = false;
-    int  r4Attempts = 0;
-    while (!r4Ready && r4Attempts < 10) {
+    bool picoReady = false;
+    int  picoAttempts = 0;
+    while (!picoReady && picoAttempts < 10) {
       Serial1.println(F("PING"));
       delay(500);
       String resp = "";
@@ -1604,31 +1604,31 @@ void setup() {
           char c = Serial1.read();
           if (c == '\n') {
             resp.trim();
-            if (resp == "PONG") { r4Ready = true; break; }
+            if (resp == "PONG") { picoReady = true; break; }
             resp = "";
           } else if (c != '\r') {
             resp += c;
           }
         }
-        if (r4Ready) break;
+        if (picoReady) break;
       }
-      r4Attempts++;
+      picoAttempts++;
     }
-    if (r4Ready) {
-      Serial.println(F("[R4] Dashboard connected"));
-      r4Linked = true;
+    if (picoReady) {
+      Serial.println(F("[PICO] Dashboard connected"));
+      picoLinked = true;
     } else {
-      Serial.println(F("[R4] WARNING: No PONG from R4 dashboard"));
+      Serial.println(F("[PICO] WARNING: No PONG from Pico dashboard"));
     }
   }
 
   // Step 3: Tell ESP32 to announce itself
   Serial3.println(F("MEGA:BOOT"));
 
-  // Step 4: Run R3 comm test, then report full status to R4
+  // Step 4: Run R3 comm test, then report full status to Pico
   runR3CommTest();
 
-  // Step 5: Broadcast connection status to R4 startup screen
+  // Step 5: Broadcast connection status to Pico boot screen
   {
     String connStatus = F("CONN_STATUS|");
     connStatus += r3CommFail ? F("R3:FAIL|") : F("R3:OK|");
@@ -1665,7 +1665,7 @@ void loop() {
   unhingedMode = (digitalRead(UNHINGED_SW) == LOW);
 
   handleS9Communication();
-  handleR4Communication();
+  handlePicoComm();
   handleR3Communication();
   handleESP32Communication();
   handleGPS();
@@ -1677,11 +1677,11 @@ void loop() {
     dbg("[S9] Disconnected");
   }
 
-  // E1: R4 link watchdog — flag if no PING_R4 received in 30s
-  if (r4Linked && r4LastPingMs > 0 && (now - r4LastPingMs > 30000)) {
-    if (debugVerbose) Serial.println(F("[R4] WATCHDOG: no PING_R4 in 30s — link lost"));
-    r4Linked     = false;
-    r4LastPingMs = 0;
+  // E1: Pico link watchdog — flag if no PING_R4 received in 30s
+  if (picoLinked && picoLastPingMs > 0 && (now - picoLastPingMs > 30000)) {
+    if (debugVerbose) Serial.println(F("[PICO] WATCHDOG: no PING_R4 in 30s — link lost"));
+    picoLinked     = false;
+    picoLastPingMs = 0;
   }
 
   // Sensor + safety loop (500ms)
@@ -1697,7 +1697,7 @@ void loop() {
   // Telemetry broadcast (1000ms)
   if (now - lastTelem > 1000) {
     lastTelem = now;
-    sendTelemetryToR4();
+    sendTelemetryToPico();
     sendTelemetryToESP32();
     uptimeSec++;
   }
