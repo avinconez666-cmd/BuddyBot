@@ -309,8 +309,8 @@ bool hit(const Touch& t,int16_t x,int16_t y,int16_t w,int16_t h){
 // ════════════════════════════════════════════════════════════════════
 struct Telemetry {
   int   gas=0; float temp=0,hum=0;
-  bool  haz=false,pir=false,tilt=false,flame=false,ir=false;
-  float volt=8.4f; int pct=100; float amps=0,boost=0;
+  bool  haz=false,pir=false,tilt=false,ir=false;
+  float volt=8.4f; int pct=100; float amps=0;
   long  dFront=-1,dRear=-1,dLeft=-1,dRight=-1;
   bool  estop=false,autoM=false;
   String mode="NORMAL",fw="";
@@ -410,7 +410,7 @@ void drawFooter(){
 
   // Hazard chips — centre
   int ix=100;
-  if(T.flame){ drawBadge(ix,fy+14,44,24,C_CORAL,"FLAME",1); ix+=50; }
+  if( ix+=50; }
   if(T.tilt)  { drawBadge(ix,fy+14,36,24,C_AMBER,"TILT",1); ix+=42; }
 
   // Mega link age — right
@@ -803,9 +803,9 @@ void parseStat(const String& s){
   if(n<11) return;
   T.gas=f[0].toInt(); T.temp=f[1].toFloat(); T.hum=f[2].toFloat();
   T.haz=f[3].toInt(); T.pir=f[4].toInt(); T.tilt=f[5].toInt();
-  T.flame=f[6].toInt(); T.ir=f[7].toInt();
+   T.ir=f[7].toInt();
   T.volt=f[8].toFloat(); T.pct=f[9].toInt(); T.amps=f[10].toFloat();
-  if(n>11) T.boost=f[11].toFloat();
+  if(n>11) 
 }
 void parseUS(const String& s){
   String tmp=s.substring(3); String f[4]; int n=0,st=0;

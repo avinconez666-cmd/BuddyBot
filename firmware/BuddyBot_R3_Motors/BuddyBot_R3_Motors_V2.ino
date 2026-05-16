@@ -1,6 +1,6 @@
 /*
  * ════════════════════════════════════════════════════════════════════
- *  BUDDYBOT — UNO R3  ·  MOTOR CONTROLLER  ·  PRODUCTION V1.0
+ *  BUDDYBOT — UNO R3  ·  MOTOR CONTROLLER  ·  PRODUCTION V2.0
  * ════════════════════════════════════════════════════════════════════
  *
  *  MOTOR SHIELD:  Adafruit Motor Shield V1  (74HC595 shift-register)
@@ -68,7 +68,7 @@ SoftwareSerial megaSerial(A0, A1);
 // PWM speed pins (direct Arduino PWM outputs)
 #define MOTOR1_PWM   11
 #define MOTOR2_PWM    3
-#define MOTOR3_PWM    6
+#define MOTOR3_PWM    9   // FIXED: pin 6 = Timer0 (shared with SoftwareSerial millis), moved to pin 9
 #define MOTOR4_PWM    5
 
 // ── Motor command constants
@@ -80,7 +80,6 @@ SoftwareSerial megaSerial(A0, A1);
 // ── State
 uint8_t  currentSpeed  = 200;
 bool     motorsRunning = false;
-uint8_t  currentDirection = M_FORWARD;  // tracks last dir so setSpeed() doesn't override it
 String   cmdBuf        = "";
 
 // Enums for pattern states
@@ -166,24 +165,25 @@ void stopAll() {
   motor(3, M_RELEASE, 0);
   motor(4, M_RELEASE, 0);
   motorsRunning = false;
+  currentDir = DIR_STOP;
 }
 
 void moveForward() {
-  currentDirection = M_FORWARD;
   motor(1, M_FORWARD, currentSpeed);
   motor(2, M_FORWARD, currentSpeed);
   motor(3, M_FORWARD, currentSpeed);
   motor(4, M_FORWARD, currentSpeed);
   motorsRunning = true;
+  currentDir = DIR_FORWARD;
 }
 
 void moveBackward() {
-  currentDirection = M_BACKWARD;
   motor(1, M_BACKWARD, currentSpeed);
   motor(2, M_BACKWARD, currentSpeed);
   motor(3, M_BACKWARD, currentSpeed);
   motor(4, M_BACKWARD, currentSpeed);
   motorsRunning = true;
+  currentDir = DIR_BACKWARD;
 }
 
 // Tank-turn left: left wheels back, right wheels forward
@@ -193,6 +193,7 @@ void spinLeft() {
   motor(2, M_FORWARD,  currentSpeed);   // Front-Right forward
   motor(4, M_FORWARD,  currentSpeed);   // Rear-Right  forward
   motorsRunning = true;
+  currentDir = DIR_SPIN_L;
 }
 
 // Tank-turn right: right wheels back, left wheels forward
@@ -202,16 +203,24 @@ void spinRight() {
   motor(2, M_BACKWARD, currentSpeed);   // Front-Right back
   motor(4, M_BACKWARD, currentSpeed);   // Rear-Right  back
   motorsRunning = true;
+  currentDir = DIR_SPIN_R;
 }
+
+// Direction tracking for live speed updates
+enum MoveDir { DIR_STOP, DIR_FORWARD, DIR_BACKWARD, DIR_SPIN_L, DIR_SPIN_R };
+MoveDir currentDir = DIR_STOP;
 
 void setSpeed(uint8_t spd) {
   currentSpeed = spd;
-  // Update speed live without overriding current direction
+  // If motors are already moving, update speed live preserving direction
   if (motorsRunning) {
-    motor(1, currentDirection, currentSpeed);
-    motor(2, currentDirection, currentSpeed);
-    motor(3, currentDirection, currentSpeed);
-    motor(4, currentDirection, currentSpeed);
+    switch (currentDir) {
+      case DIR_FORWARD:  moveForward();  break;
+      case DIR_BACKWARD: moveBackward(); break;
+      case DIR_SPIN_L:   spinLeft();     break;
+      case DIR_SPIN_R:   spinRight();    break;
+      default: break;
+    }
   }
 }
 
