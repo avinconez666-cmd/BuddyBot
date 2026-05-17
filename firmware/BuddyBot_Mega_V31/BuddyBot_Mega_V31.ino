@@ -1433,7 +1433,7 @@ void setup() {
   delay(250);
 
   Serial1.begin(115200);
-  Serial2.begin(9600);
+  // Serial2 already started above for R3 boot STOP sequence
   Serial3.begin(115200);
   gpsSerial.begin(9600);        // GPS NEO-6M via SoftwareSerial
 
