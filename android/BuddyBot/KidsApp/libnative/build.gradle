@@ -4,9 +4,9 @@ plugins {
 }
 
 android {
-    namespace 'com.jiangdg.native_lib'
+    namespace = 'com.jiangdg.native_lib'
     compileSdk rootProject.ext.versionCompiler
-    ndkVersion rootProject.ext.ndkVersion
+    ndkVersion = rootProject.ext.ndkVersion
     
     defaultConfig {
         minSdk rootProject.ext.versionMinSdk
@@ -26,7 +26,7 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled = false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -45,7 +45,7 @@ android {
     }
     
     lint {
-        abortOnError false
+        abortOnError = false
     }
 }
 

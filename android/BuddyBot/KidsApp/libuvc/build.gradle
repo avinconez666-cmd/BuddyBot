@@ -5,9 +5,9 @@ plugins {
 import org.apache.tools.ant.taskdefs.condition.Os
 
 android {
-	namespace 'com.jiangdg.uvc'
+	namespace = 'com.jiangdg.uvc'
 	compileSdk rootProject.ext.versionCompiler
-    ndkVersion rootProject.ext.ndkVersion
+    ndkVersion = rootProject.ext.ndkVersion
 
 	compileOptions {
 		sourceCompatibility rootProject.ext.javaSourceCompatibility
@@ -25,13 +25,13 @@ android {
 
     buildTypes {
 		release {
-			minifyEnabled false
+			minifyEnabled = false
 			proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.txt'
 		}
 	}
     lint {
-        abortOnError false
-        checkReleaseBuilds false
+        abortOnError = false
+        checkReleaseBuilds = false
         disable 'MissingTranslation'
     }
 }
