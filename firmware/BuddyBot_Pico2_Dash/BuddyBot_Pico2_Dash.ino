@@ -800,7 +800,7 @@ void parseStat(const String& s){
   for(int i=5;i<=(int)s.length()&&n<13;i++){
     if(i==(int)s.length()||s[i]==':'){f[n++]=s.substring(st,i);st=i+1;}
   }
-  if(n<11) return;
+  if(n<10) return;
   T.gas=f[0].toInt(); T.temp=f[1].toFloat(); T.hum=f[2].toFloat();
   T.haz=f[3].toInt(); T.pir=f[4].toInt(); T.tilt=f[5].toInt();
    T.ir=f[7].toInt();

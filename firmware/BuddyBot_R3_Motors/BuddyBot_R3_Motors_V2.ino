@@ -8,11 +8,11 @@
  *                 AFMotor library required or used.
  *
  *  SERIAL LINK:   SoftwareSerial on A0 (RX) / A1 (TX) @ 9600 baud
- *                 ← Matches Mega SoftwareSerial pins 10 (TX) / 11 (RX)
+ *                 ← Matches Mega Serial2 hardware pins 17 (TX) / 16 (RX)
  *
  *  WIRING:
- *    Mega Pin 10 (TX) ──────────────► R3 Pin A0 (RX)
- *    Mega Pin 11 (RX) ◄────────────── R3 Pin A1 (TX)
+ *    Mega Pin 17 (TX) ──────────────► R3 Pin A0 (RX)
+ *    Mega Pin 16 (RX) ◄────────────── R3 Pin A1 (TX)
  *    Mega GND         ─────────────── R3 GND          ← MUST share!
  *
  *  ⚠  UPLOAD NOTE:
