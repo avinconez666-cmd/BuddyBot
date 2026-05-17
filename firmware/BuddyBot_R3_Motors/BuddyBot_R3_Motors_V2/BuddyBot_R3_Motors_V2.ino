@@ -81,6 +81,8 @@ SoftwareSerial megaSerial(A0, A1);
 uint8_t  currentSpeed  = 200;
 bool     motorsRunning = false;
 String   cmdBuf        = "";
+enum DirState { DIR_STOP, DIR_FORWARD, DIR_BACKWARD, DIR_SPIN_L, DIR_SPIN_R };
+DirState currentDir = DIR_STOP;
 
 // Enums for pattern states
 enum DanceState { DANCE_IDLE, DANCE_SET_SPEED, DANCE_WIGGLE, DANCE_FORWARD, DANCE_STOP1, DANCE_BACKWARD, DANCE_STOP2, DANCE_SPIN, DANCE_DONE };
