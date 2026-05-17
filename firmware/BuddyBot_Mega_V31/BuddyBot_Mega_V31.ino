@@ -971,6 +971,9 @@ void handlePicoCommunication() {
     char c = Serial1.read();
     if (c == '\n') {
       picoBuf.trim();
+      // Strip CRC suffix appended by toPico() on the other end
+      int crcIdx = picoBuf.indexOf("|CRC:");
+      if (crcIdx > 0) picoBuf = picoBuf.substring(0, crcIdx);
       if (picoBuf.length() > 0) processPicoCommand(picoBuf);
       picoBuf = "";
     } else if (c != '\r') {

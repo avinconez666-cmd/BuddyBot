@@ -879,7 +879,7 @@ void setup(){
   MEGA_SERIAL.begin(115200);
   delay(200);
   MEGA_SERIAL.println("PONG");
-  MEGA_SERIAL.println("PING_R4:0");
+  MEGA_SERIAL.println("PING_PICO:0");
 
   randomSeed(analogRead(A0));
   scrDirty=true;
@@ -891,7 +891,7 @@ void loop(){
   // Heartbeat
   if(millis()-lastPing>5000){
     lastPing=millis();
-    MEGA_SERIAL.print("PING_R4:"); MEGA_SERIAL.println(pingSeq++);
+    MEGA_SERIAL.print("PING_PICO:"); MEGA_SERIAL.println(pingSeq++);
     if(pingSeq>9999) pingSeq=0;
   }
   // Watchdog
