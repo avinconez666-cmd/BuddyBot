@@ -572,6 +572,94 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         }
     }
     
+
+    // ── Fix 1: Parse Mega V31 STAT: packet ─────────────────────────────────
+    // Format: STAT:gas:temp:hum:haz:pir:tilt:ir:volt:pct:amps
+    private fun parseStatPacket(msg: String) {
+        try {
+            val fields = msg.substring(5).split(":")
+            if (fields.size < 10) return
+            val gas     = fields[0].toIntOrNull()   ?: 0
+            val temp    = fields[1].toFloatOrNull() ?: 0f
+            val hum     = fields[2].toFloatOrNull() ?: 0f
+            val haz     = fields[3].toIntOrNull()   ?: 0
+            val pir     = fields[4].toIntOrNull()   ?: 0
+            val tilt    = fields[5].toIntOrNull()   ?: 0
+            val ir      = fields[6].toIntOrNull()   ?: 0
+            val volt    = fields[7].toFloatOrNull() ?: 0f
+            val pct     = fields[8].toIntOrNull()   ?: 0
+            val amps    = fields[9].toFloatOrNull() ?: 0f
+
+            _telemetry.value = _telemetry.value.copy(
+                gasLevel        = gas,
+                temperature     = temp,
+                humidity        = hum,
+                hazardDetected  = haz == 1,
+                pirAlert        = pir == 1,
+                tiltAlert       = tilt == 1,
+                irAlert         = ir == 1,
+                batteryVoltage  = volt,
+                batteryPercent  = pct,
+                currentAmps     = amps,
+            )
+
+            // Low battery warning
+            if (pct in 1..14) {
+                speakText("My battery is getting very low. Please plug me in soon!")
+            }
+
+            // Tilt alert
+            if (tilt == 1) {
+                handleEvent("TILT")
+            }
+
+            // Hazard alert
+            if (haz == 1) {
+                handleEvent("HAZARD")
+            }
+
+            Log.d(TAG, "STAT parsed: gas=$gas temp=$temp hum=$hum volt=$volt pct=$pct")
+        } catch (e: Exception) {
+            Log.e(TAG, "parseStatPacket error: ${e.message}")
+        }
+    }
+
+    // ── Fix 5: Handle SAFETY: messages from Mega ────────────────────────────
+    private fun handleSafetyMessage(code: String) {
+        Log.d(TAG, "[SAFETY] $code")
+        logComm("SAFETY", code)
+        when {
+            code.startsWith("FLAME")    -> { handleEvent("HAZARD"); speakText("Warning! Flame detected!") }
+            code.startsWith("TILT")     -> { handleEvent("TILT") }
+            code.startsWith("GAS")      -> { handleEvent("GAS_ALERT"); speakText("Gas detected! Tell a grown up!") }
+            code.startsWith("OVERTEMP") -> { handleEvent("HAZARD"); speakText("I'm getting too hot!") }
+            else                        -> handleEvent(code)
+        }
+    }
+
+    // ── Fix 8: Parse STATUS| pipe-delimited status packet ───────────────────
+    // Format: STATUS|ESTOP:YES|AUTO:ON|R3:OK|ESP:OK|S9:OK|FW:V31.0
+    private fun parseStatusPipe(msg: String) {
+        try {
+            val isEstop  = msg.contains("ESTOP:YES")
+            val isAuto   = msg.contains("AUTO:ON")
+            val r3ok     = msg.contains("R3:OK")
+            val espOk    = msg.contains("ESP:OK")
+            val fwIdx    = msg.indexOf("FW:")
+            val fw       = if (fwIdx >= 0) msg.substring(fwIdx + 3).substringBefore("|") else "--"
+
+            _robotState.value = _robotState.value.copy(isAutoMode = isAuto)
+
+            if (isEstop) {
+                arduinoComms.sendCommand("MOTOR:S")
+                handleEvent("OBSTACLE", 8000)
+            }
+
+            logComm("STATUS", "Auto=$isAuto R3=$r3ok ESP=$espOk FW=$fw ESTOP=$isEstop")
+        } catch (e: Exception) {
+            Log.e(TAG, "parseStatusPipe error: ${e.message}")
+        }
+    }
     private fun parseUltrasonicData(msg: String) {
         val parts = msg.substring(3).split(',')
         if (parts.size == 4) {
