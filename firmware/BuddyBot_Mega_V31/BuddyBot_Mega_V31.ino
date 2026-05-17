@@ -453,7 +453,7 @@ void readAllSensors() {
   // ── Analog environmental sensors ────────────────────────────────────────────
   lightLevel = sens.light ? analogRead(LDR_AO)   : -1;
   soundLevel = sens.sound ? analogRead(SOUND_AO) : -1;
-  gasLevel   = sens.gas   ? analogRead(GAS_AO)   : -1;
+  gasLevel   = 0;  // Digital gas module only — GAS_AO=-1, read via GAS_DO interrupt/poll
   gasDetected= sens.gas   ? (digitalRead(GAS_DO) == HIGH) : false;
 
   // ── Battery voltage (A14, direct divider) ────────────────────────────────────
@@ -1432,6 +1432,7 @@ void setup() {
   Serial1.begin(115200);
   Serial2.begin(9600);
   Serial3.begin(115200);
+  gpsSerial.begin(9600);        // GPS NEO-6M via SoftwareSerial
 
   delay(400);
   Wire.begin();
