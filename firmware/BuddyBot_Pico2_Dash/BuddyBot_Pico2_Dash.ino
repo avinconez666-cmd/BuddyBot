@@ -1,33 +1,33 @@
 /*
  * ════════════════════════════════════════════════════════════════════
- *  BUDDYBOT  —  Pico RP2040  ·  Orbital HMI  ·  V3.0
- *  Portrait 320×480  |  Direct SPI  |  No external display library
+ *  BUDDYBOT  —  Pico RP2040  ·  NEXUS HMI  ·  V4.0
+ *  Cyberpunk / Sci-Fi Dashboard  |  Portrait 320×480  |  Direct SPI
  * ════════════════════════════════════════════════════════════════════
- *  WIRING
- *  SPI0   GP16=MISO  GP17=CS  GP18=SCK  GP19=MOSI  GP20=RST  GP21=DC  GP22=BL
- *  I2C1   GP26=SDA   GP27=SCL  GP28=INT  GP15=RST  (FT6336U touch)
- *  UART0  GP0=TX→Mega19  GP1=RX←Mega18  (voltage divider on RX)
+ *  WIRING (unchanged)
+ *  SPI0  GP16=MISO GP17=CS GP18=SCK GP19=MOSI GP20=RST GP21=DC GP22=BL
+ *  I2C1  GP26=SDA  GP27=SCL  GP28=INT  GP15=RST  (FT6336U touch)
+ *  UART0 GP0=TX→Mega18(RX)  GP1=RX←Mega19(TX via divider)
  * ════════════════════════════════════════════════════════════════════
  */
 #include <SPI.h>
 #include <Wire.h>
 
-// Forward declarations
-struct Touch { int16_t x, y; bool pressed; };
-Touch readTouch();
-bool  hit(const Touch& t, int16_t x, int16_t y, int16_t w, int16_t h);
-void  drawMain(Touch& t);
-void  drawRadar(Touch& t);
-void  drawGamesMenu(Touch& t);
-void  drawGameColor(Touch& t);
-void  drawGameShape(Touch& t);
-void  drawGameCount(Touch& t);
-void  drawInfo(Touch& t);
-void  drawSensors(Touch& t);
-void  drawAlert(Touch& t);
-bool  drawBackBtn(Touch& t);
+// ── Forward declarations ──────────────────────────────────────────────
+struct Touch { int16_t x,y; bool pressed; };
+Touch  readTouch();
+bool   hit(const Touch&,int16_t,int16_t,int16_t,int16_t);
+void   drawMain(Touch&);
+void   drawRadar(Touch&);
+void   drawGamesMenu(Touch&);
+void   drawGameColor(Touch&);
+void   drawGameShape(Touch&);
+void   drawGameCount(Touch&);
+void   drawInfo(Touch&);
+void   drawSensors(Touch&);
+void   drawAlert(Touch&);
+bool   drawBackBtn(Touch&);
 
-// ── Pins ─────────────────────────────────────────────────────────────
+// ── Pins ──────────────────────────────────────────────────────────────
 #define PIN_BL       22
 #define PIN_CS       17
 #define PIN_DC       21
@@ -47,67 +47,73 @@ bool  drawBackBtn(Touch& t);
 #define ST_PASET   0x2B
 #define ST_RAMWR   0x2C
 
-// ── Portrait 320×480 ──────────────────────────────────────────────────
-#define SCR_W   320
-#define SCR_H   480
+// ── Screen constants ──────────────────────────────────────────────────
+#define SCR_W  320
+#define SCR_H  480
+#define HDR_H   50
+#define FTR_H   48
+#define CNT_Y   HDR_H
+#define CNT_H   (SCR_H - HDR_H - FTR_H)
 
-// ── Colour palette (RGB565) ───────────────────────────────────────────
-#define C_BG      0x0841u   // #080808 near-black
-#define C_SURF    0x1082u   // #101010 card surface
-#define C_SURF2   0x18C3u   // #181818 lifted surface
-#define C_LINE    0x2104u   // subtle divider
-#define C_CYAN    0x07FFu   // electric cyan — primary accent
+// ══════════════════════════════════════════════════════════════════════
+//  CYBERPUNK COLOUR PALETTE  (RGB565)
+// ══════════════════════════════════════════════════════════════════════
+#define C_VOID    0x0000u   // absolute black
+#define C_BG      0x0820u   // #081018 deep space
+#define C_SURF    0x0C41u   // #0C0820 card surface
+#define C_SURF2   0x1082u   // #101020 raised
+#define C_LINE    0x2124u   // subtle grid line
+#define C_GLOW    0x0410u   // dark glow base
+
+// Neon accents
+#define C_CYAN    0x07FFu   // #00D4FF electric cyan
 #define C_DCYAN   0x03EFu   // dim cyan
-#define C_MINT    0x3FE6u   // mint green — OK/safe
-#define C_AMBER   0xFD20u   // amber — warning
-#define C_CORAL   0xF944u   // coral red — danger
-#define C_PURP    0x801Fu   // purple — info
-#define C_MAG     0xF81Fu   // magenta — unhinged
-#define C_YLLOW   0xFFE0u   // yellow — stars
+#define C_XCYAN   0x001Fu   // deep cyan-blue
+#define C_MINT    0x07E4u   // #00FF90 mint green
+#define C_PURPLE  0x781Fu   // #7800FF ultraviolet
+#define C_DPURP   0x3009u   // dim purple
+#define C_AMBER   0xFD20u   // #FFB800 amber
+#define C_CORAL   0xF944u   // #FF3355 coral red
+#define C_MAG     0xF81Fu   // magenta
+#define C_YLLOW   0xFFE0u   // yellow
 #define C_WHITE   0xFFFFu
 #define C_LGRAY   0x8C71u
 #define C_MGRAY   0x4228u
 #define C_DGRAY   0x2104u
-#define C_BLACK   0x0000u
 #define C_RED     0xF800u
 #define C_GREEN   0x07E0u
 #define C_BLUE    0x001Fu
 
-// ── Layout constants ──────────────────────────────────────────────────
-#define HDR_H   54    // header
-#define FTR_H   56    // footer (E-STOP lives here)
-#define CNT_Y   HDR_H
-#define CNT_H   (SCR_H - HDR_H - FTR_H)   // 370 px
-
-// ════════════════════════════════════════════════════════════════════
-//  LOW-LEVEL SPI + DISPLAY INIT
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+//  LOW-LEVEL SPI DISPLAY DRIVER
+// ══════════════════════════════════════════════════════════════════════
 static SPISettings _spi(20000000, MSBFIRST, SPI_MODE0);
 
 inline void _cmd(uint8_t c){
-  digitalWrite(PIN_DC,LOW); digitalWrite(PIN_CS,LOW);
-  SPI.transfer(c); digitalWrite(PIN_CS,HIGH);
+  digitalWrite(PIN_DC,LOW);  digitalWrite(PIN_CS,LOW);
+  SPI.transfer(c);           digitalWrite(PIN_CS,HIGH);
 }
 inline void _dat(uint8_t d){
   digitalWrite(PIN_DC,HIGH); digitalWrite(PIN_CS,LOW);
-  SPI.transfer(d); digitalWrite(PIN_CS,HIGH);
+  SPI.transfer(d);           digitalWrite(PIN_CS,HIGH);
 }
 
 void setWindow(int16_t x0,int16_t y0,int16_t x1,int16_t y1){
-  _cmd(ST_CASET); _dat(x0>>8); _dat(x0); _dat(x1>>8); _dat(x1);
-  _cmd(ST_PASET); _dat(y0>>8); _dat(y0); _dat(y1>>8); _dat(y1);
+  _cmd(ST_CASET); _dat(x0>>8); _dat(x0&0xFF); _dat(x1>>8); _dat(x1&0xFF);
+  _cmd(ST_PASET); _dat(y0>>8); _dat(y0&0xFF); _dat(y1>>8); _dat(y1&0xFF);
   _cmd(ST_RAMWR);
 }
 
 void fillRect(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t c){
   if(w<=0||h<=0) return;
   if(x<0){w+=x;x=0;} if(y<0){h+=y;y=0;}
+  if(x>=SCR_W||y>=SCR_H) return;
   if(x+w>SCR_W) w=SCR_W-x; if(y+h>SCR_H) h=SCR_H-y;
   if(w<=0||h<=0) return;
   setWindow(x,y,x+w-1,y+h-1);
   digitalWrite(PIN_DC,HIGH); digitalWrite(PIN_CS,LOW);
   uint32_t n=(uint32_t)w*h;
-  uint8_t hi=c>>8, lo=c&0xFF;
+  uint8_t hi=c>>8,lo=c&0xFF;
   for(uint32_t i=0;i<n;i++){SPI.transfer(hi);SPI.transfer(lo);}
   digitalWrite(PIN_CS,HIGH);
 }
@@ -119,16 +125,15 @@ void drawPixel(int16_t x,int16_t y,uint16_t c){
   setWindow(x,y,x,y); _dat(c>>8); _dat(c&0xFF);
 }
 
-// Gradient fill — two colours, vertical blend over h rows
+// Vertical gradient fill
 void fillGrad(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t c1,uint16_t c2){
   uint8_t r1=c1>>11,g1=(c1>>5)&0x3F,b1=c1&0x1F;
   uint8_t r2=c2>>11,g2=(c2>>5)&0x3F,b2=c2&0x1F;
   for(int16_t i=0;i<h;i++){
-    uint8_t r=r1+(int)(r2-r1)*i/h;
-    uint8_t g=g1+(int)(g2-g1)*i/h;
-    uint8_t b=b1+(int)(b2-b1)*i/h;
-    uint16_t col=(r<<11)|(g<<5)|b;
-    fillRect(x,y+i,w,1,col);
+    int r=r1+(int)(r2-r1)*i/h;
+    int g=g1+(int)(g2-g1)*i/h;
+    int b=b1+(int)(b2-b1)*i/h;
+    fillRect(x,y+i,w,1,(r<<11)|(g<<5)|b);
   }
 }
 
@@ -141,19 +146,17 @@ void displayInit(){
   digitalWrite(PIN_RST,LOW);  delay(50);
   digitalWrite(PIN_RST,HIGH); delay(150);
   SPI.setTX(19); SPI.setRX(16); SPI.setSCK(18);
-  SPI.begin();
-  SPI.beginTransaction(_spi);
+  SPI.begin(); SPI.beginTransaction(_spi);
   _cmd(ST_SWRESET); delay(120);
   _cmd(ST_SLPOUT);  delay(120);
-  _cmd(ST_COLMOD);  _dat(0x55);   // 16-bit RGB565
-  // MADCTL 0x48: MX | BGR  — portrait, left-right corrected
-  _cmd(ST_MADCTL);  _dat(0x48);
+  _cmd(ST_COLMOD);  _dat(0x55);
+  _cmd(ST_MADCTL);  _dat(0x48);   // MX|BGR — portrait, X-mirrored
   _cmd(ST_DISPON);  delay(50);
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  FONT (6×8 bitmap — built-in, no library)
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+//  BITMAP FONT  (6×8 glyphs, scale for large/small text)
+// ══════════════════════════════════════════════════════════════════════
 static const uint8_t F6x8[][5] PROGMEM = {
   {0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x5F,0x00,0x00},{0x00,0x07,0x00,0x07,0x00},
   {0x14,0x7F,0x14,0x7F,0x14},{0x24,0x2A,0x7F,0x2A,0x12},{0x23,0x13,0x08,0x64,0x62},
@@ -203,29 +206,37 @@ void drawChar(int16_t x,int16_t y,char ch,uint16_t fg,uint16_t bg,uint8_t sz){
 }
 
 void drawStr(int16_t x,int16_t y,const char* s,uint16_t fg,uint16_t bg,uint8_t sz){
-  while(*s){drawChar(x,y,*s++,fg,bg,sz);x+=6*sz;}
+  while(*s){ drawChar(x,y,*s++,fg,bg,sz); x+=6*sz; }
 }
 
+// Centred
 void drawStrC(int16_t cx,int16_t y,const char* s,uint16_t fg,uint16_t bg,uint8_t sz){
   drawStr(cx-(int16_t)(strlen(s)*6*sz/2),y,s,fg,bg,sz);
 }
 
+// Right-aligned
+void drawStrR(int16_t rx,int16_t y,const char* s,uint16_t fg,uint16_t bg,uint8_t sz){
+  drawStr(rx-(int16_t)(strlen(s)*6*sz),y,s,fg,bg,sz);
+}
+
 int16_t strW(const char* s,uint8_t sz=1){ return strlen(s)*6*sz; }
 
-// ════════════════════════════════════════════════════════════════════
-//  PRIMITIVES
-// ════════════════════════════════════════════════════════════════════
-void drawFastHLine(int16_t x,int16_t y,int16_t w,uint16_t c){fillRect(x,y,w,1,c);}
-void drawFastVLine(int16_t x,int16_t y,int16_t h,uint16_t c){fillRect(x,y,1,h,c);}
-
-void drawRoundRect(int16_t x,int16_t y,int16_t w,int16_t h,int16_t r,uint16_t c){
-  drawFastHLine(x+r,y,w-2*r,c); drawFastHLine(x+r,y+h-1,w-2*r,c);
-  drawFastVLine(x,y+r,h-2*r,c); drawFastVLine(x+w-1,y+r,h-2*r,c);
+// ══════════════════════════════════════════════════════════════════════
+//  SHAPE PRIMITIVES
+// ══════════════════════════════════════════════════════════════════════
+void drawH(int16_t x,int16_t y,int16_t w,uint16_t c){ fillRect(x,y,w,1,c); }
+void drawV(int16_t x,int16_t y,int16_t h,uint16_t c){ fillRect(x,y,1,h,c); }
+void drawRect(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t c){
+  drawH(x,y,w,c); drawH(x,y+h-1,w,c); drawV(x,y,h,c); drawV(x+w-1,y,h,c);
 }
-void fillRoundRect(int16_t x,int16_t y,int16_t w,int16_t h,int16_t r,uint16_t c){
+void fillRR(int16_t x,int16_t y,int16_t w,int16_t h,int16_t r,uint16_t c){
   fillRect(x+r,y,w-2*r,h,c);
   fillRect(x,y+r,r,h-2*r,c);
   fillRect(x+w-r,y+r,r,h-2*r,c);
+}
+void drawRR(int16_t x,int16_t y,int16_t w,int16_t h,int16_t r,uint16_t c){
+  drawH(x+r,y,w-2*r,c); drawH(x+r,y+h-1,w-2*r,c);
+  drawV(x,y+r,h-2*r,c); drawV(x+w-1,y+r,h-2*r,c);
 }
 void fillCircle(int16_t cx,int16_t cy,int16_t r,uint16_t c){
   for(int16_t dy=-r;dy<=r;dy++){
@@ -243,7 +254,7 @@ void drawCircle(int16_t cx,int16_t cy,int16_t r,uint16_t c){
     if(e<=0){y++;e+=2*y+1;} if(e>0){x--;e-=2*x+1;}
   }
 }
-void fillTriangle(int16_t x0,int16_t y0,int16_t x1,int16_t y1,int16_t x2,int16_t y2,uint16_t c){
+void fillTri(int16_t x0,int16_t y0,int16_t x1,int16_t y1,int16_t x2,int16_t y2,uint16_t c){
   if(y0>y1){int16_t t=y0;y0=y1;y1=t;t=x0;x0=x1;x1=t;}
   if(y1>y2){int16_t t=y1;y1=y2;y2=t;t=x1;x1=x2;x2=t;}
   if(y0>y1){int16_t t=y0;y0=y1;y1=t;t=x0;x0=x1;x1=t;}
@@ -251,62 +262,119 @@ void fillTriangle(int16_t x0,int16_t y0,int16_t x1,int16_t y1,int16_t x2,int16_t
     int16_t a=(y<y1)?x0+(x1-x0)*(y-y0)/(y1-y0):x1+(x2-x1)*(y-y1)/(y2-y1);
     int16_t b=x0+(x2-x0)*(y-y0)/(y2-y0);
     if(a>b){int16_t t=a;a=b;b=t;}
-    drawFastHLine(a,y,b-a+1,c);
+    drawH(a,y,b-a+1,c);
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  PREMIUM UI COMPONENTS
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+//  CYBERPUNK UI COMPONENTS
+// ══════════════════════════════════════════════════════════════════════
 
-// Card with optional accent bar on left edge
-void drawCard(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t accent=0){
-  fillRoundRect(x,y,w,h,6,C_SURF);
-  drawRoundRect(x,y,w,h,6,C_LINE);
-  if(accent) fillRect(x,y+6,3,h-12,accent);
+// Glowing neon box — double border with inner glow colour
+void neonBox(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t col,uint16_t bg=C_SURF){
+  fillRR(x,y,w,h,6,bg);
+  drawRR(x,y,w,h,6,col);
+  // inner highlight
+  drawRR(x+2,y+2,w-4,h-4,4,col);
+  // top accent line
+  fillRect(x+8,y,w-16,2,col);
 }
 
-// Pill badge
-void drawBadge(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t bg,const char* txt,uint8_t sz=1){
-  fillRoundRect(x,y,w,h,h/2,bg);
-  drawStrC(x+w/2,y+(h-8*sz)/2,txt,C_BLACK,bg,sz);
+// Hex corner brackets (sci-fi frame)
+void hexFrame(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t col,uint8_t sz=8){
+  // TL
+  drawH(x,y,sz,col);      drawV(x,y,sz,col);
+  drawPixel(x+1,y+1,col);
+  // TR
+  drawH(x+w-sz,y,sz,col); drawV(x+w-1,y,sz,col);
+  drawPixel(x+w-2,y+1,col);
+  // BL
+  drawH(x,y+h-1,sz,col);  drawV(x,y+h-sz,sz,col);
+  drawPixel(x+1,y+h-2,col);
+  // BR
+  drawH(x+w-sz,y+h-1,sz,col); drawV(x+w-1,y+h-sz,sz,col);
+  drawPixel(x+w-2,y+h-2,col);
 }
 
-// Glowing button — filled with subtle gradient + bright border
-void drawBtn(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t col,const char* lbl,uint8_t sz=2,bool active=false){
-  uint16_t bg = active ? col : C_SURF2;
-  uint16_t fg = active ? C_BLACK : col;
-  fillGrad(x+1,y+1,w-2,h-2,bg,active?col:C_SURF);
-  drawRoundRect(x,y,w,h,7,active?col:C_DGRAY);
-  if(active) drawRoundRect(x+1,y+1,w-2,h-2,6,col);  // inner glow
-  drawStrC(x+w/2,y+(h-8*sz)/2,lbl,fg,0xFFFF,sz);
+// Progress bar with glow
+void glowBar(int16_t x,int16_t y,int16_t w,int16_t h,float frac,uint16_t col,uint16_t bg=C_SURF2){
+  fillRR(x,y,w,h,h/2,bg);
+  int16_t filled=(int16_t)(frac*w); if(filled<2)filled=2; if(filled>w)filled=w;
+  fillRR(x,y,filled,h,h/2,col);
+  // highlight
+  fillRect(x+2,y+1,filled-4,1,C_WHITE);
 }
 
-// Thin separator line with label
-void drawDivider(int16_t y,const char* lbl=nullptr){
-  drawFastHLine(0,y,SCR_W,C_LINE);
-  if(lbl){
-    int16_t tw=strW(lbl);
-    fillRect(SCR_W/2-tw/2-4,y-4,tw+8,9,C_BG);
-    drawStrC(SCR_W/2,y-4,lbl,C_MGRAY,C_BG,1);
+// Status pill badge
+void drawPill(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t col,bool on){
+  uint16_t bg=on?col:C_SURF2;
+  fillRR(x,y,w,h,h/2,bg);
+  drawRR(x,y,w,h,h/2,col);
+}
+
+// Animated pulsing dot (call each frame with millis)
+void pulseDot(int16_t cx,int16_t cy,int16_t r,uint16_t col,bool active){
+  if(!active){ fillCircle(cx,cy,r,C_MGRAY); return; }
+  float t=(millis()%1200)/1200.0f;
+  uint8_t alpha=(uint8_t)(128+127*sinf(t*2*3.14159f));
+  // Outer glow ring — fade in/out
+  uint8_t ar=((col>>11)*(alpha>>3))>>5;
+  uint8_t ag=(((col>>5)&0x3F)*(alpha>>2))>>6;
+  uint8_t ab=((col&0x1F)*(alpha>>3))>>5;
+  uint16_t glowCol=(ar<<11)|(ag<<5)|ab;
+  drawCircle(cx,cy,r+3,glowCol);
+  fillCircle(cx,cy,r,col);
+}
+
+// Scan line animation
+void scanLine(int16_t x,int16_t y,int16_t w,int16_t h){
+  static unsigned long lastScan=0;
+  static int16_t scanPos=0;
+  if(millis()-lastScan>18){ lastScan=millis(); scanPos=(scanPos+2)%h; }
+  // Subtle horizontal glow bar scrolling down the panel
+  if(scanPos>=0&&scanPos<h){
+    uint16_t slc=0x0421u;  // very dark tint
+    fillRect(x,y+scanPos,w,1,slc);
+    if(scanPos>0) fillRect(x,y+scanPos-1,w,1,slc);
   }
 }
 
-// Value row — label left, value right, hairline below
-void valueRow(int16_t x,int16_t y,int16_t w,const char* lbl,const char* val,uint16_t vc,uint16_t bg=C_SURF){
-  drawStr(x+8,y+4,lbl,C_MGRAY,bg,1);
-  drawStr(x+w-strW(val)-8,y+4,val,vc,bg,1);
-  drawFastHLine(x+4,y+17,w-8,C_LINE);
+// Value cell — label + large value — partial update
+void valueCell(int16_t x,int16_t y,int16_t w,int16_t h,
+               const char* label,const char* val,uint16_t vcol,uint16_t bg=C_SURF){
+  fillRect(x,y,w,h,bg);
+  drawRR(x,y,w,h,4,C_LINE);
+  // Top accent
+  fillRect(x+4,y,w-8,2,vcol);
+  // Label
+  int16_t lx=x+(w-strW(label,1))/2;
+  drawStr(lx,y+5,label,vcol,bg,1);
+  // Value large
+  uint8_t vsz=3;
+  int16_t vw=strW(val,vsz);
+  while(vw>w-6&&vsz>1){ vsz--; vw=strW(val,vsz); }
+  int16_t vx=x+(w-vw)/2;
+  int16_t vy=y+h/2-4*vsz;
+  drawStr(vx,vy,val,vcol,bg,vsz);
 }
 
-// Touch hit test
+// Divider with label
+void sectionDiv(int16_t y,const char* lbl,uint16_t col=C_CYAN){
+  drawH(0,y,SCR_W,col);
+  int16_t tw=strW(lbl,1);
+  int16_t lx=(SCR_W-tw-8)/2;
+  fillRect(lx-2,y-4,tw+12,9,C_BG);
+  drawStr(lx+2,y-4,lbl,col,C_BG,1);
+}
+
+// Touch helper
 bool hit(const Touch& t,int16_t x,int16_t y,int16_t w,int16_t h){
   return t.pressed&&t.x>=x&&t.x<x+w&&t.y>=y&&t.y<y+h;
 }
 
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 //  APP STATE
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 struct Telemetry {
   int   gas=0; float temp=0,hum=0;
   bool  haz=false,pir=false,tilt=false,ir=false;
@@ -317,6 +385,9 @@ struct Telemetry {
   bool  r3ok=false,espok=false,s9ok=false;
 } T;
 
+// Previous telemetry for partial-update comparison
+struct Telemetry Tprev;
+
 struct SensFlags { bool dht=true,gas=true,flame=true,pir=false,tilt=true,ir=true,us=true,cur=true; } SF;
 
 enum Screen { SCR_BOOT,SCR_MAIN,SCR_RADAR,SCR_GAMES,
@@ -324,6 +395,7 @@ enum Screen { SCR_BOOT,SCR_MAIN,SCR_RADAR,SCR_GAMES,
               SCR_INFO,SCR_SENSORS };
 Screen curScr=SCR_BOOT;
 bool   scrDirty=true;
+bool   firstMainDraw=true;  // force full main draw on first visit
 
 bool   alertOn=false;
 String alertTitle="",alertMsg="";
@@ -336,17 +408,15 @@ bool          megaLinked=false;
 unsigned long lastMegaRx=0,lastPing=0;
 uint16_t      pingSeq=0;
 
-// Games
 const uint16_t GCOLS[]={C_RED,C_GREEN,C_BLUE,C_YLLOW};
-const char*    GCNAMES[]={"RED","GREEN","BLUE","YELLOW"};
+const char* GCNAMES[]={"RED","GREEN","BLUE","YELLOW"};
 int   gTarget=0,gScore=0;
 unsigned long gFeedbackUntil=0;
+unsigned long lastTouchMs=0;
 
-unsigned long lastTelemDraw=0,lastTouchMs=0;
-
-// ════════════════════════════════════════════════════════════════════
-//  TOUCH  (FT6336U via Wire1 = I2C1)
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+//  TOUCH — FIX: mirror X for MADCTL 0x48 (MX bit set)
+// ══════════════════════════════════════════════════════════════════════
 #define CTP_ADDR 0x38
 Touch readTouch(){
   Touch t={0,0,false};
@@ -360,461 +430,605 @@ Touch readTouch(){
   uint8_t yH=Wire1.read(),yL=Wire1.read();
   Wire1.read();
   if(n==0||n>2) return t;
-  // FT6336U portrait coords match display directly
-  t.x=((xH&0x0F)<<8)|xL;
-  t.y=((yH&0x0F)<<8)|yL;
-  // Clamp to screen
-  t.x=constrain(t.x,0,SCR_W-1);
-  t.y=constrain(t.y,0,SCR_H-1);
+  // FT6336U portrait raw coords: x=0..319, y=0..479
+  // MADCTL 0x48 mirrors X → display_x = 319 - raw_x
+  int16_t rx=((xH&0x0F)<<8)|xL;
+  int16_t ry=((yH&0x0F)<<8)|yL;
+  t.x = constrain(319-rx, 0, SCR_W-1);   // FIXED: mirror X
+  t.y = constrain(ry,     0, SCR_H-1);
   t.pressed=true;
   return t;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  CHROME — Header & Footer (drawn on every screen)
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+//  CHROME — Header & Footer (persistent chrome — redrawn only on change)
+// ══════════════════════════════════════════════════════════════════════
 void drawHeader(const char* title){
-  // Deep gradient header
-  fillGrad(0,0,SCR_W,HDR_H,0x0821u,C_BG);
-  drawFastHLine(0,HDR_H-1,SCR_W,C_CYAN);
+  fillGrad(0,0,SCR_W,HDR_H,0x0841u,C_BG);
+  drawH(0,HDR_H-1,SCR_W,C_CYAN);
+  drawH(0,HDR_H-2,SCR_W,C_XCYAN);
 
-  // Mode badge — left
+  // Mode badge
   uint16_t mc=C_CYAN;
   if(T.estop)              mc=C_CORAL;
   else if(T.mode=="BODYGUARD") mc=C_AMBER;
   else if(T.mode=="DOG")       mc=C_MINT;
   else if(T.mode=="UNHINGED")  mc=C_MAG;
+  else if(T.mode=="PARTY")     mc=C_PURPLE;
   const char* ms=T.estop?"E-STOP":T.mode.c_str();
-  drawBadge(6,14,strW(ms,1)+12,22,mc,ms,1);
+  int16_t bw=strW(ms,1)+14;
+  fillRR(4,8,bw,34,5,mc);
+  drawRR(4,8,bw,34,5,C_WHITE);
+  drawStrC(4+bw/2,19,ms,C_BLACK,mc,1);
 
-  // Title — centre
+  // Title centred
   drawStrC(SCR_W/2,(HDR_H-16)/2,title,C_WHITE,0xFFFF,2);
 
-  // Battery + link dot — right
+  // Battery + link
   uint16_t bc=T.pct>50?C_MINT:(T.pct>20?C_AMBER:C_CORAL);
-  char bat[8]; snprintf(bat,sizeof(bat),"%d%%",T.pct);
-  drawStr(SCR_W-strW(bat)-18,(HDR_H-8)/2,bat,bc,0xFFFF,1);
-  fillCircle(SCR_W-8,HDR_H/2,5,megaLinked?C_MINT:C_CORAL);
-  if(megaLinked) drawCircle(SCR_W-8,HDR_H/2,6,0x03E0u);
+  char bat[10]; snprintf(bat,sizeof(bat),"%d%%",T.pct);
+  drawStrR(SCR_W-18,(HDR_H-8)/2,bat,bc,0xFFFF,1);
+  pulseDot(SCR_W-10,HDR_H/2,5,megaLinked?C_MINT:C_CORAL,megaLinked);
 }
 
 void drawFooter(){
   int fy=SCR_H-FTR_H;
-  fillGrad(0,fy,SCR_W,FTR_H,C_BG,0x0821u);
-  drawFastHLine(0,fy,SCR_W,C_LINE);
+  fillGrad(0,fy,SCR_W,FTR_H,C_BG,0x0841u);
+  drawH(0,fy,SCR_W,C_PURPLE);
+  drawH(0,fy+1,SCR_W,C_DPURP);
 
-  // E-STOP pill — always left
+  // E-STOP
   uint16_t ec=T.estop?C_AMBER:C_CORAL;
+  fillRR(6,fy+8,86,32,6,T.estop?0x4200u:0x2800u);
+  drawRR(6,fy+8,86,32,6,ec);
+  drawRR(8,fy+10,82,28,4,ec);
   const char* el=T.estop?"RESUME":"E-STOP";
-  drawBadge(8,fy+10,82,36,ec,el,1);
+  drawStrC(49,fy+20,el,ec,0xFFFF,1);
 
-
-  // Hazard chips — centre
+  // Hazard pills
   int ix=100;
-  if(SF.flame && T.haz){ drawBadge(ix,fy+14,44,24,C_CORAL,"FLAME",1); ix+=50; }
-  if(T.tilt)  { drawBadge(ix,fy+14,36,24,C_AMBER,"TILT",1); ix+=42; }
+  if(T.tilt){ fillRR(ix,fy+12,40,24,6,0x2200u); drawRR(ix,fy+12,40,24,6,C_AMBER); drawStrC(ix+20,fy+20,"TILT",C_AMBER,0xFFFF,1); ix+=46; }
+  if(T.ir)  { fillRR(ix,fy+12,28,24,6,0x0210u); drawRR(ix,fy+12,28,24,6,C_MINT);  drawStrC(ix+14,fy+20,"IR",  C_MINT, 0xFFFF,1); ix+=34; }
 
-  // Mega link age — right
-  char buf[16];
+  // Mega link
   if(megaLinked){
     unsigned long age=(millis()-lastMegaRx)/1000;
+    char buf[14];
     if(age<5) snprintf(buf,sizeof(buf),"LIVE");
     else      snprintf(buf,sizeof(buf),"%lus",age);
     uint16_t lc=age<5?C_MINT:C_AMBER;
-    drawStr(SCR_W-strW(buf)-8,fy+22,buf,lc,0xFFFF,1);
-    drawStr(SCR_W-strW(buf)-8-strW("Mega ")-2,fy+22,"Mega",C_MGRAY,0xFFFF,1);
+    drawStrR(SCR_W-6,fy+13,"Mega",C_DGRAY,0xFFFF,1);
+    drawStrR(SCR_W-6,fy+23,buf,lc,0xFFFF,1);
   } else {
-    drawStr(SCR_W-50,fy+22,"No Mega",C_CORAL,0xFFFF,1);
+    drawStrR(SCR_W-6,fy+18,"NO LINK",C_CORAL,0xFFFF,1);
   }
 }
 
 bool drawBackBtn(Touch& t){
   int fy=SCR_H-FTR_H;
-  // Back arrow button reuses right side of footer
-  drawBadge(SCR_W-72,fy+10,64,36,C_SURF2,"< BACK",1);
-  return hit(t,SCR_W-72,fy+10,64,36);
+  fillRR(SCR_W-74,fy+8,68,32,6,C_SURF2);
+  drawRR(SCR_W-74,fy+8,68,32,6,C_PURPLE);
+  drawStrC(SCR_W-40,fy+20,"< BACK",C_PURPLE,0xFFFF,1);
+  return hit(t,SCR_W-74,fy+8,68,32);
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  BOOT SCREEN
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+//  BOOT SCREEN — animated, no flicker
+// ══════════════════════════════════════════════════════════════════════
 void drawBoot(){
-  static unsigned long lastDot=0; static uint8_t di=0;
+  static unsigned long lastAnim=0;
+  static uint8_t di=0;
+  static uint8_t phase=0;
+
   if(scrDirty){
     fillScreen(C_BG);
-    // Logo area — top third
-    fillGrad(0,0,SCR_W,160,0x0821u,C_BG);
-    drawStrC(SCR_W/2,52,"BuddyBot",C_CYAN,0xFFFF,4);
-    drawStrC(SCR_W/2,90,"Orbital HMI  v3.0",C_LGRAY,0xFFFF,1);
-    drawFastHLine(40,110,SCR_W-80,C_LINE);
-    drawStrC(SCR_W/2,120,"For AJ  ♡",C_DCYAN,0xFFFF,1);
+    // Background grid
+    for(int16_t gx=0;gx<SCR_W;gx+=20) drawV(gx,0,SCR_H,0x0421u);
+    for(int16_t gy=0;gy<SCR_H;gy+=20) drawH(0,gy,SCR_W,0x0421u);
 
-    // Hardware info card
-    drawCard(16,148,SCR_W-32,72);
-    drawStrC(SCR_W/2,160,"Hardware",C_MGRAY,0xFFFF,1);
-    drawStrC(SCR_W/2,178,"ST7796S  320×480  SPI",C_LGRAY,0xFFFF,1);
-    drawStrC(SCR_W/2,194,"FT6336U  Capacitive Touch",C_LGRAY,0xFFFF,1);
-    drawStrC(SCR_W/2,210,"RP2040  Raspberry Pi Pico",C_LGRAY,0xFFFF,1);
+    // Logo box
+    fillGrad(20,60,SCR_W-40,110,0x0841u,C_BG);
+    hexFrame(20,60,SCR_W-40,110,C_CYAN,10);
+    drawStrC(SCR_W/2,80,"BUDDYBOT",C_CYAN,0xFFFF,4);
+    drawStrC(SCR_W/2,116,"NEXUS  HMI  v4.0",C_DCYAN,0xFFFF,1);
+    drawH(40,136,SCR_W-80,C_LINE);
+    drawStrC(SCR_W/2,144,"For AJ   |   Guardian System",C_MGRAY,0xFFFF,1);
 
-    drawStrC(SCR_W/2,250,"Waiting for Mega...",C_AMBER,0xFFFF,2);
+    // Hardware info
+    neonBox(20,174,SCR_W-40,76,C_PURPLE,C_SURF);
+    drawStrC(SCR_W/2,184,"HARDWARE",C_PURPLE,C_SURF,1);
+    drawStrC(SCR_W/2,200,"ST7796S  320x480  Direct SPI",C_LGRAY,C_SURF,1);
+    drawStrC(SCR_W/2,212,"FT6336U  Capacitive Touch",C_LGRAY,C_SURF,1);
+    drawStrC(SCR_W/2,224,"RP2040   Raspberry Pi Pico",C_LGRAY,C_SURF,1);
+    drawStrC(SCR_W/2,236,"NEXUS-OS  Serial1  115200",C_LGRAY,C_SURF,1);
+
+    drawStrC(SCR_W/2,270,"Waiting for Mega...",C_AMBER,0xFFFF,2);
     scrDirty=false;
   }
-  // Animated dot strip
-  if(millis()-lastDot>250){ lastDot=millis(); di=(di+1)%6; }
-  int dx=SCR_W/2-38;
-  for(int i=0;i<6;i++) fillCircle(dx+i*16,290,i==di?6:3,i<=di?C_CYAN:C_DGRAY);
+
+  // Dot animation
+  if(millis()-lastAnim>200){ lastAnim=millis(); di=(di+1)%8; }
+  int16_t dx=SCR_W/2-56;
+  for(int i=0;i<8;i++){
+    uint16_t dc=(i<=di)?C_CYAN:C_DGRAY;
+    int16_t r=(i==di)?6:3;
+    fillRect(dx+i*16-r,300-r,r*2+1,r*2+1,C_BG);
+    fillCircle(dx+i*16,300,r,dc);
+    if(i==di){
+      drawCircle(dx+i*16,300,r+2,C_XCYAN);
+    }
+  }
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  MAIN DASHBOARD
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+//  MAIN DASHBOARD — smart partial updates (no flicker)
+// ══════════════════════════════════════════════════════════════════════
+
+// Cell positions for the telemetry grid
+#define CELL_W   ((SCR_W-18)/2)
+#define CELL_H   54
+#define CELL_X1  6
+#define CELL_X2  (CELL_X1+CELL_W+6)
+#define CELL_Y1  (CNT_Y+6)
+#define CELL_Y2  (CELL_Y1+CELL_H+4)
+#define CELL_Y3  (CELL_Y2+CELL_H+4)
+
+void updateTelCell(int16_t x,int16_t y,const char* lbl,const char* val,uint16_t col){
+  valueCell(x,y,CELL_W,CELL_H,lbl,val,col,C_SURF);
+}
+
+void drawMainFull(){
+  fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);
+  // Background grid lines
+  for(int16_t gx=0;gx<SCR_W;gx+=16) drawV(gx,CNT_Y,CNT_H,0x0421u);
+
+  // Section: TELEMETRY
+  sectionDiv(CNT_Y+4,"TELEMETRY",C_CYAN);
+
+  // Mode selector row
+  int mw=(SCR_W-24)/3;
+  struct { const char* l; uint16_t c; const char* cmd; } modes[]={
+    {"NORMAL",C_CYAN,"NORMAL"},{"BODYGUARD",C_AMBER,"BODYGUARD"},{"DOG",C_MINT,"DOG"}
+  };
+  for(int i=0;i<3;i++){
+    int mx=6+i*(mw+6);
+    int my=CELL_Y3+CELL_H+10;
+    bool act=(T.mode==modes[i].cmd);
+    uint16_t bg=act?modes[i].c:C_SURF2;
+    uint16_t fg=act?C_BLACK:modes[i].c;
+    fillRR(mx,my,mw,34,6,bg);
+    drawRR(mx,my,mw,34,6,modes[i].c);
+    if(act){ fillRect(mx+4,my,mw-8,2,C_WHITE); }
+    drawStrC(mx+mw/2,my+13,modes[i].l,fg,0xFFFF,1);
+  }
+  sectionDiv(CELL_Y3+CELL_H+54,"MODE",C_PURPLE);
+
+  // Nav buttons
+  int ny=CELL_Y3+CELL_H+64;
+  int nbw=(SCR_W-18)/2, nbh=44;
+  struct { const char* l; uint16_t c; Screen s; } nav[]={
+    {"RADAR",C_CYAN,SCR_RADAR},{"GAMES",C_MINT,SCR_GAMES},
+    {"SENSORS",C_AMBER,SCR_SENSORS},{"INFO",C_PURPLE,SCR_INFO}
+  };
+  for(int i=0;i<4;i++){
+    int nx2=6+(i%2)*(nbw+6);
+    int ny2=ny+(i/2)*(nbh+6);
+    neonBox(nx2,ny2,nbw,nbh,nav[i].c,C_SURF);
+    drawStrC(nx2+nbw/2,ny2+nbh/2-4,nav[i].l,nav[i].c,0xFFFF,2);
+  }
+}
+
+void updateTelemetryOnly(){
+  char buf[22];
+  // Row 1
+  snprintf(buf,sizeof(buf),"%.1fC",T.temp);
+  updateTelCell(CELL_X1,CELL_Y1,"TEMP",buf,T.temp>38?C_CORAL:T.temp>32?C_AMBER:C_CYAN);
+  snprintf(buf,sizeof(buf),"%.0f%%",T.hum);
+  updateTelCell(CELL_X2,CELL_Y1,"HUMIDITY",buf,C_CYAN);
+  // Row 2
+  snprintf(buf,sizeof(buf),"%d%%",T.pct);
+  updateTelCell(CELL_X1,CELL_Y2,"BATTERY",buf,T.pct>50?C_MINT:T.pct>20?C_AMBER:C_CORAL);
+  snprintf(buf,sizeof(buf),"%.1fV",T.volt);
+  updateTelCell(CELL_X2,CELL_Y2,"VOLTAGE",buf,T.volt>7.5f?C_MINT:T.volt>7.0f?C_AMBER:C_CORAL);
+  // Row 3
+  snprintf(buf,sizeof(buf),"%d",T.gas);
+  updateTelCell(CELL_X1,CELL_Y3,"GAS",buf,T.gas>400?C_CORAL:T.gas>200?C_AMBER:C_MINT);
+  // Sensor status flags
+  fillRect(CELL_X2,CELL_Y3,CELL_W,CELL_H,C_SURF);
+  drawRR(CELL_X2,CELL_Y3,CELL_W,CELL_H,4,C_LINE);
+  fillRect(CELL_X2+4,CELL_Y3,CELL_W-8,2,C_PURPLE);
+  drawStr(CELL_X2+4,CELL_Y3+5,"SENSORS",C_PURPLE,C_SURF,1);
+  // Status dots row
+  struct { const char* l; bool v; uint16_t c; } flags[]={
+    {"R3",T.r3ok,C_MINT},{"ESP",T.espok,C_CYAN},{"S9",T.s9ok,C_PURPLE},{"AUTO",T.autoM,C_AMBER}
+  };
+  int fx=CELL_X2+4;
+  for(int i=0;i<4;i++){
+    pulseDot(fx+6,CELL_Y3+CELL_H/2+4,4,flags[i].c,flags[i].v);
+    drawStr(fx+12,CELL_Y3+CELL_H/2,flags[i].l,flags[i].v?flags[i].c:C_MGRAY,C_SURF,1);
+    fx+=(CELL_W-8)/4;
+  }
+}
+
 void drawMain(Touch& t){
-  if(scrDirty){ fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG); scrDirty=false; }
-  drawHeader("Dashboard");
+  // First visit — draw full layout
+  if(scrDirty||firstMainDraw){
+    drawMainFull();
+    firstMainDraw=false;
+    scrDirty=false;
+  }
+
+  drawHeader("NEXUS DASHBOARD");
   drawFooter();
 
-  int y=CNT_Y+6, pad=8;
+  // Only update telemetry cells — no full screen wipe
+  updateTelemetryOnly();
+  scanLine(0,CNT_Y,SCR_W,CNT_H);
 
-  // ── MODE SELECTOR — 3 wide buttons ───────────────────────────────
+  // Touch — mode buttons
+  int mw=(SCR_W-24)/3;
   struct { const char* l; uint16_t c; const char* cmd; } modes[]={
-    {"NORMAL",C_CYAN,"NORMAL"},
-    {"BODYGUARD",C_AMBER,"BODYGUARD"},
-    {"DOG GUARD",C_MINT,"DOG"},
+    {"NORMAL",C_CYAN,"NORMAL"},{"BODYGUARD",C_AMBER,"BODYGUARD"},{"DOG",C_MINT,"DOG"}
   };
-  int mw=(SCR_W-pad*4)/3;
   for(int i=0;i<3;i++){
-    int mx=pad+i*(mw+pad);
-    bool act=(T.mode==modes[i].cmd);
-    drawBtn(mx,y,mw,40,modes[i].c,modes[i].l,1,act);
-    if(hit(t,mx,y,mw,40)){
+    int mx=6+i*(mw+6);
+    int my=CELL_Y3+CELL_H+10;
+    if(hit(t,mx,my,mw,34)){
       MEGA_SERIAL.print("MODE:"); MEGA_SERIAL.println(modes[i].cmd);
-      T.mode=modes[i].cmd; t.pressed=false;
+      T.mode=modes[i].cmd; firstMainDraw=true; t.pressed=false; return;
     }
   }
-  y+=48;
 
-  // ── TELEMETRY CARD ────────────────────────────────────────────────
-  int cw=SCR_W-pad*2, rh=22;
-  drawCard(pad,y,cw,rh*5+10,C_DCYAN);
-  char buf[32];
-  snprintf(buf,sizeof(buf),"%.1f C    %.0f%%",T.temp,T.hum);
-  valueRow(pad,y+2,cw,"Temp / Humidity",buf,C_CYAN,C_SURF);
-  snprintf(buf,sizeof(buf),"F:%ldcm",T.dFront);
-  uint16_t dc=T.dFront>0&&T.dFront<30?C_CORAL:T.dFront>0&&T.dFront<60?C_AMBER:C_CYAN;
-  valueRow(pad,y+2+rh,cw,"Front sensor",buf,dc,C_SURF);
-  snprintf(buf,sizeof(buf),"R:%ld  L:%ld  Ri:%ld",T.dRear,T.dLeft,T.dRight);
-  valueRow(pad,y+2+rh*2,cw,"R / L / Right",buf,C_CYAN,C_SURF);
-  snprintf(buf,sizeof(buf),"%d",T.gas);
-  valueRow(pad,y+2+rh*3,cw,"Gas level",buf,T.gas>300?C_CORAL:C_MINT,C_SURF);
-  snprintf(buf,sizeof(buf),"%.2fA   %.2fV",T.amps,T.volt);
-  uint16_t vc=T.volt>7.5f?C_MINT:(T.volt>7.0f?C_AMBER:C_CORAL);
-  valueRow(pad,y+2+rh*4,cw,"Current / Voltage",buf,vc,C_SURF);
-  y+=rh*5+18;
-
-  // ── STATUS CHIPS ─────────────────────────────────────────────────
-  struct { const char* l; bool ok; } chips[]={
-    {"R3",T.r3ok},{"ESP",T.espok},{"S9",T.s9ok},{"AUTO",T.autoM}
-  };
-  int cw2=(SCR_W-pad*5)/4;
-  for(int i=0;i<4;i++){
-    int cx=pad+i*(cw2+pad);
-    uint16_t cc=chips[i].ok?C_MINT:C_CORAL;
-    fillRoundRect(cx,y,cw2,26,6,chips[i].ok?0x0240u:0x2800u);
-    drawRoundRect(cx,y,cw2,26,6,cc);
-    drawStrC(cx+cw2/2,y+9,chips[i].l,cc,0xFFFF,1);
-  }
-  y+=34;
-
-  // ── NAV GRID — 4 tiles ────────────────────────────────────────────
+  // Touch — nav buttons
+  int ny=CELL_Y3+CELL_H+64;
+  int nbw=(SCR_W-18)/2, nbh=44;
   struct { const char* l; uint16_t c; Screen s; } nav[]={
-    {"RADAR",C_CYAN,SCR_RADAR},
-    {"GAMES",C_MINT,SCR_GAMES},
-    {"SENSORS",C_AMBER,SCR_SENSORS},
-    {"INFO",C_PURP,SCR_INFO},
+    {"RADAR",C_CYAN,SCR_RADAR},{"GAMES",C_MINT,SCR_GAMES},
+    {"SENSORS",C_AMBER,SCR_SENSORS},{"INFO",C_PURPLE,SCR_INFO}
   };
-  int tw=(SCR_W-pad*3)/2;
-  int th=(CNT_H+CNT_Y-y-pad*3)/2;
-  th=max(th,44);
   for(int i=0;i<4;i++){
-    int tx=pad+(i%2)*(tw+pad);
-    int ty=y+(i/2)*(th+pad);
-    drawBtn(tx,ty,tw,th,nav[i].c,nav[i].l,2,false);
-    if(hit(t,tx,ty,tw,th)){ curScr=nav[i].s; scrDirty=true; t.pressed=false; return; }
+    int nx2=6+(i%2)*(nbw+6);
+    int ny2=ny+(i/2)*(nbh+6);
+    if(hit(t,nx2,ny2,nbw,nbh)){
+      curScr=nav[i].s; scrDirty=true; firstMainDraw=true; t.pressed=false; return;
+    }
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  RADAR
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+//  RADAR — animated neon sweep
+// ══════════════════════════════════════════════════════════════════════
 void drawRadar(Touch& t){
   if(scrDirty){ fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG); scrDirty=false; }
-  drawHeader("Proximity Radar"); drawFooter();
-  if(drawBackBtn(t)){ curScr=SCR_MAIN; scrDirty=true; t.pressed=false; return; }
+  drawHeader("PROXIMITY RADAR"); drawFooter();
+  if(drawBackBtn(t)){ curScr=SCR_MAIN; scrDirty=true; firstMainDraw=true; t.pressed=false; return; }
 
-  const int CX=SCR_W/2, CY=CNT_Y+CNT_H/2+10, MR=110;
+  const int CX=SCR_W/2, CY=CNT_Y+CNT_H/2+20, MR=106;
+  // Animated sweep
+  float sweep=((millis()%3000)/3000.0f)*2*3.14159f;
+
+  // Clear radar area
+  fillCircle(CX,CY,MR+8,C_BG);
+
+  // Range rings with neon glow
+  uint16_t rings[]={0x2800u,0x4900u,0x0210u,C_XCYAN};
   for(int r=1;r<=4;r++){
-    uint16_t rc=(r==1)?C_CORAL:(r==2)?C_AMBER:C_DGRAY;
-    drawCircle(CX,CY,(MR*r)/4,rc);
-    char rb[8]; snprintf(rb,sizeof(rb),"%dcm",r*25);
-    drawStr(CX+(MR*r)/4+3,CY-5,rb,C_DGRAY,0xFFFF,1);
+    drawCircle(CX,CY,(MR*r)/4,rings[r-1]);
+    char rb[8]; snprintf(rb,sizeof(rb),"%d",r*25);
+    drawStr(CX+(MR*r)/4+2,CY-5,rb,C_DGRAY,0xFFFF,1);
   }
-  drawFastHLine(CX-MR,CY,MR*2,C_SURF);
-  drawFastVLine(CX,CY-MR,MR*2,C_SURF);
-  fillCircle(CX,CY,6,C_CYAN);
-  drawCircle(CX,CY,8,C_DCYAN);
+  // Cross hairs
+  drawH(CX-MR,CY,MR*2,C_SURF2);
+  drawV(CX,CY-MR,MR*2,C_SURF2);
 
+  // Sweep trail (fade)
+  for(int step=0;step<12;step++){
+    float a=sweep-step*0.15f;
+    int sx=CX+(int)(cosf(a-1.5708f)*MR);
+    int sy=CY+(int)(sinf(a-1.5708f)*MR);
+    uint8_t alpha=12-step;
+    uint16_t sc=((alpha>>1)<<5); // fading green
+    fillRect((CX+sx)/2-1,(CY+sy)/2-1,2,2,sc);
+  }
+  // Sweep line
+  int sx=CX+(int)(cosf(sweep-1.5708f)*MR);
+  int sy=CY+(int)(sinf(sweep-1.5708f)*MR);
+  // Draw sweep line pixel by pixel for glow
+  for(int r=2;r<=MR;r+=2){
+    int px=CX+(int)(cosf(sweep-1.5708f)*r);
+    int py=CY+(int)(sinf(sweep-1.5708f)*r);
+    fillRect(px-1,py-1,2,2,C_MINT);
+  }
+
+  // Centre
+  fillCircle(CX,CY,6,C_BG);
+  fillCircle(CX,CY,5,C_CYAN);
+  drawCircle(CX,CY,7,C_DCYAN);
+
+  // Plot sensors
   auto plot=[&](long d,float ang,const char* l){
-    float a=ang*0.01745329f;
-    int r=(d>0&&d<100)?(int)((1.0f-d/100.0f)*MR):0;
-    int px=CX+(int)(sinf(a)*r), py=CY-(int)(cosf(a)*r);
-    uint16_t c=(d>0&&d<25)?C_CORAL:(d>0&&d<50)?C_AMBER:C_MINT;
-    if(r>0){ fillCircle(px,py,8,c); drawCircle(px,py,10,c); }
-    char db[14];
-    if(d>0) snprintf(db,sizeof(db),"%s:%ld",l,d);
-    else    snprintf(db,sizeof(db),"%s:--",l);
-    int lx=CX+(int)(sinf(a)*(MR+20))-strW(db)*3;
-    int ly=CY-(int)(cosf(a)*(MR+20))-4;
+    if(d<=0) return;
+    float a=(ang-90.0f)*0.01745329f;
+    float frac=1.0f-constrain(d,0,100)/100.0f;
+    int r=(int)(frac*MR); if(r<4)return;
+    int px=CX+(int)(cosf(a)*r);
+    int py=CY+(int)(sinf(a)*r);
+    uint16_t col=d<25?C_CORAL:d<60?C_AMBER:C_MINT;
+    // Glow
+    for(int gr=12;gr>=4;gr-=4){
+      uint8_t gv=12-gr+4;
+      drawCircle(px,py,gr,d<25?((gv>>1)<<11):(d<60?((gv>>1)<<11|(gv>>1)<<5):((gv>>1)<<5)));
+    }
+    fillCircle(px,py,5,col);
+    char db[12]; snprintf(db,sizeof(db),"%s%ldcm",l,d);
+    int lx=CX+(int)(cosf(a)*(MR+14))-strW(db)/2;
+    int ly=CY+(int)(sinf(a)*(MR+14))-4;
     lx=constrain(lx,2,SCR_W-strW(db)-2);
-    ly=constrain(ly,CNT_Y+4,SCR_H-FTR_H-12);
-    drawStr(lx,ly,db,c,0xFFFF,1);
+    ly=constrain(ly,CNT_Y+4,SCR_H-FTR_H-14);
+    drawStr(lx,ly,db,col,0xFFFF,1);
   };
-  plot(T.dFront,0,"F"); plot(T.dRear,180,"R");
-  plot(T.dLeft,-90,"L"); plot(T.dRight,90,"Ri");
+  plot(T.dFront,0,"F:"); plot(T.dRear,180,"R:");
+  plot(T.dLeft,270,"L:"); plot(T.dRight,90,"Ri:");
 }
 
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 //  GAMES MENU
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 void drawGamesMenu(Touch& t){
   if(scrDirty){ fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG); scrDirty=false; }
-  drawHeader("Games for AJ"); drawFooter();
-  if(drawBackBtn(t)){ curScr=SCR_MAIN; scrDirty=true; t.pressed=false; return; }
+  drawHeader("GAMES FOR AJ"); drawFooter();
+  if(drawBackBtn(t)){ curScr=SCR_MAIN; scrDirty=true; firstMainDraw=true; t.pressed=false; return; }
 
-  drawStrC(SCR_W/2,CNT_Y+16,"Tap a game to play!",C_MGRAY,0xFFFF,1);
+  drawStrC(SCR_W/2,CNT_Y+10,"Choose your game!",C_MGRAY,0xFFFF,1);
 
-  struct { const char* n; Screen s; uint16_t c; const char* d; const char* icon; } g[]={
-    {"COLOURS",  SCR_GAME_COLOR, C_RED,   "Match the colour", "C"},
-    {"SHAPES",   SCR_GAME_SHAPE, C_CYAN,  "Find the shape",   "S"},
-    {"COUNTING", SCR_GAME_COUNT, C_YLLOW, "Count the stars",  "*"},
+  struct { const char* n; Screen s; uint16_t c; const char* d; const char* ic; } g[]={
+    {"COLOURS",  SCR_GAME_COLOR, C_RED,    "Match the colour",  "C"},
+    {"SHAPES",   SCR_GAME_SHAPE, C_CYAN,   "Find the shape",    "S"},
+    {"COUNTING", SCR_GAME_COUNT, C_YLLOW,  "Count the stars",   "*"},
   };
-  int gh=(CNT_H-80)/3;
+  int gh=(CNT_H-52)/3;
   for(int i=0;i<3;i++){
-    int gy=CNT_Y+40+i*(gh+10);
-    drawCard(10,gy,SCR_W-20,gh,g[i].c);
+    int gy=CNT_Y+30+i*(gh+8);
+    // Card
+    fillGrad(6,gy,SCR_W-12,gh,C_SURF,C_BG);
+    hexFrame(6,gy,SCR_W-12,gh,g[i].c,10);
+    // Neon accent
+    fillRect(6,gy,SCR_W-12,3,g[i].c);
     // Icon circle
-    fillCircle(48,gy+gh/2,22,0x0841u);
-    drawCircle(48,gy+gh/2,22,g[i].c);
-    drawStrC(48,gy+gh/2-8,g[i].icon,g[i].c,0xFFFF,3);
+    fillCircle(44,gy+gh/2,22,C_SURF2);
+    drawCircle(44,gy+gh/2,22,g[i].c);
+    drawCircle(44,gy+gh/2,20,g[i].c);
+    drawStrC(44,gy+gh/2-8,g[i].ic,g[i].c,0xFFFF,3);
     // Text
-    drawStr(80,gy+gh/2-14,g[i].n,g[i].c,0xFFFF,2);
-    drawStr(80,gy+gh/2+4,g[i].d,C_MGRAY,0xFFFF,1);
-    if(hit(t,10,gy,SCR_W-20,gh)){
+    drawStr(76,gy+gh/2-12,g[i].n,g[i].c,0xFFFF,2);
+    drawStr(76,gy+gh/2+6,g[i].d,C_MGRAY,0xFFFF,1);
+    // Arrow
+    drawStr(SCR_W-22,gy+gh/2-4,">",g[i].c,0xFFFF,2);
+    if(hit(t,6,gy,SCR_W-12,gh)){
       gTarget=random(i==2?5:(i==0?4:3));
-      if(i==2) gTarget++;
-      gScore=0; gFeedbackUntil=0;
-      curScr=g[i].s; scrDirty=true; t.pressed=false; return;
+      if(i==2)gTarget++;
+      gScore=0;gFeedbackUntil=0;
+      curScr=g[i].s;scrDirty=true;t.pressed=false;return;
     }
   }
 }
 
-// Game feedback
 void gameCorrect(uint8_t s,int nm){
   gScore++;
   fillRect(0,CNT_Y,SCR_W,CNT_H,0x0240u);
-  drawStrC(SCR_W/2,SCR_H/2-30,"CORRECT!",C_MINT,0xFFFF,4);
-  char sb[16]; snprintf(sb,sizeof(sb),"Score: %d",gScore);
-  drawStrC(SCR_W/2,SCR_H/2+10,sb,C_WHITE,0xFFFF,2);
-  fillCircle(SCR_W/2,SCR_H/2+60,24,C_MINT);
-  drawStrC(SCR_W/2,SCR_H/2+52,"OK",C_BLACK,0xFFFF,2);
+  // Large check-like indicator
+  for(int i=0;i<3;i++) drawCircle(SCR_W/2,SCR_H/2-30,30+i*4,C_MINT);
+  fillCircle(SCR_W/2,SCR_H/2-30,28,C_MINT);
+  drawStrC(SCR_W/2,SCR_H/2-38,"OK",C_BLACK,0xFFFF,4);
+  drawStrC(SCR_W/2,SCR_H/2+10,"CORRECT!",C_MINT,0xFFFF,3);
+  char sb[20];snprintf(sb,sizeof(sb),"Score: %d",gScore);
+  drawStrC(SCR_W/2,SCR_H/2+40,sb,C_WHITE,0xFFFF,2);
   gTarget=random(nm)+(s==SCR_GAME_COUNT?1:0);
   gFeedbackUntil=millis()+900;
 }
+
 void gameWrong(){
   fillRect(0,CNT_Y,SCR_W,CNT_H,0x2800u);
-  drawStrC(SCR_W/2,SCR_H/2-30,"Try Again!",C_CORAL,0xFFFF,3);
-  drawStrC(SCR_W/2,SCR_H/2+10,"That's not it...",C_LGRAY,0xFFFF,1);
+  for(int i=0;i<3;i++) drawCircle(SCR_W/2,SCR_H/2-30,30+i*4,C_CORAL);
+  fillCircle(SCR_W/2,SCR_H/2-30,28,C_CORAL);
+  drawStrC(SCR_W/2,SCR_H/2-38,"X",C_WHITE,0xFFFF,4);
+  drawStrC(SCR_W/2,SCR_H/2+10,"Try Again!",C_CORAL,0xFFFF,2);
   gFeedbackUntil=millis()+700;
 }
 
 void drawGameColor(Touch& t){
-  if(millis()<gFeedbackUntil) return;
-  if(scrDirty){ fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG); scrDirty=false; }
-  drawHeader("Colour Match"); drawFooter();
-  if(drawBackBtn(t)){ curScr=SCR_GAMES; scrDirty=true; t.pressed=false; return; }
-  char sb[16]; snprintf(sb,sizeof(sb),"Score: %d",gScore);
-  drawStr(SCR_W-strW(sb)-8,CNT_Y+8,sb,C_CYAN,0xFFFF,1);
-  drawStrC(SCR_W/2,CNT_Y+30,"Touch the colour:",C_LGRAY,0xFFFF,1);
-  drawStrC(SCR_W/2,CNT_Y+50,GCNAMES[gTarget],GCOLS[gTarget],0xFFFF,3);
-  int bw=(SCR_W-30)/2,bh=64;
+  if(millis()<gFeedbackUntil)return;
+  if(scrDirty){fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);scrDirty=false;}
+  drawHeader("COLOUR MATCH");drawFooter();
+  if(drawBackBtn(t)){curScr=SCR_GAMES;scrDirty=true;t.pressed=false;return;}
+  char sb[16];snprintf(sb,sizeof(sb),"Score: %d",gScore);
+  drawStrR(SCR_W-6,CNT_Y+8,sb,C_CYAN,0xFFFF,1);
+  drawStrC(SCR_W/2,CNT_Y+26,"Touch the colour:",C_LGRAY,0xFFFF,1);
+  drawStrC(SCR_W/2,CNT_Y+44,GCNAMES[gTarget],GCOLS[gTarget],0xFFFF,4);
+  int bw=(SCR_W-22)/2,bh=56;
   for(int i=0;i<4;i++){
-    int bx=8+(i%2)*(bw+14), by=CNT_Y+110+(i/2)*(bh+10);
-    fillRoundRect(bx,by,bw,bh,10,GCOLS[i]);
-    drawRoundRect(bx,by,bw,bh,10,C_WHITE);
-    drawStrC(bx+bw/2,by+bh/2-8,GCNAMES[i],C_WHITE,0xFFFF,2);
-    if(hit(t,bx,by,bw,bh)){ t.pressed=false; (i==gTarget)?gameCorrect(SCR_GAME_COLOR,4):gameWrong(); scrDirty=true; return; }
+    int bx=6+(i%2)*(bw+10);
+    int by=CNT_Y+108+(i/2)*(bh+10);
+    fillRR(bx,by,bw,bh,10,GCOLS[i]);
+    drawRR(bx,by,bw,bh,10,C_WHITE);
+    drawCircle(bx+bw/2,by+bh/2,14,C_WHITE);
+    if(hit(t,bx,by,bw,bh)){t.pressed=false;(i==gTarget)?gameCorrect(SCR_GAME_COLOR,4):gameWrong();scrDirty=true;return;}
   }
 }
 
 void drawGameShape(Touch& t){
   const char* SN[]={"CIRCLE","SQUARE","TRIANGLE"};
-  if(millis()<gFeedbackUntil) return;
-  if(scrDirty){ fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG); scrDirty=false; }
-  drawHeader("Shape Match"); drawFooter();
-  if(drawBackBtn(t)){ curScr=SCR_GAMES; scrDirty=true; t.pressed=false; return; }
-  char sb[16]; snprintf(sb,sizeof(sb),"Score: %d",gScore);
-  drawStr(SCR_W-strW(sb)-8,CNT_Y+8,sb,C_CYAN,0xFFFF,1);
-  drawStrC(SCR_W/2,CNT_Y+30,"Find the shape:",C_LGRAY,0xFFFF,1);
-  drawStrC(SCR_W/2,CNT_Y+52,SN[gTarget],C_CYAN,0xFFFF,3);
-  int bw=SCR_W-24, bh=66, by=CNT_Y+120;
+  if(millis()<gFeedbackUntil)return;
+  if(scrDirty){fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);scrDirty=false;}
+  drawHeader("SHAPE MATCH");drawFooter();
+  if(drawBackBtn(t)){curScr=SCR_GAMES;scrDirty=true;t.pressed=false;return;}
+  char sb[16];snprintf(sb,sizeof(sb),"Score: %d",gScore);
+  drawStrR(SCR_W-6,CNT_Y+8,sb,C_CYAN,0xFFFF,1);
+  drawStrC(SCR_W/2,CNT_Y+26,"Find the shape:",C_LGRAY,0xFFFF,1);
+  drawStrC(SCR_W/2,CNT_Y+44,SN[gTarget],C_CYAN,0xFFFF,3);
+  int bw=SCR_W-20,bh=58,by=CNT_Y+110;
   for(int i=0;i<3;i++){
-    drawCard(12,by,bw,bh);
-    int cx2=70, cy2=by+bh/2, r=22;
-    if(i==0) fillCircle(cx2,cy2,r,C_CYAN);
-    else if(i==1) fillRect(cx2-r,cy2-r,r*2,r*2,C_CYAN);
-    else fillTriangle(cx2,cy2-r,cx2-r,cy2+r,cx2+r,cy2+r,C_CYAN);
-    drawStr(104,by+bh/2-8,SN[i],C_WHITE,0xFFFF,2);
-    if(hit(t,12,by,bw,bh)){ t.pressed=false; (i==gTarget)?gameCorrect(SCR_GAME_SHAPE,3):gameWrong(); scrDirty=true; return; }
+    neonBox(10,by,bw,bh,C_CYAN,C_SURF);
+    int cx2=54,cy2=by+bh/2,r=20;
+    if(i==0)fillCircle(cx2,cy2,r,C_CYAN);
+    else if(i==1)fillRect(cx2-r,cy2-r,r*2,r*2,C_CYAN);
+    else fillTri(cx2,cy2-r,cx2-r,cy2+r,cx2+r,cy2+r,C_CYAN);
+    drawStr(88,by+bh/2-8,SN[i],C_WHITE,0xFFFF,2);
+    if(hit(t,10,by,bw,bh)){t.pressed=false;(i==gTarget)?gameCorrect(SCR_GAME_SHAPE,3):gameWrong();scrDirty=true;return;}
     by+=bh+8;
   }
 }
 
 void drawGameCount(Touch& t){
-  if(millis()<gFeedbackUntil) return;
-  if(scrDirty){ fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG); scrDirty=false; }
-  drawHeader("Count the Stars"); drawFooter();
-  if(drawBackBtn(t)){ curScr=SCR_GAMES; scrDirty=true; t.pressed=false; return; }
-  char sb[16]; snprintf(sb,sizeof(sb),"Score: %d",gScore);
-  drawStr(SCR_W-strW(sb)-8,CNT_Y+8,sb,C_CYAN,0xFFFF,1);
-  drawStrC(SCR_W/2,CNT_Y+30,"How many stars?",C_LGRAY,0xFFFF,1);
-  // Stars display
-  drawCard(12,CNT_Y+54,SCR_W-24,80,C_YLLOW);
+  if(millis()<gFeedbackUntil)return;
+  if(scrDirty){fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);scrDirty=false;}
+  drawHeader("COUNT THE STARS");drawFooter();
+  if(drawBackBtn(t)){curScr=SCR_GAMES;scrDirty=true;t.pressed=false;return;}
+  char sb[16];snprintf(sb,sizeof(sb),"Score: %d",gScore);
+  drawStrR(SCR_W-6,CNT_Y+8,sb,C_CYAN,0xFFFF,1);
+  drawStrC(SCR_W/2,CNT_Y+26,"How many stars?",C_LGRAY,0xFFFF,1);
+  // Stars panel
+  neonBox(10,CNT_Y+52,SCR_W-20,80,C_YLLOW,C_SURF);
   int sp=(gTarget>1)?((SCR_W-60)/(gTarget-1)):0;
   for(int i=0;i<gTarget;i++){
     int sx=(gTarget>1)?(26+i*sp):(SCR_W/2-9);
-    drawStrC(sx,CNT_Y+74,"*",C_YLLOW,0xFFFF,3);
+    drawStrC(sx,CNT_Y+76,"*",C_YLLOW,C_SURF,4);
   }
   // Number buttons
-  int bw=(SCR_W-36)/5, bh=60, by=CNT_Y+150;
+  int bw=(SCR_W-32)/5,bh=58,by=CNT_Y+148;
   for(int i=0;i<5;i++){
-    int bx=8+i*(bw+4);
-    char nb[3]; snprintf(nb,sizeof(nb),"%d",i+1);
+    int bx=6+i*(bw+4);
+    char nb[3];snprintf(nb,sizeof(nb),"%d",i+1);
     bool sel=(i+1==gTarget);
-    fillRoundRect(bx,by,bw,bh,8,sel?0x0840u:C_SURF2);
-    drawRoundRect(bx,by,bw,bh,8,C_YLLOW);
+    fillRR(bx,by,bw,bh,8,sel?0x0840u:C_SURF2);
+    drawRR(bx,by,bw,bh,8,C_YLLOW);
+    if(sel)drawRR(bx+2,by+2,bw-4,bh-4,6,C_YLLOW);
     drawStrC(bx+bw/2,by+bh/2-16,nb,C_YLLOW,0xFFFF,4);
-    if(hit(t,bx,by,bw,bh)){ t.pressed=false; (i+1==gTarget)?gameCorrect(SCR_GAME_COUNT,5):gameWrong(); scrDirty=true; return; }
+    if(hit(t,bx,by,bw,bh)){t.pressed=false;(i+1==gTarget)?gameCorrect(SCR_GAME_COUNT,5):gameWrong();scrDirty=true;return;}
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 //  INFO SCREEN
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 void drawInfo(Touch& t){
-  if(scrDirty){ fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG); scrDirty=false; }
-  drawHeader("System Info"); drawFooter();
-  if(drawBackBtn(t)){ curScr=SCR_MAIN; scrDirty=true; t.pressed=false; return; }
+  if(scrDirty){fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);scrDirty=false;}
+  drawHeader("SYSTEM INFO");drawFooter();
+  if(drawBackBtn(t)){curScr=SCR_MAIN;scrDirty=true;firstMainDraw=true;t.pressed=false;return;}
 
-  int y=CNT_Y+6, cw=SCR_W-16, rh=22;
-  drawCard(8,y,cw,rh*10+10,C_PURP);
+  int y=CNT_Y+8,rh=22,cw=SCR_W-12;
+  // Card
+  fillRR(6,y,cw,rh*10+12,6,C_SURF);
+  drawRR(6,y,cw,rh*10+12,6,C_LINE);
+  fillRect(6,y,cw,3,C_PURPLE);
 
   auto ir=[&](const char* l,const char* v,uint16_t vc){
-    valueRow(8,y+2,cw,l,v,vc,C_SURF); y+=rh;
+    drawStr(14,y+6,l,C_MGRAY,C_SURF,1);
+    drawStrR(SCR_W-14,y+6,v,vc,C_SURF,1);
+    drawH(10,y+rh-1,cw-8,C_LINE);
+    y+=rh;
   };
   char buf[28];
-  ir("Mega firmware", T.fw.length()?T.fw.c_str():"--", C_CYAN);
+  ir("Mega Firmware", T.fw.length()?T.fw.c_str():"--", C_CYAN);
   snprintf(buf,sizeof(buf),"%.2f V",T.volt);
-  ir("Battery voltage",buf,T.volt>7.5f?C_MINT:T.volt>7.0f?C_AMBER:C_CORAL);
+  ir("Battery Voltage",buf,T.volt>7.5f?C_MINT:T.volt>7.0f?C_AMBER:C_CORAL);
   snprintf(buf,sizeof(buf),"%d%%",T.pct);
-  ir("Battery level",buf,T.pct>50?C_MINT:C_AMBER);
+  ir("Battery Level",buf,T.pct>50?C_MINT:C_AMBER);
   snprintf(buf,sizeof(buf),"%.2f A",T.amps);
-  ir("Current draw",buf,C_LGRAY);
-  ir("R3 motors",T.r3ok?"LINKED":"OFFLINE",T.r3ok?C_MINT:C_CORAL);
-  ir("ESP32 bridge",T.espok?"LINKED":"WAITING",T.espok?C_MINT:C_AMBER);
+  ir("Current Draw",buf,C_LGRAY);
+  ir("R3 Motors",T.r3ok?"LINKED":"OFFLINE",T.r3ok?C_MINT:C_CORAL);
+  ir("ESP32 Bridge",T.espok?"LINKED":"WAITING",T.espok?C_MINT:C_AMBER);
   ir("S9 Android",T.s9ok?"LINKED":"WAITING",T.s9ok?C_MINT:C_AMBER);
-  ir("Autonomous",T.autoM?"ACTIVE":"OFF",T.autoM?C_MINT:C_MGRAY);
+  ir("Auto Mode",T.autoM?"ACTIVE":"OFF",T.autoM?C_MINT:C_DGRAY);
   snprintf(buf,sizeof(buf),"%lu s",millis()/1000);
-  ir("Pico uptime",buf,C_LGRAY);
+  ir("Pico Uptime",buf,C_LGRAY);
   snprintf(buf,sizeof(buf),"%lu s ago",(millis()-lastMegaRx)/1000);
-  ir("Last Mega rx",buf,megaLinked?C_MINT:C_CORAL);
+  ir("Last Mega RX",buf,megaLinked?C_MINT:C_CORAL);
 }
 
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 //  SENSORS SCREEN
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 void drawSensors(Touch& t){
-  if(scrDirty){ fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG); scrDirty=false; }
-  drawHeader("Sensor Config"); drawFooter();
-  if(drawBackBtn(t)){ curScr=SCR_MAIN; scrDirty=true; t.pressed=false; return; }
+  if(scrDirty){fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);scrDirty=false;}
+  drawHeader("SENSOR CONFIG");drawFooter();
+  if(drawBackBtn(t)){curScr=SCR_MAIN;scrDirty=true;firstMainDraw=true;t.pressed=false;return;}
 
-  struct SBtn { const char* id; bool* f; const char* l; };
+  struct SBtn { const char* id;bool* f;const char* l; };
   SBtn sb[]={
     {"DHT",&SF.dht,"DHT Temp"},{"GAS",&SF.gas,"Gas"},
     {"FLAME",&SF.flame,"Flame"},{"PIR",&SF.pir,"PIR"},
     {"TILT",&SF.tilt,"Tilt"},{"IR",&SF.ir,"IR Obst."},
     {"US",&SF.us,"Ultrasonic"},{"CURRENT",&SF.cur,"Current"},
   };
-  int bw=(SCR_W-24)/2, bh=40;
+  int bw=(SCR_W-18)/2,bh=42;
   for(int i=0;i<8;i++){
-    int bx=8+(i%2)*(bw+8), by=CNT_Y+8+(i/2)*(bh+8);
+    int bx=6+(i%2)*(bw+6),by=CNT_Y+6+(i/2)*(bh+6);
     bool on=*sb[i].f;
-    uint16_t bc=on?C_MINT:C_CORAL;
-    fillRoundRect(bx,by,bw,bh,8,on?0x0240u:0x2800u);
-    drawRoundRect(bx,by,bw,bh,8,bc);
-    drawStr(bx+10,by+8,sb[i].l,bc,0xFFFF,1);
-    drawStr(bx+bw-strW(on?"ON":"OFF")-8,by+8,on?"ON":"OFF",bc,0xFFFF,1);
+    uint16_t col=on?C_MINT:C_CORAL;
+    fillRR(bx,by,bw,bh,8,on?0x0240u:0x2800u);
+    drawRR(bx,by,bw,bh,8,col);
+    if(on)fillRect(bx+4,by,bw-8,2,col);
+    pulseDot(bx+14,by+bh/2,5,col,on);
+    drawStr(bx+26,by+bh/2-4,sb[i].l,col,0xFFFF,1);
+    drawStrR(bx+bw-6,by+bh/2-4,on?"ON":"OFF",col,0xFFFF,1);
     if(hit(t,bx,by,bw,bh)){
       *sb[i].f=!(*sb[i].f);
-      MEGA_SERIAL.print("TOGGLE_SENSOR:"); MEGA_SERIAL.print(sb[i].id);
+      MEGA_SERIAL.print("TOGGLE_SENSOR:");MEGA_SERIAL.print(sb[i].id);
       MEGA_SERIAL.println(*sb[i].f?":ON":":OFF");
-      scrDirty=true; t.pressed=false;
+      scrDirty=true;t.pressed=false;
     }
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 //  ALERT OVERLAY
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 void drawAlert(Touch& t){
-  const int AX=20,AY=100,AW=SCR_W-40,AH=240;
-  fillGrad(AX,AY,AW,AH,alertCol,0x0821u);
-  drawRoundRect(AX,AY,AW,AH,12,C_WHITE);
-  drawRoundRect(AX+2,AY+2,AW-4,AH-4,10,C_WHITE);
-  drawStrC(AX+AW/2,AY+30,alertTitle.c_str(),C_WHITE,0xFFFF,3);
-  drawFastHLine(AX+20,AY+72,AW-40,0x8410u);
-  drawStrC(AX+AW/2,AY+88,alertMsg.c_str(),C_WHITE,0xFFFF,2);
-  int bx=AX+(AW-100)/2, by=AY+AH-52;
-  fillRoundRect(bx,by,100,38,8,C_WHITE);
-  drawStrC(bx+50,by+15,"DISMISS",alertCol,0xFFFF,2);
-  if(hit(t,bx,by,100,38)||(alertTs&&millis()-alertTs>10000)){
-    alertOn=false; alertTs=0; scrDirty=true; t.pressed=false;
+  const int AX=16,AY=90,AW=SCR_W-32,AH=260;
+  fillGrad(AX,AY,AW,AH,alertCol,C_BG);
+  hexFrame(AX,AY,AW,AH,alertCol,14);
+  drawH(AX,AY+2,AW,alertCol);
+  drawH(AX,AY+4,AW,C_WHITE);
+  drawStrC(AX+AW/2,AY+24,alertTitle.c_str(),C_WHITE,0xFFFF,3);
+  drawH(AX+20,AY+66,AW-40,C_WHITE);
+  drawStrC(AX+AW/2,AY+80,alertMsg.c_str(),C_WHITE,0xFFFF,2);
+  // Dismiss button
+  int bx=AX+(AW-110)/2,by=AY+AH-54;
+  fillRR(bx,by,110,40,8,C_WHITE);
+  drawRR(bx,by,110,40,8,alertCol);
+  drawStrC(bx+55,by+16,"DISMISS",alertCol,0xFFFF,2);
+  if(hit(t,bx,by,110,40)||(alertTs&&millis()-alertTs>10000)){
+    alertOn=false;alertTs=0;scrDirty=true;firstMainDraw=true;t.pressed=false;
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 //  MEGA PROTOCOL PARSER
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 void raisAlert(const char* ti,const char* msg,uint16_t c){
-  alertTitle=ti; alertMsg=msg; alertCol=c; alertOn=true; alertTs=millis();
+  alertTitle=ti;alertMsg=msg;alertCol=c;alertOn=true;alertTs=millis();
 }
 void parseStat(const String& s){
-  String f[13]; int n=0,st=5;
-  for(int i=5;i<=(int)s.length()&&n<13;i++){
+  // V31: gas:temp:hum:haz:pir:tilt:ir:volt:pct:amps
+  String f[11];int n=0,st=5;
+  for(int i=5;i<=(int)s.length()&&n<11;i++){
     if(i==(int)s.length()||s[i]==':'){f[n++]=s.substring(st,i);st=i+1;}
   }
   if(n<10) return;
-  T.gas=f[0].toInt(); T.temp=f[1].toFloat(); T.hum=f[2].toFloat();
-  T.haz=f[3].toInt(); T.pir=f[4].toInt(); T.tilt=f[5].toInt();
+  T.gas=f[0].toInt();T.temp=f[1].toFloat();T.hum=f[2].toFloat();
+  T.haz=f[3].toInt();T.pir=f[4].toInt();T.tilt=f[5].toInt();
   T.ir=f[6].toInt();
-  T.volt=f[7].toFloat(); T.pct=f[8].toInt(); T.amps=f[9].toFloat();
+  T.volt=f[7].toFloat();T.pct=f[8].toInt();T.amps=f[9].toFloat();
 }
 void parseUS(const String& s){
-  String tmp=s.substring(3); String f[4]; int n=0,st=0;
+  String tmp=s.substring(3);String f[4];int n=0,st=0;
   for(int i=0;i<=(int)tmp.length()&&n<4;i++){
     if(i==(int)tmp.length()||tmp[i]==','){f[n++]=tmp.substring(st,i);st=i+1;}
   }
-  if(n<4) return;
-  T.dFront=f[0].toInt(); T.dRear=f[1].toInt();
-  T.dLeft=f[2].toInt();  T.dRight=f[3].toInt();
+  if(n<4)return;
+  T.dFront=f[0].toInt();T.dRear=f[1].toInt();
+  T.dLeft=f[2].toInt();T.dRight=f[3].toInt();
 }
 void parseStatus(const String& s){
   T.estop=(s.indexOf("ESTOP:YES")>=0);
@@ -823,23 +1037,27 @@ void parseStatus(const String& s){
   T.espok=(s.indexOf("ESP:OK")>=0);
   T.s9ok=(s.indexOf("S9:OK")>=0);
   int fi=s.indexOf("FW:");
-  if(fi>=0){ int fe=s.indexOf('|',fi); T.fw=(fe>0)?s.substring(fi+3,fe):s.substring(fi+3); }
+  if(fi>=0){int fe=s.indexOf('|',fi);T.fw=(fe>0)?s.substring(fi+3,fe):s.substring(fi+3);}
 }
-
 void parseSensStatus(const String& s){
-  // SENS_ST|DHT:1|GAS:1|FLAME:1|PIR:0|TILT:1|IR:1|US:1|CUR:1|END
-  // Sensor flag sync from Mega — update display indicators if needed
+  SF.dht=s.indexOf("DHT:1")>=0; SF.gas=s.indexOf("GAS:1")>=0;
+  SF.flame=s.indexOf("FLAME:1")>=0; SF.pir=s.indexOf("PIR:1")>=0;
+  SF.tilt=s.indexOf("TILT:1")>=0; SF.ir=s.indexOf("IR:1")>=0;
+  SF.us=s.indexOf("US:1")>=0; SF.cur=s.indexOf("CUR:1")>=0;
 }
 void handleMegaLine(String& line){
-  line.trim(); if(!line.length()) return;
-  lastMegaRx=millis(); megaLinked=true;
+  line.trim();if(!line.length())return;
+  lastMegaRx=millis();megaLinked=true;
+  int crcIdx=line.indexOf("|CRC:");
+  if(crcIdx>0)line=line.substring(0,crcIdx);
+  if(!line.length())return;
   if(line.startsWith("STAT:"))           parseStat(line);
   else if(line.startsWith("US:"))        parseUS(line);
   else if(line.startsWith("STATUS|")||line.startsWith("MEGA_READY|")||line.startsWith("SYSTEM|READY|")) parseStatus(line);
+  else if(line.startsWith("CONN_STATUS|"))  parseStatus(line);
+  else if(line.startsWith("SENS_ST|"))      parseSensStatus(line);
   else if(line.startsWith("MODE:"))      T.mode=line.substring(5);
   else if(line=="PING")                  MEGA_SERIAL.println("PONG");
-  else if(line.startsWith("CONN_STATUS|"))  parseStatus(line);   // boot status from Mega
-  else if(line.startsWith("SENS_ST|"))      parseSensStatus(line);
   else if(line.startsWith("BAT:WARN"))   raisAlert("Battery Low","Charge soon",C_AMBER);
   else if(line.startsWith("BAT:LOW"))    raisAlert("Battery Critical","Plug in NOW",C_CORAL);
   else if(line.startsWith("SAFETY:FLAME"))raisAlert("FLAME DETECTED","Check area",C_CORAL);
@@ -853,26 +1071,25 @@ void handleMegaSerial(){
   int budget=64;
   while(MEGA_SERIAL.available()&&budget-->0){
     char c=MEGA_SERIAL.read();
-    if(c=='\n'){ handleMegaLine(megaBuf); megaBuf=""; }
-    else if(c!='\r'){ megaBuf+=c; if(megaBuf.length()>128) megaBuf=""; }
+    if(c=='\n'){handleMegaLine(megaBuf);megaBuf="";}
+    else if(c!='\r'){megaBuf+=c;if(megaBuf.length()>128)megaBuf="";}
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 //  SETUP & LOOP
-// ════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
 void setup(){
   delay(500);
   displayInit();
-  // Diagnostic — confirms display alive
   fillScreen(C_RED);   delay(200);
   fillScreen(C_GREEN); delay(200);
   fillScreen(C_BG);
 
-  // Touch controller
+  // Touch
   pinMode(PIN_CTP_RST,OUTPUT);
-  digitalWrite(PIN_CTP_RST,LOW); delay(20);
-  digitalWrite(PIN_CTP_RST,HIGH); delay(100);
+  digitalWrite(PIN_CTP_RST,LOW);delay(20);
+  digitalWrite(PIN_CTP_RST,HIGH);delay(100);
   pinMode(PIN_CTP_INT,INPUT);
   Wire1.setSDA(PIN_CTP_SDA);
   Wire1.setSCL(PIN_CTP_SCL);
@@ -880,7 +1097,7 @@ void setup(){
   delay(100);
 
   // Mega UART
-  Serial1.setTX(0); Serial1.setRX(1);
+  Serial1.setTX(0);Serial1.setRX(1);
   MEGA_SERIAL.begin(115200);
   delay(200);
   MEGA_SERIAL.println("PONG");
@@ -893,36 +1110,30 @@ void setup(){
 void loop(){
   handleMegaSerial();
 
-  // Heartbeat
   if(millis()-lastPing>5000){
     lastPing=millis();
-    MEGA_SERIAL.print("PING_PICO:"); MEGA_SERIAL.println(pingSeq++);
-    if(pingSeq>9999) pingSeq=0;
+    MEGA_SERIAL.print("PING_PICO:");MEGA_SERIAL.println(pingSeq++);
+    if(pingSeq>9999)pingSeq=0;
   }
-  // Watchdog
-  if(megaLinked&&millis()-lastMegaRx>12000) megaLinked=false;
-  // Boot advance
-  if(curScr==SCR_BOOT&&megaLinked){ curScr=SCR_MAIN; scrDirty=true; }
+  if(megaLinked&&millis()-lastMegaRx>12000)megaLinked=false;
+  if(curScr==SCR_BOOT&&megaLinked){curScr=SCR_MAIN;scrDirty=true;firstMainDraw=true;}
 
-  // Touch read (debounced 80ms)
+  // Touch — debounced 80ms
   Touch t={0,0,false};
   if(millis()-lastTouchMs>80&&!digitalRead(PIN_CTP_INT)){
-    t=readTouch(); if(t.pressed) lastTouchMs=millis();
+    t=readTouch();if(t.pressed)lastTouchMs=millis();
   }
 
-  // Global E-STOP — footer hit, always active
-  if(hit(t,8,SCR_H-FTR_H+10,82,36)){
-    if(T.estop){ MEGA_SERIAL.println("ESTOP_CLEAR"); T.estop=false; }
-    else        { MEGA_SERIAL.println("EMERGENCY_STOP"); T.estop=true; }
-    scrDirty=true; t.pressed=false;
+  // Global E-STOP
+  if(hit(t,6,SCR_H-FTR_H+8,86,32)){
+    if(T.estop){MEGA_SERIAL.println("ESTOP_CLEAR");T.estop=false;}
+    else        {MEGA_SERIAL.println("EMERGENCY_STOP");T.estop=true;}
+    scrDirty=true;firstMainDraw=true;t.pressed=false;
   }
 
-  // Alert overlay
-  if(alertOn){ drawHeader("Alert!"); drawFooter(); drawAlert(t); return; }
+  if(alertOn){drawHeader("ALERT");drawFooter();drawAlert(t);return;}
 
-  // Telem refresh on main
-  if(curScr==SCR_MAIN&&millis()-lastTelemDraw>1000){ lastTelemDraw=millis(); scrDirty=true; }
-
+  // NO timed scrDirty=true — partial updates handle telemetry
   switch(curScr){
     case SCR_BOOT:       drawBoot();       break;
     case SCR_MAIN:       drawMain(t);      break;
