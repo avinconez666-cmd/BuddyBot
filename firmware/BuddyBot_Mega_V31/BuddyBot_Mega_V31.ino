@@ -110,51 +110,49 @@ void motorCommPrintln(const String &msg)              { if (!r3CommFail) motorCo
 void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorComm.println(msg); }
 
 // ── Analog sensors ───────────────────────────────────────────────────────────
-#define VOLTAGE_SENSOR    A14   // Battery voltage divider (direct battery)
-#define TEMP_SENSOR_1     A0    // Thermistor 1 — battery pack temperature
+#define VOLTAGE_SENSOR    A6   // Battery voltage divider (direct battery)
+#define TEMP_SENSOR_1     A9    // Thermistor 1 — battery pack temperature
 #define HEAD_TEMP_SENSOR  A3    // Head temperature sensor (placeholder — install soon)
-#define LDR_AO            A2    // Light-dependent resistor
+#define LDR_AO            A4    // Light-dependent resistor
 #define SOUND_AO          A1    // Sound sensor analog
-#define GAS_AO            A12   // Gas / MQ sensor analog
+#define GAS_AO            -1   // USING DIGITAL MODULE NOW
 
 // ── I2C interrupt ────────────────────────────────────────────────────────────
 #define GESTURE_INT       A13   // PAJ7620 gesture sensor interrupt
 
 // ── Digital outputs ──────────────────────────────────────────────────────────
-#define FAN_BODY_PIN      34    // Body extract fan     (battery / ambient temp)
-#define FAN_HEAD_BLOW_PIN 35    // Head blower fan      (head temp ≥ HEAD_FAN_TEMP)
-#define FAN_HEAD_EXT_PIN  37    // Head extract fan     (head temp ≥ HEAD_FAN_TEMP)
+#define FAN_BODY_PIN      12    // Body extract fan     (battery / ambient temp)
+#define FAN_HEAD_BLOW_PIN 7    // Head blower fan      (head temp ≥ HEAD_FAN_TEMP)
+#define FAN_HEAD_EXT_PIN  8    // Head extract fan     (head temp ≥ HEAD_FAN_TEMP)
 #define UV_LIGHT_PIN      40    // UV light strip       (manual / auto, PIR interlock)
-#define BUZZER_PIN        33    // Piezo buzzer
+#define BUZZER_PIN        2    // Piezo buzzer
 
 // ── Digital inputs ───────────────────────────────────────────────────────────
-#define MOMENTARY_BTN     A11   // Push button — toggle autonomous mode
+#define MOMENTARY_BTN     24   // Push button — toggle autonomous mode
 #define LDR_DO            5     // LDR threshold output
-#define UNHINGED_SW       A1    // Physical switch — unhinged mode
-#define TILT_SENSOR       45    // Tilt / vibration sensor (HIGH = tilt)
+#define UNHINGED_SW       A10    // Physical switch — unhinged mode
+#define TILT_SENSOR       30    // Tilt / vibration sensor (HIGH = tilt)
 #define PIR_PIN           -1    // PIR motion sensor — set real pin when fitted
-#define DHT_PIN           24    // DHT11 data
-#define GAS_DO            2    // Gas sensor digital output (HIGH = gas)
+#define DHT_PIN           33    // DHT11 data
+#define GAS_DO            22    // Gas sensor digital output (HIGH = gas)
 #define RF_PIN            A2    // 433 MHz RF receiver
-#define CURRENT_SENSOR    27    // Current sensor pulse input (interrupt)
+#define CURRENT_SENSOR    3     // Current sensor pulse input (INT5 — interrupt-capable)
 
 // ── IR obstacle sensors (LOW = obstacle detected) ────────────────────────────
-#define REAR_IR   31
-#define FRONT_IR  22
+#define REAR_IR   25
+#define FRONT_IR  A8
 #define LEFT_IR   -1
 #define RIGHT_IR  -1
 
 // ── Ultrasonic sensors (4× HC-SR04) ─────────────────────────────────────────
-//   NOTE: FRONT_TRIG on an analogue pin is fine — digitalWrite() / pulseIn()
-//   both work transparently on Mega analogue pins used as digital I/O.
-#define FRONT_TRIG  A0
-#define FRONT_ECHO  49
-#define LEFT_TRIG   42
-#define LEFT_ECHO   44
-#define RIGHT_TRIG  40
-#define RIGHT_ECHO  42
-#define REAR_TRIG   53
-#define REAR_ECHO   47
+#define FRONT_TRIG  36
+#define FRONT_ECHO  34
+#define LEFT_TRIG   32
+#define LEFT_ECHO   28
+#define RIGHT_TRIG  41
+#define RIGHT_ECHO  39
+#define REAR_TRIG   27
+#define REAR_ECHO   26
 
 // ════════════════════════════════════════════════════════════════════
 //  OBJECTS
