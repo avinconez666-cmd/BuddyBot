@@ -1438,7 +1438,7 @@ void setup() {
   dht.begin();
   initPins();
 
-  rfReceiver.enableReceive(digitalPinToInterrupt(RF_PIN));
+  rfReceiver.enableReceive(-1);  // Polling mode — RF_PIN (A2) is not interrupt-capable on Mega
   attachInterrupt(digitalPinToInterrupt(CURRENT_SENSOR), currentPulseISR, RISING);
 
   if (paj7620Init() == 0) { dbg("[INIT] PAJ7620 OK"); }
