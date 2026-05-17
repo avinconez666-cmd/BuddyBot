@@ -410,7 +410,8 @@ void drawFooter(){
 
 
   // Hazard chips — centre
-  if(T.flame){ drawBadge(ix,fy+14,44,24,C_CORAL,"FLAME",1); ix+=50; }
+  int ix=100;
+  if(SF.flame && T.haz){ drawBadge(ix,fy+14,44,24,C_CORAL,"FLAME",1); ix+=50; }
   if(T.tilt)  { drawBadge(ix,fy+14,36,24,C_AMBER,"TILT",1); ix+=42; }
 
   // Mega link age — right
@@ -823,10 +824,11 @@ void parseStatus(const String& s){
   T.s9ok=(s.indexOf("S9:OK")>=0);
   int fi=s.indexOf("FW:");
   if(fi>=0){ int fe=s.indexOf('|',fi); T.fw=(fe>0)?s.substring(fi+3,fe):s.substring(fi+3); }
+}
+
 void parseSensStatus(const String& s){
   // SENS_ST|DHT:1|GAS:1|FLAME:1|PIR:0|TILT:1|IR:1|US:1|CUR:1|END
   // Sensor flag sync from Mega — update display indicators if needed
-}
 }
 void handleMegaLine(String& line){
   line.trim(); if(!line.length()) return;
