@@ -81,6 +81,9 @@ SoftwareSerial megaSerial(A0, A1);
 uint8_t  currentSpeed  = 200;
 bool     motorsRunning = false;
 String   cmdBuf        = "";
+// Direction tracking — must be declared before movement functions
+enum MoveDir { DIR_STOP, DIR_FORWARD, DIR_BACKWARD, DIR_SPIN_L, DIR_SPIN_R };
+MoveDir  currentDir    = DIR_STOP;
 
 // Enums for pattern states
 enum DanceState { DANCE_IDLE, DANCE_SET_SPEED, DANCE_WIGGLE, DANCE_FORWARD, DANCE_STOP1, DANCE_BACKWARD, DANCE_STOP2, DANCE_SPIN, DANCE_DONE };
@@ -205,10 +208,6 @@ void spinRight() {
   motorsRunning = true;
   currentDir = DIR_SPIN_R;
 }
-
-// Direction tracking for live speed updates
-enum MoveDir { DIR_STOP, DIR_FORWARD, DIR_BACKWARD, DIR_SPIN_L, DIR_SPIN_R };
-MoveDir currentDir = DIR_STOP;
 
 void setSpeed(uint8_t spd) {
   currentSpeed = spd;
