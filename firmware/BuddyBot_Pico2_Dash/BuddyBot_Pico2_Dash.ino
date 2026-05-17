@@ -459,7 +459,7 @@ void drawHeader(const char* title){
   int16_t bw=strW(ms,1)+14;
   fillRR(4,8,bw,34,5,mc);
   drawRR(4,8,bw,34,5,C_WHITE);
-  drawStrC(4+bw/2,19,ms,C_BLACK,mc,1);
+  drawStrC(4+bw/2,19,ms,C_VOID,mc,1);
 
   // Title centred
   drawStrC(SCR_W/2,(HDR_H-16)/2,title,C_WHITE,0xFFFF,2);
@@ -595,7 +595,7 @@ void drawMainFull(){
     int my=CELL_Y3+CELL_H+10;
     bool act=(T.mode==modes[i].cmd);
     uint16_t bg=act?modes[i].c:C_SURF2;
-    uint16_t fg=act?C_BLACK:modes[i].c;
+    uint16_t fg=act?C_VOID:modes[i].c;
     fillRR(mx,my,mw,34,6,bg);
     drawRR(mx,my,mw,34,6,modes[i].c);
     if(act){ fillRect(mx+4,my,mw-8,2,C_WHITE); }
@@ -819,7 +819,7 @@ void gameCorrect(uint8_t s,int nm){
   // Large check-like indicator
   for(int i=0;i<3;i++) drawCircle(SCR_W/2,SCR_H/2-30,30+i*4,C_MINT);
   fillCircle(SCR_W/2,SCR_H/2-30,28,C_MINT);
-  drawStrC(SCR_W/2,SCR_H/2-38,"OK",C_BLACK,0xFFFF,4);
+  drawStrC(SCR_W/2,SCR_H/2-38,"OK",C_VOID,0xFFFF,4);
   drawStrC(SCR_W/2,SCR_H/2+10,"CORRECT!",C_MINT,0xFFFF,3);
   char sb[20];snprintf(sb,sizeof(sb),"Score: %d",gScore);
   drawStrC(SCR_W/2,SCR_H/2+40,sb,C_WHITE,0xFFFF,2);
