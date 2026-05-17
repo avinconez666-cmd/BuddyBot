@@ -408,9 +408,9 @@ void drawFooter(){
   const char* el=T.estop?"RESUME":"E-STOP";
   drawBadge(8,fy+10,82,36,ec,el,1);
 
+
   // Hazard chips — centre
-  int ix=100;
-  if( ix+=50; }
+  if(T.flame){ drawBadge(ix,fy+14,44,24,C_CORAL,"FLAME",1); ix+=50; }
   if(T.tilt)  { drawBadge(ix,fy+14,36,24,C_AMBER,"TILT",1); ix+=42; }
 
   // Mega link age — right
@@ -803,9 +803,8 @@ void parseStat(const String& s){
   if(n<10) return;
   T.gas=f[0].toInt(); T.temp=f[1].toFloat(); T.hum=f[2].toFloat();
   T.haz=f[3].toInt(); T.pir=f[4].toInt(); T.tilt=f[5].toInt();
-   T.ir=f[7].toInt();
-  T.volt=f[8].toFloat(); T.pct=f[9].toInt(); T.amps=f[10].toFloat();
-  if(n>11) 
+  T.ir=f[6].toInt();
+  T.volt=f[7].toFloat(); T.pct=f[8].toInt(); T.amps=f[9].toFloat();
 }
 void parseUS(const String& s){
   String tmp=s.substring(3); String f[4]; int n=0,st=0;
@@ -824,6 +823,10 @@ void parseStatus(const String& s){
   T.s9ok=(s.indexOf("S9:OK")>=0);
   int fi=s.indexOf("FW:");
   if(fi>=0){ int fe=s.indexOf('|',fi); T.fw=(fe>0)?s.substring(fi+3,fe):s.substring(fi+3); }
+void parseSensStatus(const String& s){
+  // SENS_ST|DHT:1|GAS:1|FLAME:1|PIR:0|TILT:1|IR:1|US:1|CUR:1|END
+  // Sensor flag sync from Mega — update display indicators if needed
+}
 }
 void handleMegaLine(String& line){
   line.trim(); if(!line.length()) return;
