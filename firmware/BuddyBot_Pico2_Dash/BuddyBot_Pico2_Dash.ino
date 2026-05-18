@@ -14,6 +14,13 @@
 #include "logos.h"  // RGB565 bitmap arrays for splash screen
 
 // ── Forward declarations ──────────────────────────────────────────────
+void neonBox(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t col,uint16_t bg=C_SURF);
+void hexFrame(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t col,uint8_t sz=8);
+void glowBar(int16_t x,int16_t y,int16_t w,int16_t h,float frac,uint16_t col,uint16_t bg=C_SURF2);
+void drawH(int16_t x,int16_t y,int16_t w,uint16_t c);
+void drawV(int16_t x,int16_t y,int16_t h,uint16_t c);
+void drawRR(int16_t x,int16_t y,int16_t w,int16_t h,int16_t r,uint16_t c);
+void fillCircle(int16_t cx,int16_t cy,int16_t r,uint16_t c);
 struct Touch { int16_t x,y; bool pressed; };
 Touch  readTouch();
 bool   hit(const Touch&,int16_t,int16_t,int16_t,int16_t);
