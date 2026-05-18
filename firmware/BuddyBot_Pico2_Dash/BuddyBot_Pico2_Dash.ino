@@ -11,6 +11,7 @@
  */
 #include <SPI.h>
 #include <Wire.h>
+#include "logos.h"  // RGB565 bitmap arrays for splash screen
 
 // ── Forward declarations ──────────────────────────────────────────────
 struct Touch { int16_t x,y; bool pressed; };
@@ -137,6 +138,101 @@ void fillGrad(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t c1,uint16_t c2){
   }
 }
 
+
+// ══════════════════════════════════════════════════════════════════════
+//  SPLASH SCREEN — BITMAP RENDERER + ANIMATIONS
+// ══════════════════════════════════════════════════════════════════════
+void drawBitmap(int16_t x,int16_t y,const uint16_t* bmp,int16_t w,int16_t h){
+  setWindow(x,y,x+w-1,y+h-1);
+  digitalWrite(PIN_DC,HIGH); digitalWrite(PIN_CS,LOW);
+  for(uint32_t i=0;i<(uint32_t)w*h;i++){
+    uint16_t px=pgm_read_word(&bmp[i]);
+    SPI.transfer(px>>8); SPI.transfer(px&0xFF);
+  }
+  digitalWrite(PIN_CS,HIGH);
+}
+
+static float _orbitAngle=0.0f;
+void orbitalParticles(int16_t cx,int16_t cy,float radius,uint8_t count,uint16_t col){
+  _orbitAngle+=0.09f;
+  for(uint8_t i=0;i<count;i++){
+    float a=_orbitAngle+i*(6.2832f/count);
+    int16_t px=cx+(int16_t)(cosf(a)*radius);
+    int16_t py=cy+(int16_t)(sinf(a)*radius*0.65f);
+    if(px>=0&&px<SCR_W&&py>=0&&py<SCR_H){
+      drawPixel(px,py,col);
+      if((i&1)==0&&px+1<SCR_W) drawPixel(px+1,py,C_XCYAN);
+    }
+  }
+}
+
+void showStartupSplash(){
+  fillScreen(C_BG);
+  // Background grid
+  for(int16_t gx=0;gx<SCR_W;gx+=20) drawV(gx,0,SCR_H,0x0421u);
+  for(int16_t gy=0;gy<SCR_H;gy+=20) drawH(0,gy,SCR_W,0x0421u);
+
+  // ── PHASE 1: Reinsma Innovations ─────────────────────────────────
+  neonBox(30,75,SCR_W-60,185,C_CYAN,C_SURF);
+  hexFrame(40,90,SCR_W-80,155,C_PURPLE,14);
+  int16_t ri_x=(SCR_W-reinsma_logo_W)/2;
+  int16_t ri_y=88;
+  drawBitmap(ri_x,ri_y,reinsma_logo,reinsma_logo_W,reinsma_logo_H);
+  drawStrC(SCR_W/2,222,"GENERATIVE  AI  SOLUTIONS",C_PURPLE,0xFFFF,1);
+  drawStrC(SCR_W/2,238,"Proudly Powered by Arduino",C_MGRAY,0xFFFF,1);
+
+  // Particle burst
+  for(uint8_t i=0;i<65;i++){
+    drawPixel(random(40,SCR_W-40),random(90,240),C_CYAN);
+    if(i%6==0) delay(9);
+  }
+  delay(1800);
+
+  // Smooth fade out
+  for(uint8_t step=0;step<16;step++){
+    fillRect(25,70,SCR_W-50,200,(uint16_t)(step*0x0842u));
+    delay(35);
+  }
+
+  // ── PHASE 2: BuddyBot v1.0 ────────────────────────────────────────
+  fillScreen(C_BG);
+  for(int16_t gx=0;gx<SCR_W;gx+=20) drawV(gx,0,SCR_H,0x0421u);
+  for(int16_t gy=0;gy<SCR_H;gy+=20) drawH(0,gy,SCR_W,0x0421u);
+
+  int16_t bx=(SCR_W-buddybot_logo_W)/2;
+  int16_t by=30;
+  drawBitmap(bx,by,buddybot_logo,buddybot_logo_W,buddybot_logo_H);
+
+  // Loading bar + orbital particles during init
+  neonBox(24,296,SCR_W-48,44,C_PURPLE,C_SURF);
+  drawStrC(SCR_W/2,270,"INITIALIZING  NEXUS  OS...",C_LGRAY,0xFFFF,1);
+  drawStrC(SCR_W/2,256,"GUARDIAN SYSTEM",C_PURPLE,0xFFFF,1);
+
+  int16_t oc_x=bx+buddybot_logo_W/2;
+  int16_t oc_y=by+buddybot_logo_H/2;
+  for(int p=0;p<=100;p+=2){
+    // Erase old particles before drawing new (avoids trails)
+    fillCircle(oc_x,oc_y,130,C_BG);
+    // Redraw logo centre (particle orbit overlaps it)
+    drawBitmap(bx,by,buddybot_logo,buddybot_logo_W,buddybot_logo_H);
+    // Orbital rings
+    orbitalParticles(oc_x,oc_y,100,14,C_CYAN);
+    orbitalParticles(oc_x,oc_y,124,9,C_XCYAN);
+    orbitalParticles(oc_x,oc_y,80,6,C_PURPLE);
+    // Progress bar
+    glowBar(28,300,SCR_W-56,36,p/100.0f,C_CYAN,C_SURF2);
+    if(p%10==0) drawRR(24,296,SCR_W-48,44,6,C_WHITE);
+    delay(80);
+  }
+  delay(600);
+
+  // Fade to black
+  for(uint8_t step=0;step<20;step++){
+    fillRect(0,0,SCR_W,SCR_H,(uint16_t)((19-step)*0x0842u));
+    delay(25);
+  }
+  fillScreen(C_BG);
+}
 void displayInit(){
   pinMode(PIN_CS,OUTPUT);  digitalWrite(PIN_CS,HIGH);
   pinMode(PIN_DC,OUTPUT);  digitalWrite(PIN_DC,HIGH);
@@ -1082,9 +1178,7 @@ void handleMegaSerial(){
 void setup(){
   delay(500);
   displayInit();
-  fillScreen(C_RED);   delay(200);
-  fillScreen(C_GREEN); delay(200);
-  fillScreen(C_BG);
+  showStartupSplash();  // Reinsma + BuddyBot logo splash with orbital particles
 
   // Touch
   pinMode(PIN_CTP_RST,OUTPUT);
