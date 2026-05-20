@@ -40,7 +40,7 @@ bool   drawBackBtn(Touch&);
 #define PIN_CTP_SDA  26
 #define PIN_CTP_SCL  27
 #define PIN_CTP_INT  28
-#define PIN_CTP_RST  15
+#define PIN_CTP_RST  29   // FIX #1: was GP15 — wiring diagram shows GP29
 
 // ── ST7796S commands ──────────────────────────────────────────────────
 #define ST_SWRESET 0x01
@@ -529,21 +529,20 @@ unsigned long lastTouchMs=0;
 #define CTP_ADDR 0x38
 Touch readTouch(){
   Touch t={0,0,false};
-  Wire1.beginTransmission(CTP_ADDR);
-  Wire1.write(0x02);
-  if(Wire1.endTransmission(false)!=0) return t;
-  Wire1.requestFrom(CTP_ADDR,6);
-  if(Wire1.available()<6) return t;
-  uint8_t n=Wire1.read()&0x0F;
-  uint8_t xH=Wire1.read(),xL=Wire1.read();
-  uint8_t yH=Wire1.read(),yL=Wire1.read();
-  Wire1.read();
+  // FIX #3 applied here: Wire instead of Wire1 — matches I2C0 init in setup()
+  Wire.beginTransmission(CTP_ADDR);
+  Wire.write(0x02);
+  if(Wire.endTransmission(false)!=0) return t;
+  Wire.requestFrom(CTP_ADDR,6);
+  if(Wire.available()<6) return t;
+  uint8_t n=Wire.read()&0x0F;
+  uint8_t xH=Wire.read(),xL=Wire.read();
+  uint8_t yH=Wire.read(),yL=Wire.read();
+  Wire.read();
   if(n==0||n>2) return t;
-  // FT6336U portrait raw coords: x=0..319, y=0..479
-  // MADCTL 0x48 mirrors X → display_x = 319 - raw_x
   int16_t rx=((xH&0x0F)<<8)|xL;
   int16_t ry=((yH&0x0F)<<8)|yL;
-  t.x = constrain(319-rx, 0, SCR_W-1);   // FIXED: mirror X
+  t.x = constrain(319-rx, 0, SCR_W-1);   // mirror X for MADCTL 0x48
   t.y = constrain(ry,     0, SCR_H-1);
   t.pressed=true;
   return t;
@@ -1194,13 +1193,20 @@ void setup(){
   showStartupSplash();  // Reinsma + BuddyBot logo splash with orbital particles
 
   // Touch
-  pinMode(PIN_CTP_RST,OUTPUT);
-  digitalWrite(PIN_CTP_RST,LOW);delay(20);
-  digitalWrite(PIN_CTP_RST,HIGH);delay(100);
-  pinMode(PIN_CTP_INT,INPUT);
-  Wire1.setSDA(PIN_CTP_SDA);
-  Wire1.setSCL(PIN_CTP_SCL);
-  Wire1.begin();
+  pinMode(PIN_CTP_RST, OUTPUT);
+  digitalWrite(PIN_CTP_RST, LOW);  delay(20);
+  digitalWrite(PIN_CTP_RST, HIGH); delay(200);  // FT6336U needs 200ms after reset
+  // FIX #2: INPUT_PULLUP — FT6336U INT is open-drain; floats without pullup
+  // and the touch condition (!digitalRead) would never reliably trigger.
+  pinMode(PIN_CTP_INT, INPUT_PULLUP);
+
+  // FIX #3: Use Wire (I2C0) matching the DisplayTest — Wire1 default routing
+  // on RP2040 does not map to GP26/GP27 unless explicitly configured.
+  Wire.setSDA(PIN_CTP_SDA);
+  Wire.setSCL(PIN_CTP_SCL);
+  Wire.begin();
+  // FIX #4: Set 400 kHz fast-mode (FT6336U supports up to 400 kHz)
+  Wire.setClock(400000);
   delay(100);
 
   // Mega UART

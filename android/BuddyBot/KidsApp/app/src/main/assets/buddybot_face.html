@@ -564,16 +564,62 @@ buddyAudio.addEventListener('play', function() {
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   isSpeaking = true;
   isAnalysing = true;
+  // Fallback: if AudioContext analysis fails to start, drive mouth with
+  // a gentle oscillation so it still visibly moves during speech.
+  setTimeout(function() {
+    if (!isAnalysing || targetOpen < 1) {
+      startFallbackAnimation();
+    }
+  }, 300);
 });
 buddyAudio.addEventListener('ended', function() {
   isSpeaking = false;
   isAnalysing = false;
+  stopFallbackAnimation();
   targetOpen = 0;
+  // Notify Kotlin that audio has finished so isSpeaking state is cleared correctly
+  if (window.AndroidBridge && window.AndroidBridge.onAudioEnded) {
+    window.AndroidBridge.onAudioEnded();
+  }
 });
 buddyAudio.addEventListener('pause', function() {
   isAnalysing = false;
+  stopFallbackAnimation();
   targetOpen = 0;
 });
+buddyAudio.addEventListener('error', function(e) {
+  console.log('Audio error:', e);
+  isSpeaking = false;
+  isAnalysing = false;
+  stopFallbackAnimation();
+  targetOpen = 0;
+  if (window.AndroidBridge && window.AndroidBridge.onAudioEnded) {
+    window.AndroidBridge.onAudioEnded();
+  }
+});
+
+// ═══ FALLBACK MOUTH ANIMATION ═══
+// Used when AudioContext amplitude analysis is unavailable (e.g. file:// CORS block)
+let fallbackAnimId = null;
+let fallbackPhase = 0;
+function startFallbackAnimation() {
+  if (fallbackAnimId !== null) return;
+  function tick() {
+    if (!isSpeaking) { fallbackAnimId = null; return; }
+    fallbackPhase += 0.18;
+    // Oscillate between 4 and 18 — looks like natural talking
+    targetOpen = 4 + Math.abs(Math.sin(fallbackPhase)) * 14
+               + Math.abs(Math.sin(fallbackPhase * 2.3)) * 4;
+    fallbackAnimId = requestAnimationFrame(tick);
+  }
+  fallbackAnimId = requestAnimationFrame(tick);
+}
+function stopFallbackAnimation() {
+  if (fallbackAnimId !== null) {
+    cancelAnimationFrame(fallbackAnimId);
+    fallbackAnimId = null;
+  }
+}
 
 // ═══ STARTUP ═══
 window.addEventListener('DOMContentLoaded', function() {

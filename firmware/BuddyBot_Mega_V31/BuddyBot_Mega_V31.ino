@@ -134,7 +134,7 @@ void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorCo
 #define MOMENTARY_BTN     24   // Push button — toggle autonomous mode
 #define LDR_DO            5     // LDR threshold output
 #define UNHINGED_SW       A10    // Physical switch — unhinged mode
-#define TILT_SENSOR       30    // Tilt / vibration sensor (HIGH = tilt)
+#define TILT_SENSOR       52    // Tilt / vibration sensor (HIGH = tilt)
 #define PIR_PIN           -1    // PIR motion sensor — set real pin when fitted
 #define DHT_PIN           33    // DHT11 data
 #define GAS_DO            22    // Gas sensor digital output (HIGH = gas)
@@ -148,14 +148,14 @@ void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorCo
 #define RIGHT_IR  -1
 
 // ── Ultrasonic sensors (4× HC-SR04) ─────────────────────────────────────────
-#define FRONT_TRIG  36
+#define FRONT_TRIG  35
 #define FRONT_ECHO  34
-#define LEFT_TRIG   32
+#define LEFT_TRIG   29
 #define LEFT_ECHO   28
-#define RIGHT_TRIG  41
-#define RIGHT_ECHO  39
-#define REAR_TRIG   27
-#define REAR_ECHO   26
+#define RIGHT_TRIG  38
+#define RIGHT_ECHO  40
+#define REAR_TRIG   42
+#define REAR_ECHO   43
 
 // ════════════════════════════════════════════════════════════════════
 //  OBJECTS

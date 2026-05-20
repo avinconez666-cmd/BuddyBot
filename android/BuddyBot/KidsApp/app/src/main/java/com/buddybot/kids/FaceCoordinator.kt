@@ -45,6 +45,14 @@ class FaceCoordinator(
 
     // ── State ────────────────────────────────────────────────────────────────
     private var currentMode: RobotMode = RobotMode.NORMAL
+
+    /**
+     * Invoked (on the main thread) when the WebView audio element fires 'ended'.
+     * MainActivity sets this before calling notifyAudioFile() and uses it to
+     * know when ElevenLabs speech has truly finished so isSpeaking can be cleared.
+     */
+    var onAudioEnded: (() -> Unit)? = null
+
     private var isSpeakingState: Boolean = false
     private var isTransitioning: Boolean = false
     private var isWarningTriggered: Boolean = false
@@ -109,6 +117,20 @@ class FaceCoordinator(
             scope.launch(Dispatchers.Main) {
                 faceWebView?.evaluateJavascript(
                     "window.BuddyBot.setViseme('$viseme','$weight')", null)
+            }
+        }
+
+        /**
+         * Called by buddybot_face.html when the <audio> element fires 'ended'.
+         * Triggers the onAudioEnded callback so MainActivity knows speech is done.
+         */
+        @JavascriptInterface
+        fun onAudioEnded() {
+            scope.launch(Dispatchers.Main) {
+                Log.d(TAG, "WebView audio ended — invoking onAudioEnded callback")
+                val cb = onAudioEnded
+                onAudioEnded = null   // clear so it doesn't fire twice
+                cb?.invoke()
             }
         }
     }
@@ -240,19 +262,46 @@ class FaceCoordinator(
         currentMode = newMode
         setWebViewMode(newMode)
 
-        // Play transition video if available
-        if (newMode == RobotMode.NORMAL && oldMode != RobotMode.NORMAL) {
-            val transName = "${oldMode.name.lowercase()}_to_normal"
-            val resId = context.resources.getIdentifier(transName, "raw", context.packageName)
-            if (resId != 0) {
-                isTransitioning = true
-                showVideoFace()
-                playVideo(transName, loop = false)
-                return
-            }
+        // ── Resolve which transition video to play ──────────────────────────
+        //
+        // Priority:
+        //   1. Exact out-transition:  dog_to_normal, bodyguard_to_normal, party_to_normal
+        //   2. Exact in-transition:   dog_transition, bodyguard_transition, party_transition
+        //   3. Special case:          normal_to_unhinged  (normal → unhinged)
+        //   4. No video found         → snap directly to WebView idle face
+
+        val transName: String? = when {
+            // Going back to NORMAL: prefer the "X_to_normal" exit video
+            newMode == RobotMode.NORMAL && oldMode != RobotMode.NORMAL ->
+                "${oldMode.name.lowercase()}_to_normal"
+
+            // Going TO UNHINGED from NORMAL: dedicated video
+            newMode == RobotMode.UNHINGED && oldMode == RobotMode.NORMAL ->
+                "normal_to_unhinged"
+
+            // Going INTO a non-normal mode: use that mode's _transition video
+            newMode != RobotMode.NORMAL ->
+                "${newMode.name.lowercase()}_transition"
+
+            else -> null
         }
-        // No transition video — just switch WebView face immediately
-        showWebViewFace()
+
+        val resId = if (transName != null)
+            context.resources.getIdentifier(transName, "raw", context.packageName)
+        else 0
+
+        if (resId != 0) {
+            Log.d(TAG, "Playing mode transition video: $transName")
+            isTransitioning = true
+            showVideoFace()
+            playVideo(transName!!, loop = false)
+            // After the video ends, playbackStateChanged → showWebViewFace() is called
+            // automatically by the existing player listener, which shows the SVG face
+            // with the correct mode colours already applied above via setWebViewMode().
+        } else {
+            Log.d(TAG, "No transition video for $oldMode→$newMode — showing WebView face")
+            showWebViewFace()
+        }
     }
 
     fun setSpeaking(speaking: Boolean) {

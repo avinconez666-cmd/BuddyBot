@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BuddyBot Controller</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; color: #e0e0e0; font-family: 'Segoe UI', monospace; height: 100vh; display: flex; flex-direction: column; }
+
+  header { background: #1a1a2e; padding: 12px 20px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #333; }
+  header h1 { font-size: 18px; color: #00d4ff; font-weight: 700; letter-spacing: 2px; }
+  #status-dot { width: 10px; height: 10px; border-radius: 50%; background: #444; transition: background 0.3s; }
+  #status-dot.connected { background: #00ff88; box-shadow: 0 0 8px #00ff88; }
+  #status-text { font-size: 12px; color: #888; }
+  #connect-btn { margin-left: auto; padding: 7px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; background: #00d4ff; color: #000; transition: all 0.2s; }
+  #connect-btn:hover { background: #00b8d9; }
+  #connect-btn.connected { background: #ff4455; color: #fff; }
+  #baud-select { background: #222; color: #ccc; border: 1px solid #444; border-radius: 5px; padding: 5px 8px; font-size: 12px; }
+
+  main { display: flex; flex: 1; overflow: hidden; }
+
+  /* LEFT PANEL */
+  .left-panel { width: 320px; min-width: 320px; background: #111; border-right: 1px solid #222; display: flex; flex-direction: column; gap: 0; overflow-y: auto; }
+
+  .section { padding: 14px; border-bottom: 1px solid #1e1e1e; }
+  .section-title { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 10px; }
+
+  /* DPAD */
+  .dpad-container { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 4px 0; }
+  .dpad-row { display: flex; gap: 4px; }
+  .dpad-btn { width: 64px; height: 64px; border-radius: 8px; border: none; cursor: pointer; font-size: 22px; font-weight: bold; transition: all 0.1s; background: #1e1e2e; color: #ccc; display: flex; align-items: center; justify-content: center; }
+  .dpad-btn:hover { background: #2a2a4a; color: #fff; }
+  .dpad-btn:active, .dpad-btn.active { background: #00d4ff; color: #000; transform: scale(0.95); }
+  .dpad-center { background: #2a1a1a !important; color: #ff4455 !important; font-size: 14px !important; }
+  .dpad-center:hover { background: #3a2020 !important; }
+  .dpad-center:active { background: #ff4455 !important; color: #fff !important; }
+  .dpad-spacer { width: 64px; height: 64px; }
+
+  /* SPEED */
+  .speed-btns { display: flex; gap: 6px; }
+  .speed-btn { flex: 1; padding: 8px 4px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #aaa; font-size: 12px; cursor: pointer; transition: all 0.15s; text-align: center; }
+  .speed-btn:hover { border-color: #00d4ff; color: #00d4ff; }
+  .speed-btn.active { background: #00d4ff22; border-color: #00d4ff; color: #00d4ff; }
+
+  /* QUICK CMDS */
+  .quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .quick-btn { padding: 9px 6px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #ccc; font-size: 12px; cursor: pointer; transition: all 0.15s; text-align: center; }
+  .quick-btn:hover { background: #252525; border-color: #555; }
+  .quick-btn.danger { border-color: #ff445544; color: #ff4455; }
+  .quick-btn.danger:hover { background: #ff445522; border-color: #ff4455; }
+  .quick-btn.success { border-color: #00ff8844; color: #00ff88; }
+  .quick-btn.success:hover { background: #00ff8822; border-color: #00ff88; }
+  .quick-btn.warn { border-color: #ffaa0044; color: #ffaa00; }
+  .quick-btn.warn:hover { background: #ffaa0022; border-color: #ffaa00; }
+
+  /* RIGHT PANEL */
+  .right-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* TERMINAL */
+  #terminal { flex: 1; overflow-y: auto; padding: 12px 16px; font-size: 12px; line-height: 1.7; background: #080808; }
+  .log-rx  { color: #00d4ff; }
+  .log-tx  { color: #00ff88; }
+  .log-sys { color: #888; font-style: italic; }
+  .log-err { color: #ff4455; }
+  .log-warn{ color: #ffaa00; }
+  .log-time { color: #444; font-size: 10px; margin-right: 6px; }
+
+  /* COMMAND BAR */
+  .cmd-bar { display: flex; gap: 8px; padding: 12px 16px; background: #111; border-top: 1px solid #222; }
+  #cmd-input { flex: 1; background: #0d0d0d; border: 1px solid #333; border-radius: 6px; padding: 9px 14px; color: #e0e0e0; font-family: monospace; font-size: 13px; outline: none; }
+  #cmd-input:focus { border-color: #00d4ff; }
+  #send-btn { padding: 9px 20px; background: #00d4ff; color: #000; border: none; border-radius: 6px; font-weight: 700; font-size: 13px; cursor: pointer; }
+  #send-btn:hover { background: #00b8d9; }
+  #send-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+  #clear-btn { padding: 9px 14px; background: #222; color: #888; border: 1px solid #333; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  #clear-btn:hover { background: #2a2a2a; color: #ccc; }
+
+  /* STATUS BAR */
+  .status-bar { display: flex; gap: 16px; padding: 6px 16px; background: #0d0d0d; border-top: 1px solid #1a1a1a; font-size: 11px; color: #555; }
+  .status-bar span { color: #777; }
+  .status-bar b { color: #00d4ff; }
+
+  /* R3 indicator */
+  #r3-status { font-size: 11px; padding: 3px 10px; border-radius: 4px; background: #1a1a1a; border: 1px solid #333; }
+  #r3-status.ok   { color: #00ff88; border-color: #00ff8844; }
+  #r3-status.fail { color: #ff4455; border-color: #ff445544; }
+  #r3-status.unknown { color: #888; }
+
+  scrollbar-width: thin;
+  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #0d0d0d; } ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div id="status-dot"></div>
+  <h1>🤖 BUDDYBOT</h1>
+  <span id="status-text">Disconnected</span>
+  <div id="r3-status" class="unknown">R3: ?</div>
+  <select id="baud-select">
+    <option value="115200" selected>115200</option>
+    <option value="9600">9600</option>
+    <option value="57600">57600</option>
+  </select>
+  <button id="connect-btn" onclick="toggleConnect()">Connect</button>
+</header>
+
+<main>
+  <div class="left-panel">
+
+    <div class="section">
+      <div class="section-title">Drive Control (keyboard: W A S D)</div>
+      <div class="dpad-container">
+        <div class="dpad-row">
+          <div class="dpad-spacer"></div>
+          <button class="dpad-btn" id="btn-F" onmousedown="holdMotor('MOTOR:F')" onmouseup="releaseMotor()" onmouseleave="releaseMotor()" ontouchstart="holdMotor('MOTOR:F')" ontouchend="releaseMotor()">▲</button>
+          <div class="dpad-spacer"></div>
+        </div>
+        <div class="dpad-row">
+          <button class="dpad-btn" id="btn-L" onmousedown="holdMotor('MOTOR:L')" onmouseup="releaseMotor()" onmouseleave="releaseMotor()" ontouchstart="holdMotor('MOTOR:L')" ontouchend="releaseMotor()">◄</button>
+          <button class="dpad-btn dpad-center" onclick="sendCmd('MOTOR:S')">STOP</button>
+          <button class="dpad-btn" id="btn-R" onmousedown="holdMotor('MOTOR:R')" onmouseup="releaseMotor()" onmouseleave="releaseMotor()" ontouchstart="holdMotor('MOTOR:R')" ontouchend="releaseMotor()">►</button>
+        </div>
+        <div class="dpad-row">
+          <div class="dpad-spacer"></div>
+          <button class="dpad-btn" id="btn-B" onmousedown="holdMotor('MOTOR:B')" onmouseup="releaseMotor()" onmouseleave="releaseMotor()" ontouchstart="holdMotor('MOTOR:B')" ontouchend="releaseMotor()">▼</button>
+          <div class="dpad-spacer"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Speed</div>
+      <div class="speed-btns">
+        <button class="speed-btn" onclick="setSpeed('SLOW')">SLOW<br><small style="color:#555">120</small></button>
+        <button class="speed-btn active" id="spd-NORMAL" onclick="setSpeed('NORMAL')">NORMAL<br><small style="color:#555">200</small></button>
+        <button class="speed-btn" onclick="setSpeed('FAST')">FAST<br><small style="color:#555">255</small></button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Quick Commands</div>
+      <div class="quick-grid">
+        <button class="quick-btn success" onclick="sendCmd('AUTO:ON')">AUTO ON</button>
+        <button class="quick-btn warn"    onclick="sendCmd('AUTO:OFF')">AUTO OFF</button>
+        <button class="quick-btn warn"    onclick="sendCmd('MOTOR:DANCE')">DANCE 🕺</button>
+        <button class="quick-btn"         onclick="sendCmd('DEFENSE')">DEFENSE</button>
+        <button class="quick-btn"         onclick="sendCmd('DIAG')">DIAG</button>
+        <button class="quick-btn"         onclick="sendCmd('STATUS')">STATUS</button>
+        <button class="quick-btn"         onclick="sendCmd('ESTOP_CLEAR')">ESTOP CLR</button>
+        <button class="quick-btn danger"  onclick="sendCmd('EMERGENCY_STOP')">E-STOP 🛑</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Sensors / Systems</div>
+      <div class="quick-grid">
+        <button class="quick-btn" onclick="sendCmd('FAN:ON')">FAN ON</button>
+        <button class="quick-btn" onclick="sendCmd('FAN:OFF')">FAN OFF</button>
+        <button class="quick-btn" onclick="sendCmd('UV:ON')">UV ON</button>
+        <button class="quick-btn" onclick="sendCmd('UV:OFF')">UV OFF</button>
+        <button class="quick-btn" onclick="sendCmd('GPS:STATUS')">GPS</button>
+        <button class="quick-btn" onclick="sendCmd('PING')">PING</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="right-panel">
+    <div id="terminal"></div>
+
+    <div class="cmd-bar">
+      <input id="cmd-input" type="text" placeholder="Type a command (e.g. MOTOR:F, SPEED:150, DIAG)" autocomplete="off" onkeydown="if(event.key==='Enter') sendManual()">
+      <button id="send-btn" onclick="sendManual()" disabled>Send</button>
+      <button id="clear-btn" onclick="clearTerminal()">Clear</button>
+    </div>
+
+    <div class="status-bar">
+      <span>TX: <b id="tx-count">0</b></span>
+      <span>RX: <b id="rx-count">0</b></span>
+      <span id="last-rx-label">Last RX: <b id="last-rx">—</b></span>
+    </div>
+  </div>
+</main>
+
+<script>
+let port = null;
+let writer = null;
+let reader = null;
+let reading = false;
+let txCount = 0;
+let rxCount = 0;
+let holdInterval = null;
+let holdCmd = null;
+let currentSpeed = 'NORMAL';
+
+// ── CONNECT ──────────────────────────────────────────────────────────────────
+async function toggleConnect() {
+  if (port) { await doDisconnect(); return; }
+  if (!navigator.serial) {
+    log('Web Serial API not available. Use Chrome or Edge.', 'err');
+    return;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    const baud = parseInt(document.getElementById('baud-select').value);
+    await port.open({ baudRate: baud });
+    writer = port.writable.getWriter();
+    reading = true;
+    readLoop();
+    setConnected(true);
+    log(`Connected @ ${baud} baud`, 'sys');
+    document.getElementById('send-btn').disabled = false;
+    // Auto-request status to check R3
+    setTimeout(() => sendCmd('DIAG'), 500);
+  } catch(e) {
+    log('Connect failed: ' + e.message, 'err');
+    port = null;
+  }
+}
+
+async function doDisconnect() {
+  reading = false;
+  try { if (reader) { await reader.cancel(); reader = null; } } catch(e){}
+  try { if (writer) { writer.releaseLock(); writer = null; } } catch(e){}
+  try { if (port) { await port.close(); port = null; } } catch(e){}
+  setConnected(false);
+  document.getElementById('send-btn').disabled = true;
+  log('Disconnected', 'sys');
+}
+
+function setConnected(c) {
+  const btn = document.getElementById('connect-btn');
+  const dot = document.getElementById('status-dot');
+  const st  = document.getElementById('status-text');
+  btn.textContent = c ? 'Disconnect' : 'Connect';
+  btn.className = c ? 'connected' : '';
+  dot.className = c ? 'connected' : '';
+  st.textContent = c ? 'Connected' : 'Disconnected';
+}
+
+// ── SEND ─────────────────────────────────────────────────────────────────────
+async function sendCmd(cmd) {
+  if (!writer) { log('Not connected', 'warn'); return; }
+  const line = cmd + '\n';
+  try {
+    await writer.write(new TextEncoder().encode(line));
+    txCount++;
+    document.getElementById('tx-count').textContent = txCount;
+    log('→ ' + cmd, 'tx');
+  } catch(e) {
+    log('Send error: ' + e.message, 'err');
+  }
+}
+
+function sendManual() {
+  const inp = document.getElementById('cmd-input');
+  const val = inp.value.trim();
+  if (!val) return;
+  sendCmd(val);
+  inp.value = '';
+}
+
+// ── HOLD TO DRIVE ─────────────────────────────────────────────────────────────
+function holdMotor(cmd) {
+  if (holdCmd === cmd) return;
+  holdCmd = cmd;
+  sendCmd(cmd);
+  setDpadActive(cmd);
+  holdInterval = setInterval(() => { if (holdCmd) sendCmd(holdCmd); }, 300);
+}
+
+function releaseMotor() {
+  if (!holdCmd) return;
+  holdCmd = null;
+  clearInterval(holdInterval);
+  holdInterval = null;
+  clearDpadActive();
+  sendCmd('MOTOR:S');
+}
+
+function setDpadActive(cmd) {
+  ['F','B','L','R'].forEach(d => {
+    const el = document.getElementById('btn-' + d);
+    if (el) el.classList.remove('active');
+  });
+  const dir = cmd.split(':')[1];
+  const el = document.getElementById('btn-' + dir);
+  if (el) el.classList.add('active');
+}
+
+function clearDpadActive() {
+  ['F','B','L','R'].forEach(d => {
+    const el = document.getElementById('btn-' + d);
+    if (el) el.classList.remove('active');
+  });
+}
+
+// ── SPEED ─────────────────────────────────────────────────────────────────────
+function setSpeed(spd) {
+  currentSpeed = spd;
+  document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+  sendCmd('SPEED:' + spd);
+}
+
+// ── READ LOOP ─────────────────────────────────────────────────────────────────
+async function readLoop() {
+  const dec = new TextDecoder();
+  let buf = '';
+  reader = port.readable.getReader();
+  try {
+    while (reading) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value);
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        const l = line.trim();
+        if (!l) continue;
+        rxCount++;
+        document.getElementById('rx-count').textContent = rxCount;
+        document.getElementById('last-rx').textContent = l.substring(0, 40);
+        parseIncoming(l);
+        log('← ' + l, 'rx');
+      }
+    }
+  } catch(e) {
+    if (reading) log('Read error: ' + e.message, 'err');
+  } finally {
+    try { reader.releaseLock(); } catch(e){}
+    reader = null;
+  }
+}
+
+// ── PARSE INCOMING ────────────────────────────────────────────────────────────
+function parseIncoming(line) {
+  // R3 comm status
+  if (line.includes('R3:FAIL') || line.includes('r3CommFail=1')) {
+    const el = document.getElementById('r3-status');
+    el.textContent = 'R3: FAIL ⚠';
+    el.className = 'fail';
+    log('⚠ R3 comm failure! Power R3 BEFORE Mega, then reboot Mega.', 'warn');
+  } else if (line.includes('R3:OK') || line.includes('r3CommFail=0') || line.includes('PONG:R3')) {
+    const el = document.getElementById('r3-status');
+    el.textContent = 'R3: OK ✓';
+    el.className = 'ok';
+  }
+}
+
+// ── TERMINAL ──────────────────────────────────────────────────────────────────
+function log(msg, type='sys') {
+  const t = document.getElementById('terminal');
+  const d = document.createElement('div');
+  const now = new Date();
+  const ts = now.toTimeString().substring(0,8);
+  d.innerHTML = `<span class="log-time">${ts}</span><span class="log-${type}">${escHtml(msg)}</span>`;
+  t.appendChild(d);
+  t.scrollTop = t.scrollHeight;
+  // keep max 500 lines
+  while (t.children.length > 500) t.removeChild(t.firstChild);
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function clearTerminal() {
+  document.getElementById('terminal').innerHTML = '';
+  log('Terminal cleared', 'sys');
+}
+
+// ── KEYBOARD ──────────────────────────────────────────────────────────────────
+const keyMap = { 'w':'MOTOR:F', 's':'MOTOR:B', 'a':'MOTOR:L', 'd':'MOTOR:R' };
+const keysDown = new Set();
+
+document.addEventListener('keydown', e => {
+  if (document.activeElement.id === 'cmd-input') return;
+  const cmd = keyMap[e.key.toLowerCase()];
+  if (cmd && !keysDown.has(e.key)) {
+    keysDown.add(e.key);
+    holdMotor(cmd);
+  }
+  if (e.key === ' ') { e.preventDefault(); sendCmd('MOTOR:S'); }
+});
+
+document.addEventListener('keyup', e => {
+  if (keyMap[e.key.toLowerCase()]) {
+    keysDown.delete(e.key);
+    if (keysDown.size === 0) releaseMotor();
+  }
+});
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+log('BuddyBot Controller ready. Click Connect to pick your serial port.', 'sys');
+log('Commands: MOTOR:F/B/L/R/S  •  SPEED:SLOW/NORMAL/FAST  •  DIAG  •  AUTO:ON/OFF', 'sys');
+log('Keyboard: W=Forward  S=Backward  A=Left  D=Right  SPACE=Stop', 'sys');
+</script>
+</body>
+</html>

@@ -1781,28 +1781,42 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             put(
                 "voice_settings",
                 JSONObject().apply {
-                    put("stability", 0.5f); put("similarity_boost", 0.75); put(
-                    "style",
-                    0.5f
-                ); put("use_speaker_boost", true)
+                    put("stability", 0.5f)
+                    put("similarity_boost", 0.75)
+                    put("style", 0.5f)
+                    put("use_speaker_boost", true)
                 })
         }
         val request = Request.Builder()
             .url("https://api.elevenlabs.io/v1/text-to-speech/${BuddyBotConfig.ELEVENLABS_VOICE_ID}")
             .addHeader("Accept", "audio/mpeg")
             .addHeader("xi-api-key", BuildConfig.ELEVENLABS_API_KEY)
-            .post(requestBody.toString().toRequestBody("application/json".toMediaType())).build()
+            .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
         val response = httpClient.newCall(request).execute()
-        if (response.isSuccessful) {
-            // Phase 3 fix: unique filename prevents concurrent call corruption
-            val audioFile = File(cacheDir, "speech_${System.currentTimeMillis()}.mp3")
-            response.body?.bytes()?.let { bytes ->
-                FileOutputStream(audioFile).use { fos ->
-                    fos.write(bytes)
-                }
+        if (!response.isSuccessful) throw Exception("ElevenLabs failed: ${response.code}")
+
+        val audioFile = File(cacheDir, "speech_${System.currentTimeMillis()}.mp3")
+        response.body?.bytes()?.let { bytes ->
+            FileOutputStream(audioFile).use { fos -> fos.write(bytes) }
+        }
+
+        // Hand the MP3 to the WebView face — it plays the audio via its <audio> element
+        // and runs real-time amplitude analysis so the mouth moves in sync with speech.
+        // CompletableDeferred suspends here until the JS 'ended' event fires and the
+        // WebViewBridge.onAudioEnded() callback resolves it.
+        val completion = kotlinx.coroutines.CompletableDeferred<Unit>()
+        withContext(Dispatchers.Main) {
+            faceCoordinator.onAudioEnded = {
+                audioFile.delete()          // clean up cache file when done
+                completion.complete(Unit)
             }
-            withContext(Dispatchers.Main) { playAudioFile(audioFile) }
-        } else throw Exception("ElevenLabs failed")
+            faceCoordinator.notifyAudioFile(audioFile.absolutePath)
+        }
+        // Wait for audio to actually finish before returning — this makes the
+        // speakText() finally block clear isSpeaking at the correct moment.
+        completion.await()
     }
 
     private fun playAudioFile(audioFile: File) {

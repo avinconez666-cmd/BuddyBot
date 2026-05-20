@@ -19,6 +19,16 @@ if exist "D:\MOVED_PROGRAMS\Eclipse Adoptium\jdk-17.0.18+8" (
 
 set PATH=%JAVA_HOME%\bin;%PATH%
 
+REM Add Git's Unix tools to PATH so NDK's ndk-build can find 'uname'
+REM (libuvc uses the legacy ndk-build system which calls 'uname -s' to detect the OS)
+if exist "C:\Program Files\Git\usr\bin\uname.exe" (
+    set PATH=C:\Program Files\Git\usr\bin;%PATH%
+    echo Added Git Unix tools to PATH for NDK build ^(uname found^)
+) else (
+    echo WARNING: uname.exe not found - libuvc ndkBuild may fail.
+    echo Install Git for Windows: https://git-scm.com/download/win
+)
+
 REM Clear problematic environment variable
 set JAVA_TOOL_OPTIONS=
 
