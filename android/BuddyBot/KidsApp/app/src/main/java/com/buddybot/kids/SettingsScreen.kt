@@ -57,6 +57,14 @@ private val DarkCardAlt = Color(0xFF0A1628)
 private val GlassWhite  = Color(0x14FFFFFF)
 private val GlassBorder = Color(0x33FFFFFF)
 
+// ── Network option row model (used by AISettingsCard) ─────────────────────────
+private data class NetworkOption(
+    val pref: NetworkPreference,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val label: String,
+    val sublabel: String
+)
+
 // ── Glow modifier helper ──────────────────────────────────────────────────────
 private fun Modifier.neonGlow(color: Color, radius: Float = 24f): Modifier = this.drawBehind {
     // Guard against radius = 0 which occurs before layout is complete
@@ -83,8 +91,8 @@ fun SettingsMenu(
     onMotorCommand: (String) -> Unit,
     onIPChange: (String) -> Unit,
     onToggleCommunication: () -> Unit,
+    onNetworkPreferenceChange: (NetworkPreference) -> Unit = {},
     webcamClient: CameraClient? = null,
-    // Phase 2 additions – test callbacks wired in MainActivity
     onTestSerial: (() -> Unit)? = null,
     onTestWebSocket: (() -> Unit)? = null
 ) {
@@ -141,7 +149,10 @@ fun SettingsMenu(
 
                     // ── AI SETTINGS CARD ─────────────────────────────────────
                     item {
-                        AISettingsCard(robotState = robotState)
+                        AISettingsCard(
+                            robotState = robotState,
+                            onNetworkPreferenceChange = onNetworkPreferenceChange
+                        )
                     }
 
                     // ── ROBOT MODES CARD ─────────────────────────────────────
@@ -793,16 +804,19 @@ private fun NeonSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, acc
 // AI SETTINGS CARD
 // ═══════════════════════════════════════════════════════════════════════════════
 @Composable
-private fun AISettingsCard(robotState: RobotState) {
+private fun AISettingsCard(
+    robotState: RobotState,
+    onNetworkPreferenceChange: (NetworkPreference) -> Unit
+) {
     GlassCard(accentColor = NeonPurple) {
         CardHeader("AI Settings", Icons.Default.Psychology, NeonPurple)
 
         // Active AI service indicator
         val (aiLabel, aiColor) = when (robotState.aiService) {
-            AIService.GROQ -> "Groq Llama 3 (Free)" to NeonGreen
-            AIService.GEMINI -> "Gemini 2.0 Flash (Free)" to NeonCyan
-            AIService.CLAUDE -> "Claude Haiku (Paid)" to NeonPurple
-            AIService.OFFLINE -> "Offline Fallback" to NeonOrange
+            AIService.GROQ    -> "Groq Llama 3 (Free)"      to NeonGreen
+            AIService.GEMINI  -> "Gemini 2.0 Flash (Free)"  to NeonCyan
+            AIService.CLAUDE  -> "Claude Haiku (Paid)"      to NeonPurple
+            AIService.OFFLINE -> "Offline Fallback"         to NeonOrange
         }
 
         Row(
@@ -816,18 +830,85 @@ private fun AISettingsCard(robotState: RobotState) {
             Icon(Icons.Default.AutoAwesome, null, tint = aiColor, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
             Column {
-                Text("Active AI Engine", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Text("Active AI Engine", color = Color.White.copy(alpha = 0.5f),
+                    fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                 Text(aiLabel, color = aiColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        // ── Network Preference Selector ───────────────────────────────────────
+        Text(
+            "AI NETWORK",
+            color = NeonPurple.copy(alpha = 0.7f),
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            letterSpacing = 1.sp
+        )
+        Spacer(Modifier.height(6.dp))
+
+        val netOptions = listOf(
+            NetworkOption(NetworkPreference.ANY,         Icons.Default.Language,             "Auto (WiFi → Mobile)",   "Use best available connection"),
+            NetworkOption(NetworkPreference.WIFI_ONLY,   Icons.Default.Wifi,                 "WiFi Only",              "No mobile data — offline if no WiFi"),
+            NetworkOption(NetworkPreference.MOBILE_ONLY, Icons.Default.SignalCellular4Bar,   "Mobile Data Only",       "Force mobile data, ignore WiFi"),
+        )
+
+        netOptions.forEach { option ->
+            val isSelected = robotState.networkPreference == option.pref
+            val color = when (option.pref) {
+                NetworkPreference.ANY         -> NeonCyan
+                NetworkPreference.WIFI_ONLY   -> NeonGreen
+                NetworkPreference.MOBILE_ONLY -> NeonOrange
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 3.dp)
+                    .background(
+                        if (isSelected) color.copy(alpha = 0.12f) else Color.Transparent,
+                        RoundedCornerShape(10.dp)
+                    )
+                    .border(
+                        1.dp,
+                        if (isSelected) color.copy(alpha = 0.6f) else GlassBorder,
+                        RoundedCornerShape(10.dp)
+                    )
+                    .clickable { onNetworkPreferenceChange(option.pref) }
+                    .padding(horizontal = 12.dp, vertical = 9.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .background(color.copy(alpha = 0.15f), CircleShape)
+                        .border(1.dp, color.copy(alpha = 0.4f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(option.icon, null, tint = color, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(option.label, color = if (isSelected) color else Color.White,
+                        fontSize = 13.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                    Text(option.sublabel, color = Color.White.copy(alpha = 0.4f),
+                        fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                }
+                if (isSelected) {
+                    Icon(Icons.Default.CheckCircle, null, tint = color,
+                        modifier = Modifier.size(18.dp))
+                }
+            }
+            Spacer(Modifier.height(2.dp))
         }
 
         Spacer(Modifier.height(12.dp))
 
         // Info rows
-        NeonInfoRow("Wake Word", BuddyBotConfig.WAKE_WORD.uppercase(), NeonPurple)
-        NeonInfoRow("Voice Engine", "ElevenLabs TTS", NeonPurple)
-        NeonInfoRow("Silence Threshold", "${BuddyBotConfig.SILENCE_THRESHOLD_MS}ms", NeonPurple)
-        NeonInfoRow("Child Profile", "${BuddyBotConfig.CHILD_NAME} · Age ${BuddyBotConfig.CHILD_AGE}", NeonPurple)
+        NeonInfoRow("Wake Word",          BuddyBotConfig.WAKE_WORD.uppercase(), NeonPurple)
+        NeonInfoRow("Voice Engine",       "ElevenLabs TTS",                     NeonPurple)
+        NeonInfoRow("Silence Threshold",  "${BuddyBotConfig.SILENCE_THRESHOLD_MS}ms", NeonPurple)
+        NeonInfoRow("Child Profile",      "${BuddyBotConfig.CHILD_NAME} · Age ${BuddyBotConfig.CHILD_AGE}", NeonPurple)
     }
 }
 

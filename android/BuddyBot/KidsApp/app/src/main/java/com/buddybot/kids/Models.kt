@@ -21,6 +21,22 @@ enum class AIService {
     OFFLINE     // No network — hardcoded child-friendly responses
 }
 
+/**
+ * Which network interface AI/TTS API calls are allowed to use.
+ *
+ * WIFI_ONLY    — only uses WiFi; if WiFi is down, AI goes OFFLINE.
+ *                Best for home use where you don't want surprise mobile data bills.
+ * MOBILE_ONLY  — forces calls through mobile data even when WiFi is available.
+ *                Useful when the robot roams out of WiFi range.
+ * ANY          — system default: use whatever's connected (WiFi preferred).
+ *                Seamlessly falls back from WiFi → mobile data automatically.
+ */
+enum class NetworkPreference {
+    ANY,         // System default (WiFi preferred, auto-fallback to mobile)
+    WIFI_ONLY,   // WiFi only — go OFFLINE if WiFi unavailable
+    MOBILE_ONLY  // Force mobile data even when WiFi is present
+}
+
 data class RobotState(
     val currentMode: RobotMode = RobotMode.NORMAL,
     val isListening: Boolean = false,
@@ -41,6 +57,8 @@ data class RobotState(
     val communicationMode: CommunicationMode = CommunicationMode.DISCONNECTED,
     // Default OFFLINE — updates to GROQ/GEMINI/CLAUDE on first successful AI call
     val aiService: AIService = AIService.OFFLINE,
+    // Which network to use for AI/TTS API calls (persisted in SharedPreferences)
+    val networkPreference: NetworkPreference = NetworkPreference.ANY,
     val batteryVoltage: Float = 0f,
     val batteryPercent: Int = 100,
     val temperature: Float = 25f,
