@@ -149,22 +149,33 @@ class FaceCoordinator(
                 if (state == Player.STATE_ENDED) {
                     val cb = onCompleteCallback
                     onCompleteCallback = null
+                    isTransitioning = false
                     when {
                         cb != null -> {
                             Log.d(TAG, "Video ended — running completion callback")
                             cb()
                         }
-                        isTransitioning -> {
-                            isTransitioning = false
-                            Log.d(TAG, "Mode transition video ended — returning to WebView")
-                            showWebViewFace()
-                        }
                         isWarningTriggered -> {
                             isWarningTriggered = false
-                            Log.d(TAG, "Warning video ended — returning to WebView")
-                            showWebViewFace()
+                            Log.d(TAG, "Warning video ended — resuming idle loop")
+                            startIdleLoop(when (currentMode) {
+                                RobotMode.NORMAL    -> "normal_idle"
+                                RobotMode.DOG       -> "dog_idle"
+                                RobotMode.BODYGUARD -> "bodyguard_looking"
+                                RobotMode.UNHINGED  -> "unhinged_idle"
+                                RobotMode.PARTY     -> "party_transition"
+                            })
                         }
-                        else -> showWebViewFace()
+                        else -> {
+                            Log.d(TAG, "Video ended — no callback, returning to idle")
+                            startIdleLoop(when (currentMode) {
+                                RobotMode.NORMAL    -> "normal_idle"
+                                RobotMode.DOG       -> "dog_idle"
+                                RobotMode.BODYGUARD -> "bodyguard_looking"
+                                RobotMode.UNHINGED  -> "unhinged_idle"
+                                RobotMode.PARTY     -> "party_transition"
+                            })
+                        }
                     }
                 }
             }
@@ -260,46 +271,62 @@ class FaceCoordinator(
         if (!force && currentMode == newMode && !isTransitioning) return
         Log.d(TAG, "setRobotMode: $oldMode -> $newMode (force=$force)")
         currentMode = newMode
-        setWebViewMode(newMode)
 
-        // ── Resolve which transition video to play ──────────────────────────
-        //
-        // Priority:
-        //   1. Exact out-transition:  dog_to_normal, bodyguard_to_normal, party_to_normal
-        //   2. Exact in-transition:   dog_transition, bodyguard_transition, party_transition
-        //   3. Special case:          normal_to_unhinged  (normal → unhinged)
-        //   4. No video found         → snap directly to WebView idle face
-
+        // ── Resolve transition video name ──────────────────────────────────
         val transName: String? = when {
-            // Going back to NORMAL: prefer the "X_to_normal" exit video
             newMode == RobotMode.NORMAL && oldMode != RobotMode.NORMAL ->
                 "${oldMode.name.lowercase()}_to_normal"
-
-            // Going TO UNHINGED from NORMAL: dedicated video
             newMode == RobotMode.UNHINGED && oldMode == RobotMode.NORMAL ->
                 "normal_to_unhinged"
-
-            // Going INTO a non-normal mode: use that mode's _transition video
             newMode != RobotMode.NORMAL ->
                 "${newMode.name.lowercase()}_transition"
-
             else -> null
         }
 
-        val resId = if (transName != null)
+        val transResId = if (transName != null)
             context.resources.getIdentifier(transName, "raw", context.packageName)
         else 0
 
-        if (resId != 0) {
-            Log.d(TAG, "Playing mode transition video: $transName")
+        // ── Resolve idle loop video name for this mode ─────────────────────
+        // After the transition finishes we loop the idle face for this mode.
+        // normal_idle, dog_idle, bodyguard_looking, unhinged_idle, party_transition(loop)
+        val idleName = when (newMode) {
+            RobotMode.NORMAL    -> "normal_idle"
+            RobotMode.DOG       -> "dog_idle"
+            RobotMode.BODYGUARD -> "bodyguard_looking"  // scanning animation
+            RobotMode.UNHINGED  -> "unhinged_idle"
+            RobotMode.PARTY     -> "party_transition"
+        }
+
+        if (transResId != 0) {
+            Log.d(TAG, "Mode transition: playing $transName then looping $idleName")
             isTransitioning = true
             showVideoFace()
             playVideo(transName!!, loop = false)
-            // After the video ends, playbackStateChanged → showWebViewFace() is called
-            // automatically by the existing player listener, which shows the SVG face
-            // with the correct mode colours already applied above via setWebViewMode().
+            // When the transition ends, onPlaybackStateChanged fires STATE_ENDED
+            // → the callback below starts the idle loop for the new mode.
+            onCompleteCallback = { startIdleLoop(idleName) }
         } else {
-            Log.d(TAG, "No transition video for $oldMode→$newMode — showing WebView face")
+            Log.d(TAG, "No transition video — jumping straight to idle: $idleName")
+            startIdleLoop(idleName)
+        }
+    }
+
+    /**
+     * Loops [idleName] full-screen as the resting face for the current mode.
+     * The WebView is hidden while the idle video plays.
+     * Speaking (ElevenLabs) interrupts the idle with a _talk video, then resumes here.
+     */
+    fun startIdleLoop(idleName: String) {
+        val resId = context.resources.getIdentifier(idleName, "raw", context.packageName)
+        if (resId != 0) {
+            Log.d(TAG, "Starting idle loop: $idleName")
+            showVideoFace()
+            playVideo(idleName, loop = true)
+        } else {
+            // Fallback — idle video missing, use WebView face with mode colours
+            Log.w(TAG, "Idle video '$idleName' missing — falling back to WebView")
+            setWebViewMode(currentMode)
             showWebViewFace()
         }
     }
@@ -307,8 +334,43 @@ class FaceCoordinator(
     fun setSpeaking(speaking: Boolean) {
         if (isSpeakingState == speaking) return
         isSpeakingState = speaking
-        setWebViewSpeaking(speaking)
         Log.d(TAG, "setSpeaking: $speaking")
+
+        if (speaking) {
+            // Switch to the talk/bark video for this mode — mouth animation
+            // is driven by the WebView amplitude analyser via notifyAudioFile()
+            // playing simultaneously. The video plays once then idle resumes.
+            val talkName = when (currentMode) {
+                RobotMode.NORMAL    -> "normal_talk"
+                RobotMode.DOG       -> "dog_barking"
+                RobotMode.BODYGUARD -> "bodyguard_talk"
+                RobotMode.UNHINGED  -> "normal_talk"   // no unhinged_talk yet
+                RobotMode.PARTY     -> "normal_talk"
+            }
+            val resId = context.resources.getIdentifier(talkName, "raw", context.packageName)
+            if (resId != 0) {
+                Log.d(TAG, "Speaking — playing talk video: $talkName")
+                showVideoFace()
+                playVideo(talkName, loop = false)
+                // When done, resume the idle loop
+                onCompleteCallback = {
+                    startIdleLoop(when (currentMode) {
+                        RobotMode.NORMAL    -> "normal_idle"
+                        RobotMode.DOG       -> "dog_idle"
+                        RobotMode.BODYGUARD -> "bodyguard_looking"
+                        RobotMode.UNHINGED  -> "unhinged_idle"
+                        RobotMode.PARTY     -> "party_transition"
+                    })
+                }
+            }
+            // Also notify the WebView to start amplitude analysis / fallback oscillation
+            setWebViewSpeaking(true)
+        } else {
+            // ElevenLabs finished — the onCompleteCallback above handles
+            // returning to idle once the talk video ends naturally.
+            // Just stop the WebView mouth animation immediately.
+            setWebViewSpeaking(false)
+        }
     }
 
     fun triggerWarning() {
@@ -319,6 +381,11 @@ class FaceCoordinator(
             isWarningTriggered = true
             showVideoFace()
             playVideo("bodyguard_warning", loop = false)
+            // After warning, resume bodyguard scanning loop
+            onCompleteCallback = {
+                isWarningTriggered = false
+                startIdleLoop("bodyguard_looking")
+            }
         }
     }
 
@@ -333,7 +400,11 @@ class FaceCoordinator(
     /** Plays splash video (muted) — called after intro or directly when "No" tapped */
     fun playSplashVideo(onComplete: () -> Unit) {
         Log.d(TAG, "playSplashVideo")
-        onCompleteCallback = onComplete
+        onCompleteCallback = {
+            onComplete()
+            // After splash, start normal idle face loop
+            startIdleLoop("normal_idle")
+        }
         showVideoFace()
         playVideo("splash", loop = false)
     }
