@@ -85,7 +85,7 @@ struct Telemetry {
 //  declared at file scope.  Their absence causes a compile failure
 //  which is WHY the ESP32 never runs and therefore never handshakes.
 // ════════════════════════════════════════════════════════════════════
-#define       ESP_FW_VER   "V2.0"        // firmware version string
+#define       ESP_FW_VER   "V3.0"        // firmware version string
 bool          wifiOK       = false;      // true once WiFi connects
 bool          btOnlyMode   = false;      // true if WiFi never connected
 bool          megaLinked   = false;      // true once any Mega byte received
@@ -173,7 +173,6 @@ const char HTML[] = R"rawliteral(
     <div class="row"><span>Temp</span>   <span id="tp">--</span></div>
     <div class="row"><span>Humidity</span><span id="hu">--</span></div>
     <div class="row"><span>Gas</span>    <span id="ga">--</span></div>
-    <div class="row"><span>Flame</span>  <span id="fl">--</span></div>
 
     <details>
       <summary>Sensor on/off controls</summary>

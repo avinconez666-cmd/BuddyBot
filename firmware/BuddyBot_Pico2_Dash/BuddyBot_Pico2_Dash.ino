@@ -1166,8 +1166,10 @@ void handleMegaLine(String& line){
   else if(line.startsWith("SENS_ST|"))      parseSensStatus(line);
   else if(line.startsWith("MODE:"))      T.mode=line.substring(5);
   else if(line=="PING")                  MEGA_SERIAL.println("PONG");
-  else if(line.startsWith("BAT:WARN"))   raisAlert("Battery Low","Charge soon",C_AMBER);
-  else if(line.startsWith("BAT:LOW"))    raisAlert("Battery Critical","Plug in NOW",C_CORAL);
+  else if(line.startsWith("BAT:WARN"))    raisAlert("Battery Low","Charge soon",C_AMBER);
+  else if(line.startsWith("BAT:LOW"))     raisAlert("Battery Critical","Plug in NOW",C_CORAL);
+  else if(line=="CHARGE:MANUAL:CONNECTED")    raisAlert("Charging","Manual charger connected",C_MINT);
+  else if(line=="CHARGE:MANUAL:DISCONNECTED") raisAlert("Ready","Charger disconnected",C_CYAN);
   else if(line.startsWith("SAFETY:FLAME"))raisAlert("FLAME DETECTED","Check area",C_CORAL);
   else if(line.startsWith("SAFETY:TILT"))raisAlert("Robot Tilted","Check robot",C_AMBER);
   else if(line.startsWith("SAFETY:GAS")) raisAlert("Gas Detected","Ventilate now",C_AMBER);

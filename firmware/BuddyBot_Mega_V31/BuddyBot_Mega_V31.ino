@@ -127,8 +127,8 @@ void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorCo
 #define FAN_BODY_PIN      12    // Body extract fan     (battery / ambient temp)
 #define FAN_HEAD_BLOW_PIN 7    // Head blower fan      (head temp ≥ HEAD_FAN_TEMP)
 #define FAN_HEAD_EXT_PIN  8    // Head extract fan     (head temp ≥ HEAD_FAN_TEMP)
-#define UV_LIGHT_PIN      40    // UV light strip       (manual / auto, PIR interlock)
-#define BUZZER_PIN        2    // Piezo buzzer
+#define UV_LIGHT_PIN      44    // UV light strip       (manual / auto, PIR interlock) — moved from 40 (was RIGHT_ECHO conflict)
+#define BUZZER_PIN        41   // Piezo buzzer — moved from 2 (INT4 now used by RF)
 
 // ── Digital inputs ───────────────────────────────────────────────────────────
 #define MOMENTARY_BTN     24   // Push button — toggle autonomous mode
@@ -138,8 +138,9 @@ void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorCo
 #define PIR_PIN           -1    // PIR motion sensor — set real pin when fitted
 #define DHT_PIN           33    // DHT11 data
 #define GAS_DO            22    // Gas sensor digital output (HIGH = gas)
-#define RF_PIN            A2    // 433 MHz RF receiver
-#define CURRENT_SENSOR    3     // Current sensor pulse input (INT5 — interrupt-capable)
+#define RF_PIN            2     // 433 MHz RF receiver — INT4 (interrupt-capable on Mega)
+#define CURRENT_SENSOR    3     // Current sensor pulse input — INT5 (interrupt-capable on Mega)
+#define CHARGE_DETECT_PIN 27    // Barrel jack third wire: LOW=charging, HIGH=not charging (via 10kΩ/6.8kΩ divider)
 
 // ── IR obstacle sensors (LOW = obstacle detected) ────────────────────────────
 #define REAR_IR   25
@@ -322,6 +323,10 @@ String lastFace = "";
 // ── ESP32 bridge ─────────────────────────────────────────────────────────────
 String esp32Buf   = "";
 bool   esp32Ready = false;
+
+// ── Manual charge detection ───────────────────────────────────────────────────
+bool isCharging  = false;   // true when barrel jack charger connected
+bool wasCharging = false;   // edge-detection flag
 
 // ── Pico / R3 buffers ──────────────────────────────────────────────────────────
 String picoBuf = "";
@@ -604,16 +609,7 @@ void sendTelemetryToPico() {
   Serial1.println(u);
   toS9(u);
 
-  // ── PWR: (idx: 0=volt 1=amps 3=pct 4=pct) ───────────────────────────────────
-  String p = F("PWR:");
-  p += String(battVolt, 2);      p += ':';
-  p += String(currentAmps, 2);  p += ':';
-  p += String((int)analogRead(VOLTAGE_SENSOR)); p += ':';
-  p += String((int)battPct);    p += ':';
-  p += String((int)battPct);
-  Serial1.println(p);
-
-  // ── STATUS| — enriched with all board states + new V31 fields ────────────────
+  // ── STATUS| ───────────────────────────────────────────────────────────────────
   String s = F("STATUS|ESTOP:");
   s += (emergencyStop  ? "YES" : "NO");
   s += F("|AUTO:");
@@ -640,6 +636,8 @@ void sendTelemetryToPico() {
   s += (s9Connected ? F("OK")   : F("WAIT"));
   s += F("|FW:");
   s += FW_VERSION;
+  s += F("|CHG:");
+  s += (isCharging ? F("YES") : F("NO"));
   Serial1.println(s);
   Serial3.println(s);
 }
@@ -1442,6 +1440,37 @@ void initPins() {
   pinMode(FAN_HEAD_EXT_PIN,  OUTPUT); digitalWrite(FAN_HEAD_EXT_PIN,  LOW);
   pinMode(UV_LIGHT_PIN,      OUTPUT); digitalWrite(UV_LIGHT_PIN,      LOW);  // SAFE default OFF
   pinMode(BUZZER_PIN,        OUTPUT); digitalWrite(BUZZER_PIN,        LOW);
+  pinMode(CHARGE_DETECT_PIN, INPUT_PULLUP);  // Barrel jack third wire — LOW=charging
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  MANUAL CHARGE DETECTION
+//  Barrel jack third wire: 0V = charger plugged in, 8.4V = unplugged.
+//  8.4V is stepped to ~3.4V via 10kΩ/6.8kΩ voltage divider on pin 27.
+//  LOW  = charging   HIGH = not charging
+// ════════════════════════════════════════════════════════════════════
+void checkManualCharging() {
+  isCharging = (digitalRead(CHARGE_DETECT_PIN) == LOW);
+
+  if (isCharging && !wasCharging) {
+    wasCharging    = true;
+    autonomousMode = false;
+    sendMotor("STOP");
+    toS9("CHARGE:MANUAL:CONNECTED");
+    Serial1.println(F("CHARGE:MANUAL:CONNECTED"));
+    Serial3.println(F("CHARGE:MANUAL:CONNECTED"));
+    dbg("[CHARGE] Manual charger connected");
+    beep(1000, 80); delay(100); beep(1300, 80);
+  }
+
+  if (!isCharging && wasCharging) {
+    wasCharging = false;
+    toS9("CHARGE:MANUAL:DISCONNECTED");
+    Serial1.println(F("CHARGE:MANUAL:DISCONNECTED"));
+    Serial3.println(F("CHARGE:MANUAL:DISCONNECTED"));
+    dbg("[CHARGE] Manual charger disconnected");
+    beep(800, 150);
+  }
 }
 
 void startupSequence() {
@@ -1483,7 +1512,7 @@ void setup() {
   dht.begin();
   initPins();
 
-  rfReceiver.enableReceive(-1);  // Polling mode — RF_PIN (A2) is not interrupt-capable on Mega
+  rfReceiver.enableReceive(digitalPinToInterrupt(RF_PIN));  // INT4 on pin 2
   attachInterrupt(digitalPinToInterrupt(CURRENT_SENSOR), currentPulseISR, RISING);
 
   if (paj7620Init() == 0) { dbg("[INIT] PAJ7620 OK"); }
@@ -1533,8 +1562,10 @@ void loop() {
     sendMotor("STOP");
     drainMotorQueue();
     handleS9Communication();
+    handlePicoCommunication();   // [FIX MEGA-06] was missing — Pico PONG/PING dropped during boot
     handleR3Communication();
     handleESP32Communication();
+    checkManualCharging();       // always check charge state, even during boot
     return;
   }
 
@@ -1577,6 +1608,7 @@ void loop() {
     checkSafety();
     checkGestures();
     handleButton();
+    checkManualCharging();   // [FIX MEGA-03] charge detection
   }
 
   // Telemetry broadcast (1000 ms)

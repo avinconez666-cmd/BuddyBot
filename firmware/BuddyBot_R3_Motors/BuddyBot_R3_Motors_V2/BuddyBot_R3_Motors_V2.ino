@@ -369,11 +369,17 @@ void processCommand(String cmd) {
 
   // ── PATTERNS ───────────────────────────────────────────────────
   if (cmd == "MOTOR|DANCE") {
-    danceState = DANCE_IDLE;  // Will start on next loop
+    if (danceState == DANCE_IDLE) {
+      danceState = DANCE_IDLE;  // Will start on next loop
+      megaSerial.println(F("ACK:MOTOR|DANCE"));
+    }
     return;
   }
   if (cmd == "DEFENSE") {
-    defenseState = DEFENSE_IDLE;  // Will start on next loop
+    if (defenseState == DEFENSE_IDLE) {
+      defenseState = DEFENSE_IDLE;  // Will start on next loop
+      megaSerial.println(F("ACK:DEFENSE"));
+    }
     return;
   }
 
