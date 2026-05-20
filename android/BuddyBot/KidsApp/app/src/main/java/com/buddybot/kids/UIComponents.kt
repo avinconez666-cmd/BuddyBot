@@ -93,18 +93,16 @@ fun BuddyBotOverlay(
                 detectTapGestures(onTap = { onTap() })
             }
     ) {
+        // ── Invisible settings trigger — top-left 72×72 dp corner ─────────
+        // No icon, no background, no hint it exists. Tap it to open settings.
         Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(16.dp)
-                .size(60.dp)
-                .background(Color.White.copy(alpha = 0.1f), CircleShape)
-                .clickable { onOpenMenu() },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.Default.Settings, contentDescription = "Menu", tint = Color.White.copy(alpha = 0.5f))
-        }
+                .size(72.dp)
+                .clickable { onOpenMenu() }
+        )
 
+        // ── Battery indicator — top centre ────────────────────────────────
         Text(
             text = "🔋 ${telemetry.batteryPercent}% (${String.format("%.1f", telemetry.batteryVoltage)}V)",
             color = if (telemetry.batteryPercent < 20) Color.Red else Color.Green,
@@ -116,18 +114,18 @@ fun BuddyBotOverlay(
                 .padding(horizontal = 12.dp, vertical = 4.dp)
         )
 
-        // Phase 5: Detection overlay — face bounding boxes (cyan) + object boxes (green)
+        // ── ML detection overlay ──────────────────────────────────────────
         DetectionOverlay(
             faces = robotState.detectedFaces,
             objects = robotState.detectedObjects
         )
 
-        // Phase 4: Call Daddy button with camera status indicator
+        // ── Call Daddy button — top right ─────────────────────────────────
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .align(Alignment.TopStart) // ← was TopEnd
-                .padding(start = 80.dp, top = 12.dp) // offset right of gear icon
+                .align(Alignment.TopEnd)
+                .padding(end = 16.dp, top = 12.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -148,15 +146,11 @@ fun BuddyBotOverlay(
                 Text("📞", fontSize = 32.sp)
             }
             Spacer(Modifier.height(4.dp))
-            // Camera status badge below the button
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
                 modifier = Modifier
-                    .background(
-                        Color.Black.copy(alpha = 0.6f),
-                        RoundedCornerShape(6.dp)
-                    )
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
                 Box(
@@ -177,10 +171,7 @@ fun BuddyBotOverlay(
             }
         }
 
-        IconButton(onClick = onEmergency, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
-            Icon(Icons.Default.Warning, "SOS", tint = Color.Red, modifier = Modifier.size(48.dp))
-        }
-
+        // ── Recognised person label ───────────────────────────────────────
         if (robotState.recognizedPerson != null) {
             Text(
                 text = "Detected: ${robotState.recognizedPerson}",
