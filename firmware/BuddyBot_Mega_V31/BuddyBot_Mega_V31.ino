@@ -1031,6 +1031,17 @@ void processESP32Command(String cmd) {
 
   if (cmd == "READY") { esp32Ready = true; return; }
 
+  // Forward ESP32 WiFi IP to S9 app so it can auto-connect via HTTP
+  if (cmd.startsWith("WIFI_IP:")) {
+    String ip = cmd.substring(8);
+    ip.trim();
+    if (ip.length() > 0) {
+      toS9("WIFI_IP:" + ip);
+      Serial.print(F("[MEGA] Forwarded WiFi IP to S9: ")); Serial.println(ip);
+    }
+    return;
+  }
+
   if (cmd.startsWith("BTCMD|"))  { processMotorOrModeCmd(cmd.substring(6)); return; }
 
   if (cmd.startsWith("WEBCMD|")) {

@@ -462,7 +462,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             }
             
             try {
-                val prefs = getSharedPreferences("BuddyBot", MODE_PRIVATE)
+                val prefs = getSharedPreferences("buddybot", MODE_PRIVATE)
                 val savedIP = prefs.getString("buddybotIP", "") ?: ""
                 if (savedIP.isNotEmpty()) {
                     _robotState.value = _robotState.value.copy(buddybotIP = savedIP)
@@ -495,19 +495,27 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 Log.e(TAG, "Error initializing Arduino communications", e)
             }
             
-            try {
-                startEnvironmentMonitoring()
-                Log.d(TAG, "initializeApp: Environment monitoring started")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error starting environment monitoring", e)
-            }
-
-            // Phase 3: Start always-listening hotword service
+            // HotwordService MUST start before EnvironmentMonitoringService.
+            // Both use the microphone — Samsung S9 only allows one SpeechRecognizer
+            // at a time. Starting EnvironmentMonitoring first causes ERROR_RECOGNIZER_BUSY
+            // which makes "Hey Buddy" silently fail.
             try {
                 startHotwordService()
                 Log.d(TAG, "initializeApp: HotwordService started")
             } catch (e: Exception) {
                 Log.e(TAG, "Error starting HotwordService", e)
+            }
+
+            // Delay EnvironmentMonitoringService 4 s so HotwordService has time
+            // to acquire the SpeechRecognizer before any mic contention.
+            lifecycleScope.launch {
+                kotlinx.coroutines.delay(4000)
+                try {
+                    startEnvironmentMonitoring()
+                    Log.d(TAG, "initializeApp: Environment monitoring started (delayed)")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error starting environment monitoring", e)
+                }
             }
 
             // Show the intro dialog
@@ -565,6 +573,21 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             } else if (msg.startsWith("REQ_MODE:")) {
                 parseMode(msg.substring(9))?.let {
                     _robotState.value = _robotState.value.copy(showPinEntry = true, requestedMode = it)
+                }
+            } else if (msg.startsWith("WIFI_IP:")) {
+                // ESP32 broadcasts its IP to Mega which relays it here.
+                // Auto-populate buddybotIP so the user never has to type it manually.
+                val ip = msg.substring(8).trim()
+                if (ip.isNotEmpty() && ip != "0.0.0.0") {
+                    Log.d(TAG, "Auto-detected BuddyBot WiFi IP: $ip")
+                    logComm("WIFI", "ESP32 IP auto-detected: $ip")
+                    updateIP(ip)
+                    if (arduinoComms.communicationMode.value != CommunicationMode.WEBSOCKET) {
+                        lifecycleScope.launch {
+                            delay(500)
+                            arduinoComms.initializeHttp(ip)
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -2058,7 +2081,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         val trimmed = ip.trim()
         if (trimmed.isEmpty()) return
         _robotState.value = _robotState.value.copy(buddybotIP = trimmed)
-        getSharedPreferences("BuddyBot", MODE_PRIVATE).edit { putString("buddybotIP", trimmed) }
+        getSharedPreferences("buddybot", MODE_PRIVATE).edit { putString("buddybotIP", trimmed) }
         logComm("COMM", "IP saved: $trimmed — connecting HTTP…")
         lifecycleScope.launch {
             delay(300)
