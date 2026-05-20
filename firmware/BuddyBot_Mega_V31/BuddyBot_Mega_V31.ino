@@ -906,7 +906,12 @@ void processS9Command(String cmd) {
 
   // ── Sensor toggle ────────────────────────────────────────────────────────────
   if (cmd.startsWith("TOGGLE_SENSOR:")) { applyToggle(cmd); return; }
-  if (cmd == "SENSOR_STATUS")           { toS9(sensorStatusString()); return; }
+  if (cmd == "SENSOR_STATUS") {
+    String ss = sensorStatusString();
+    toS9(ss);
+    Serial1.println(ss);   // also reply to Pico if S9 requested it
+    return;
+  }
 
   // ── Face / object passthrough to Pico ─────────────────────────────────────────
   if (cmd.startsWith("FACE:")) { lastFace = cmd.substring(5); return; }
@@ -955,13 +960,38 @@ void processPicoCommand(String cmd) {
 
   if (cmd.startsWith("MODE:")) {
     String mode = cmd.substring(5);
-    Serial1.print(F("MODE:")); Serial1.println(mode);
+    // Do NOT echo back to Serial1 — that would loop back to the Pico
     toS9("REQ_MODE:" + mode);
     Serial3.print(F("MODE:")); Serial3.println(mode);
     return;
   }
 
   if (cmd.startsWith("TOGGLE_SENSOR:")) { applyToggle(cmd); return; }
+
+  // B2: Pico requests sensor config on boot — reply directly to Serial1
+  if (cmd == "SENSOR_STATUS") {
+    Serial1.println(sensorStatusString());
+    return;
+  }
+
+  // B3: Pico footer ESTOP button — was silently dropped before
+  if (cmd == "EMERGENCY_STOP") {
+    emergencyStop = true;
+    sendMotor("STOP");
+    toS9("ACK|EMERGENCY_STOP|END");
+    beep(2000, 500);
+    return;
+  }
+  if (cmd == "ESTOP_CLEAR") {
+    emergencyStop = false;
+    estopRetries  = 0;
+    estopT        = 0;
+    toS9("ACK|ESTOP_CLEARED|END");
+    return;
+  }
+
+  // B4: Pico boot greeting — picoLinked already set above, just consume it
+  if (cmd == "PONG") { return; }
 
   if (debugVerbose) { Serial.print(F("[PICO] Unknown: ")); Serial.println(cmd); }
 }
