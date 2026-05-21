@@ -174,7 +174,7 @@ struct SensorFlags {
     bool dht     = true;
     bool light   = true;
     bool sound   = true;
-    bool gas     = true;
+    bool gas     = false; // off by default until sensor physically connected (floating pin causes false alerts)
     bool pir     = false;  // off by default (can be noisy indoors)
     bool tilt    = true;
     bool ir      = true;
