@@ -307,11 +307,13 @@ void cmdSerialSend(int port, String text) {
 }
 
 void cmdListen(int port) {
-  Serial.print(F("  Listening Serial")); Serial.print(port); Serial.println(F(" for 5 seconds..."));
+  int duration = (port == 2) ? 15000 : 5000;  // Serial2 (R3) gets 15s, others 5s
+  Serial.print(F("  Listening Serial")); Serial.print(port);
+  Serial.print(F(" for ")); Serial.print(duration/1000); Serial.println(F(" seconds..."));
   divider();
   unsigned long t = millis();
   int count = 0;
-  while (millis() - t < 5000) {
+  while (millis() - t < (unsigned long)duration) {
     bool avail = false;
     switch (port) {
       case 1: avail = Serial1.available(); break;
