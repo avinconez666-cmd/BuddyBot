@@ -2,7 +2,9 @@
  * ════════════════════════════════════════════════════════════════════
  *  BUDDYBOT  ·  KEYESTUDIO MEGA 2560 PLUS WiFi  ·  PRODUCTION V31.0
  * ════════════════════════════════════════════════════════════════════
- *
+ *  
+ *  DO NOT CHANGE PIN DEFINITIONS WITHOUT EXPLICIT PERMISSION!!!
+ *  
  *  CHANGES FROM V30
  *  ─────────────────
  *  [REMOVED] Boost converter voltage sensor (BOOST_VOLT_SENSOR / A9,
@@ -114,30 +116,29 @@ void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorCo
 
 // ── Analog sensors ───────────────────────────────────────────────────────────
 #define VOLTAGE_SENSOR    A6   // Battery voltage divider (direct battery)
-#define TEMP_SENSOR_1     A9    // Thermistor 1 — battery pack temperature
-#define HEAD_TEMP_SENSOR  A3    // Head temperature sensor (placeholder — install soon)
+#define TEMP_SENSOR_1     A2    // Thermistor 1 — battery pack temperature
+#define HEAD_TEMP_SENSOR  A13    // Head temperature sensor (placeholder — install soon)
 #define LDR_AO            A4    // Light-dependent resistor
-#define SOUND_AO          A1    // Sound sensor analog
-#define GAS_AO            -1   // USING DIGITAL MODULE NOW
-
+#define SOUND_AO          -1    // Sound sensor analog
+#define GAS_AO            A14   // 
 // ── I2C interrupt ────────────────────────────────────────────────────────────
-#define GESTURE_INT       A13   // PAJ7620 gesture sensor interrupt
+#define GESTURE_INT       -1   // PAJ7620 gesture sensor interrupt
 
 // ── Digital outputs ──────────────────────────────────────────────────────────
 #define FAN_BODY_PIN      12    // Body extract fan     (battery / ambient temp)
-#define FAN_HEAD_BLOW_PIN 7    // Head blower fan      (head temp ≥ HEAD_FAN_TEMP)
+#define FAN_HEAD_BLOW_PIN 9    // Head blower fan      (head temp ≥ HEAD_FAN_TEMP)
 #define FAN_HEAD_EXT_PIN  8    // Head extract fan     (head temp ≥ HEAD_FAN_TEMP)
-#define UV_LIGHT_PIN      44    // UV light strip       (manual / auto, PIR interlock) — moved from 40 (was RIGHT_ECHO conflict)
-#define BUZZER_PIN        41   // Piezo buzzer — moved from 2 (INT4 now used by RF)
+#define UV_LIGHT_PIN      4    // UV light strip       (manual / auto, PIR interlock) — moved from 40 (was RIGHT_ECHO conflict)
+#define BUZZER_PIN        23   // Piezo buzzer — moved from 2 (INT4 now used by RF)
 
 // ── Digital inputs ───────────────────────────────────────────────────────────
 #define MOMENTARY_BTN     24   // Push button — toggle autonomous mode
 #define LDR_DO            5     // LDR threshold output
-#define UNHINGED_SW       A10    // Physical switch — unhinged mode
+#define UNHINGED_SW       A1    // Physical switch — unhinged mode
 #define TILT_SENSOR       52    // Tilt / vibration sensor (HIGH = tilt)
 #define PIR_PIN           -1    // PIR motion sensor — set real pin when fitted
 #define DHT_PIN           33    // DHT11 data
-#define GAS_DO            22    // Gas sensor digital output (HIGH = gas)
+#define GAS_DO            -1    // Gas sensor digital output (HIGH = gas)
 #define RF_PIN            2     // 433 MHz RF receiver — INT4 (interrupt-capable on Mega)
 #define CURRENT_SENSOR    3     // Current sensor pulse input — INT5 (interrupt-capable on Mega)
 #define CHARGE_DETECT_PIN 27    // Barrel jack third wire: LOW=charging, HIGH=not charging (via 10kΩ/6.8kΩ divider)
@@ -1161,6 +1162,7 @@ void handleRF() {
 //  PAJ7620 GESTURE SENSOR
 // ════════════════════════════════════════════════════════════════════
 void checkGestures() {
+  if (GESTURE_INT < 0) return;   // sensor not connected
   uint8_t data = 0;
   paj7620ReadReg(0x43, 1, &data);
   if (data == 0) return;
@@ -1515,8 +1517,12 @@ void setup() {
   rfReceiver.enableReceive(digitalPinToInterrupt(RF_PIN));  // INT4 on pin 2
   attachInterrupt(digitalPinToInterrupt(CURRENT_SENSOR), currentPulseISR, RISING);
 
-  if (paj7620Init() == 0) { dbg("[INIT] PAJ7620 OK"); }
-  else                     { dbg("[INIT] PAJ7620 FAILED"); }
+  if (GESTURE_INT >= 0) {
+    if (paj7620Init() == 0) { dbg("[INIT] PAJ7620 OK"); }
+    else                     { dbg("[INIT] PAJ7620 FAILED"); }
+  } else {
+    dbg("[INIT] PAJ7620 skipped — not connected");
+  }
 
   readAllSensors();
   waitForR3Ready();
