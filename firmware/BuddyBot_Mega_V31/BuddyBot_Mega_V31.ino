@@ -91,6 +91,10 @@ const int SIDE_MIN = 35;   // cm — minimum side clearance
 const int T45      = 350;  // ms for ~45° turn at DEFAULT_SPEED
 const int T90      = 700;  // ms for ~90° turn at DEFAULT_SPEED
 
+// Gas sensor alert threshold (analog 0-1023)
+// Tune this to your sensor — most MQ sensors read ~100-200 clean air, spike above 400 on gas
+const int GAS_ALERT_THRESHOLD = 400;
+
 // RF remote codes (315 / 433 MHz)
 const unsigned long RF_FWD  = 5393;
 const unsigned long RF_BWD  = 5396;
@@ -245,7 +249,7 @@ float headTemp    = 25.0f;   // Head enclosure temperature (from HEAD_TEMP_SENSO
 float humidity    = 50.0f;
 float currentAmps = 0.0f;
 int   lightLevel  = 500;
-int   gasLevel    = 0;
+int   gasLevel    = 0;   // raw analog 0-1023 from GAS_AO
 int   soundLevel  = 0;
 int   gps_sats    = 0;
 float gps_lat     = 0.0f;
@@ -254,7 +258,6 @@ long  dFront = -1, dRear = -1, dLeft = -1, dRight = -1;
 bool  irFront = false, irRear = false, irLeft = false, irRight = false;
 bool  tiltDetected  = false;
 bool  pirDetected   = false;
-bool  gasDetected   = false;
 
 // ── Battery tier (edge-triggered — no spamming) ──────────────────────────────
 enum BatTier { BAT_TIER_OK, BAT_TIER_WARN, BAT_TIER_LOW, BAT_TIER_CRITICAL };
@@ -458,9 +461,8 @@ void readAllSensors() {
 
   // ── Analog environmental sensors ────────────────────────────────────────────
   lightLevel = sens.light ? analogRead(LDR_AO)   : -1;
-  soundLevel = sens.sound ? analogRead(SOUND_AO) : -1;
-  gasLevel   = 0;  // Digital gas module only — GAS_AO=-1, read via GAS_DO interrupt/poll
-  gasDetected= sens.gas   ? (digitalRead(GAS_DO) == HIGH) : false;
+  soundLevel = (SOUND_AO >= 0 && sens.sound) ? analogRead(SOUND_AO) : -1;
+  gasLevel   = (GAS_AO   >= 0 && sens.gas)   ? analogRead(GAS_AO)   :  0;
 
   // ── Battery voltage (A14, direct divider) ────────────────────────────────────
   int rawV = analogRead(VOLTAGE_SENSOR);
@@ -755,8 +757,8 @@ void checkSafety() {
     beep(2000, 300);
   }
 
-  // Gas: alert only
-  if (gasDetected && sens.gas) {
+  // Gas: alert only (analog threshold — tune GAS_ALERT_THRESHOLD to suit your sensor)
+  if (sens.gas && gasLevel > GAS_ALERT_THRESHOLD) {
     toS9("EVENT:GAS_ALERT");
     Serial1.println(F("SAFETY:GAS_ALERT"));
     Serial3.println(F("ALERT:GAS_DETECTED"));
@@ -1409,8 +1411,8 @@ void initPins() {
   pinMode(TEMP_SENSOR_1,    INPUT);
   pinMode(HEAD_TEMP_SENSOR, INPUT);   // placeholder — safe to configure now
   pinMode(LDR_AO,           INPUT);
-  pinMode(SOUND_AO,         INPUT);
-  pinMode(GAS_AO,           INPUT);
+  if (GAS_AO   >= 0) pinMode(GAS_AO,   INPUT);
+  if (SOUND_AO >= 0) pinMode(SOUND_AO, INPUT);
 
   // ── Digital inputs ───────────────────────────────────────────────────────────
   pinMode(LDR_DO,       INPUT);
@@ -1424,7 +1426,6 @@ void initPins() {
   pinMode(MOMENTARY_BTN,INPUT_PULLUP);
   pinMode(GESTURE_INT,  INPUT);
   pinMode(CURRENT_SENSOR,INPUT);
-  pinMode(GAS_DO,       INPUT);
 
   // ── Echo pins ────────────────────────────────────────────────────────────────
   pinMode(FRONT_ECHO, INPUT); pinMode(LEFT_ECHO,  INPUT);
