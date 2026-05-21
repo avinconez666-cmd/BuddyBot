@@ -938,6 +938,7 @@ void processS9Command(String cmd) {
 
   if (cmd == "DEBUG:ON")  { debugVerbose = true;  return; }
   if (cmd == "DEBUG:OFF") { debugVerbose = false; return; }
+  if (cmd == "R3:RETRY")  { r3CommFail = false; runR3CommTest(); return; }
 
   if (cmd == "NOTIFY:PATROL_START") { toS9("ACK|PATROL_START|END"); return; }
   if (cmd == "KEEP_DISTANCE")       { toS9("ACK|KEEP_DISTANCE|END"); return; }
@@ -1387,7 +1388,7 @@ void runR3CommTest() {
 }
 
 bool waitForR3Ready() {
-  unsigned long timeout = millis() + 2500;
+  unsigned long timeout = millis() + 5000;  // bumped 2500→5000ms — R3 takes ~1.5s to boot
   String response = "";
   while (millis() < timeout) {
     if (motorComm.available()) {
