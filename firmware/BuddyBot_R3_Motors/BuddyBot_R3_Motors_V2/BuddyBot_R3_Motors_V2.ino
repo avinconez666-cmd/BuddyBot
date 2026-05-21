@@ -43,8 +43,8 @@
 
 #include <SoftwareSerial.h>
 
-// ── SoftwareSerial: A0=RX (from Mega TX pin 10), A1=TX (to Mega RX pin 11)
-SoftwareSerial megaSerial(A0, A1);
+// ── SoftwareSerial: A1=RX (from Mega TX pin 17), A0=TX (to Mega RX pin 16) — TX/RX swapped
+SoftwareSerial megaSerial(A1, A0);
 
 // ════════════════════════════════════════════════════════════════════
 //  MOTOR SHIELD PINS  (Adafruit V1 — 74HC595 shift register)
@@ -440,9 +440,9 @@ void processCommand(String cmd) {
 // ════════════════════════════════════════════════════════════════════
 
 void setup() {
-  // Disable motor outputs immediately, before anything else
-  // Motor stop will be sent via SoftwareSerial after initialization
+  Serial.begin(9600);   // USB debug — mirrors everything received from Mega
   megaSerial.begin(9600);
+  Serial.println(F("[R3] Boot start"));
   
   // ✅ FIX: Wait for serial link to stabilize before transmitting
   delay(1000);
@@ -483,6 +483,7 @@ void loop() {
   // Accumulate bytes from Mega into cmdBuf, fire on newline
   while (megaSerial.available()) {
     char c = megaSerial.read();
+    Serial.print(c);   // echo raw bytes to USB so we can see what Mega is sending
     if (c == '\n' || c == '\r') {
       if (cmdBuf.length() > 0) {
         processCommand(cmdBuf);
