@@ -688,7 +688,7 @@ void updateTelCell(int16_t x,int16_t y,const char* lbl,const char* val,uint16_t 
 void drawMainFull(){
   fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);
   // Background grid lines
-  for(int16_t gx=0;gx<SCR_W;gx+=16) drawV(gx,CNT_Y,CNT_H,0x0421u);
+  // grid lines disabled for debug
 
   // Section: TELEMETRY
   sectionDiv(CNT_Y+4,"TELEMETRY",C_CYAN);
@@ -771,7 +771,7 @@ void drawMain(Touch& t){
 
   // Only update telemetry cells — no full screen wipe
   updateTelemetryOnly();
-  scanLine(0,CNT_Y,SCR_W,CNT_H);
+  // scanLine disabled for debug
 
   // Touch — mode buttons
   int mw=(SCR_W-24)/3;
