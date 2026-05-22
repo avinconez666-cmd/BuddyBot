@@ -1182,6 +1182,7 @@ void setup(){
 }
 
 void loop(){
+  static unsigned long lastHB2=0; if(millis()-lastHB2>1000){lastHB2=millis();Serial.print("LOOP ms=");Serial.println(millis());}
   handleMegaSerial();
 
   if(millis()-lastPing>5000){
