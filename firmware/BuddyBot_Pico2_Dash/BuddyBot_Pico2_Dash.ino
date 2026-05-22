@@ -1080,25 +1080,20 @@ void raisAlert(const char* ti,const char* msg,uint16_t c){
   alertTitle=ti;alertMsg=msg;alertCol=c;alertOn=true;alertTs=millis();
 }
 void parseStat(const String& s){
-  // V31: gas:temp:hum:haz:pir:tilt:ir:volt:pct:amps
-  String f[11];int n=0,st=5;
-  for(int i=5;i<=(int)s.length()&&n<11;i++){
-    if(i==(int)s.length()||s[i]==':'){f[n++]=s.substring(st,i);st=i+1;}
-  }
-  if(n<10) return;
-  T.gas=f[0].toInt();T.temp=f[1].toFloat();T.hum=f[2].toFloat();
-  T.haz=f[3].toInt();T.pir=f[4].toInt();T.tilt=f[5].toInt();
-  T.ir=f[6].toInt();
-  T.volt=f[7].toFloat();T.pct=f[8].toInt();T.amps=f[9].toFloat();
+  static char buf[160]; static char* fld[11]; int n=0;
+  s.substring(5).toCharArray(buf,sizeof(buf));
+  char* p=strtok(buf,":"); while(p&&n<11){fld[n++]=p;p=strtok(NULL,":");}
+  if(n<10)return;
+  T.gas=atoi(fld[0]);T.temp=atof(fld[1]);T.hum=atof(fld[2]);
+  T.haz=atoi(fld[3]);T.pir=atoi(fld[4]);T.tilt=atoi(fld[5]);T.ir=atoi(fld[6]);
+  T.volt=atof(fld[7]);T.pct=atoi(fld[8]);T.amps=atof(fld[9]);
 }
 void parseUS(const String& s){
-  String tmp=s.substring(3);String f[4];int n=0,st=0;
-  for(int i=0;i<=(int)tmp.length()&&n<4;i++){
-    if(i==(int)tmp.length()||tmp[i]==','){f[n++]=tmp.substring(st,i);st=i+1;}
-  }
+  static char buf2[40]; static char* g[4]; int n=0;
+  s.substring(3).toCharArray(buf2,sizeof(buf2));
+  char* p=strtok(buf2,","); while(p&&n<4){g[n++]=p;p=strtok(NULL,",");}
   if(n<4)return;
-  T.dFront=f[0].toInt();T.dRear=f[1].toInt();
-  T.dLeft=f[2].toInt();T.dRight=f[3].toInt();
+  T.dFront=atoi(g[0]);T.dRear=atoi(g[1]);T.dLeft=atoi(g[2]);T.dRight=atoi(g[3]);
 }
 void parseStatus(const String& s){
   T.estop=(s.indexOf("ESTOP:YES")>=0);
