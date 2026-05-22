@@ -1189,7 +1189,7 @@ void loop(){
     if(pingSeq>9999)pingSeq=0;
   }
   if(megaLinked&&millis()-lastMegaRx>12000)megaLinked=false;
-  if(curScr==SCR_BOOT&&megaLinked){curScr=SCR_MAIN;scrDirty=true;firstMainDraw=true;}
+  if(curScr==SCR_BOOT&&megaLinked){Serial.println("TRANSITION");curScr=SCR_MAIN;scrDirty=true;firstMainDraw=true;}
 
   // Touch — debounced 80ms
   Touch t={0,0,false};
