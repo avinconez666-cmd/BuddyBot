@@ -759,50 +759,12 @@ void updateTelemetryOnly(){
 }
 
 void drawMain(Touch& t){
-  // First visit — draw full layout
-  if(scrDirty||firstMainDraw){
-    drawMainFull();
-    firstMainDraw=false;
-    scrDirty=false;
-  }
-
-  drawHeader("NEXUS DASHBOARD");
-  drawFooter();
-
-  // Only update telemetry cells — no full screen wipe
-  updateTelemetryOnly();
-  // scanLine disabled for debug
-
-  // Touch — mode buttons
-  int mw=(SCR_W-24)/3;
-  struct { const char* l; uint16_t c; const char* cmd; } modes[]={
-    {"NORMAL",C_CYAN,"NORMAL"},{"BODYGUARD",C_AMBER,"BODYGUARD"},{"DOG",C_MINT,"DOG"}
-  };
-  for(int i=0;i<3;i++){
-    int mx=6+i*(mw+6);
-    int my=CELL_Y3+CELL_H+10;
-    if(hit(t,mx,my,mw,34)){
-      MEGA_SERIAL.print("MODE:"); MEGA_SERIAL.println(modes[i].cmd);
-      T.mode=modes[i].cmd; firstMainDraw=true; t.pressed=false; return;
-    }
-  }
-
-  // Touch — nav buttons
-  int ny=CELL_Y3+CELL_H+64;
-  int nbw=(SCR_W-18)/2, nbh=44;
-  struct { const char* l; uint16_t c; Screen s; } nav[]={
-    {"RADAR",C_CYAN,SCR_RADAR},{"GAMES",C_MINT,SCR_GAMES},
-    {"SENSORS",C_AMBER,SCR_SENSORS},{"INFO",C_PURPLE,SCR_INFO}
-  };
-  for(int i=0;i<4;i++){
-    int nx2=6+(i%2)*(nbw+6);
-    int ny2=ny+(i/2)*(nbh+6);
-    if(hit(t,nx2,ny2,nbw,nbh)){
-      curScr=nav[i].s; scrDirty=true; firstMainDraw=true; t.pressed=false; return;
-    }
-  }
+  // DEBUG: bare minimum — just fill screen green to confirm transition works
+  fillRect(0,0,SCR_W,SCR_H,0x07E0);  // solid green
+  Serial.println("drawMain called");
 }
 
+// ══
 // ══════════════════════════════════════════════════════════════════════
 //  RADAR — animated neon sweep
 // ══════════════════════════════════════════════════════════════════════
