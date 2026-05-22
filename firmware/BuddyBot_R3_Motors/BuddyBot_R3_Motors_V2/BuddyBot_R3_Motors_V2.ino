@@ -483,7 +483,8 @@ void loop() {
   // Accumulate bytes from Mega into cmdBuf, fire on newline
   while (megaSerial.available()) {
     char c = megaSerial.read();
-    Serial.print(c);   // echo raw bytes to USB so we can see what Mega is sending
+    // NOTE: do NOT echo to Serial here — USB Serial.print() blocks interrupts
+    // long enough for SoftwareSerial to miss bits and corrupt the link
     if (c == '\n' || c == '\r') {
       if (cmdBuf.length() > 0) {
         processCommand(cmdBuf);

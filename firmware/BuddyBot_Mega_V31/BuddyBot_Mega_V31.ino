@@ -1568,14 +1568,19 @@ void setup() {
 // ════════════════════════════════════════════════════════════════════
 void loop() {
   // BOOT LOCK — keep motors dead for first 5 seconds
+  // Send STOP once only — do NOT spam every cycle (floods SoftwareSerial)
   if (millis() - bootStartTime < BOOT_LOCK_TIME) {
-    sendMotor("STOP");
+    static bool bootStopSent = false;
+    if (!bootStopSent) {
+      motorCommPrintln(F("MOTOR|S"));
+      bootStopSent = true;
+    }
     drainMotorQueue();
     handleS9Communication();
-    handlePicoCommunication();   // [FIX MEGA-06] was missing — Pico PONG/PING dropped during boot
+    handlePicoCommunication();
     handleR3Communication();
     handleESP32Communication();
-    checkManualCharging();       // always check charge state, even during boot
+    checkManualCharging();
     return;
   }
 
