@@ -142,7 +142,53 @@ void applyBaud(long baud) {
 //  DIAGNOSTIC TESTS
 // ════════════════════════════════════════════════════════════════════
 
-// TEST 1 — Pin voltage check
+// TEST 0 — Serial2 Loopback (pin 17 jumpered to pin 16)
+// Before running: disconnect R3 wires from pins 16/17
+// Bridge pin 17 → pin 16 with a single jumper wire
+void testLoopback() {
+  hdr("TEST 0: SERIAL2 LOOPBACK (TX→RX JUMPER)");
+  Serial.println(F("  !! Disconnect R3 wires from pins 16 & 17 first !!"));
+  Serial.println(F("  !! Jumper pin 17 (TX2) directly to pin 16 (RX2) !!"));
+  Serial.println(F("  Waiting 5 seconds for you to connect jumper..."));
+  delay(5000);
+
+  // Flush anything in buffer
+  while (Serial2.available()) Serial2.read();
+
+  const char* testStr = "LOOPBACK_TEST_123";
+  Serial2.println(testStr);
+  Serial.print(F("  → Sent:     ")); Serial.println(testStr);
+
+  String received = "";
+  unsigned long deadline = millis() + 2000;
+  while (millis() < deadline) {
+    while (Serial2.available()) {
+      char c = Serial2.read();
+      if (c != '\n' && c != '\r') received += c;
+    }
+  }
+
+  Serial.print(F("  ← Received: "));
+  if (received.length() == 0) {
+    Serial.println(F("(nothing)"));
+    fail("Loopback failed — Mega TX2 is NOT transmitting OR RX2 not receiving");
+    Serial.println(F("  → Check USB connection, Serial2.begin() called, pins 16/17 not damaged"));
+  } else {
+    Serial.println(received);
+    if (received.indexOf("LOOPBACK_TEST_123") != -1) {
+      pass("Loopback SUCCESS — Mega TX2 is transmitting and RX2 is receiving correctly");
+      Serial.println(F("  → Mega Serial2 hardware is healthy. Problem is in R3 wiring or firmware."));
+    } else {
+      fail("Received garbage — possible baud mismatch or pin damage");
+      Serial.print(F("  Raw bytes: "));
+      for (int i = 0; i < received.length(); i++) {
+        Serial.print((int)received[i]); Serial.print(' ');
+      }
+      Serial.println();
+    }
+  }
+  Serial.println(F("  !! Remove jumper and reconnect R3 wires before continuing !!"));
+}
 void testPinVoltage() {
   hdr("TEST 1: PIN VOLTAGE CHECK");
   info("Checking TX2 (pin 17) and RX2 (pin 16) idle state");
@@ -373,6 +419,7 @@ void runFullScan() {
 
 void showHelp() {
   hdr("MANUAL COMMANDS");
+  Serial.println(F("  LOOPBACK       Jumper pin17→pin16, test Mega TX/RX hardware"));
   Serial.println(F("  PING           Send PING → listen 15s for PONG"));
   Serial.println(F("  SEND <text>    Send raw text to R3"));
   Serial.println(F("  LISTEN <n>     Listen raw for n seconds"));
@@ -393,8 +440,9 @@ void processCommand(String raw) {
 
   Serial.println();
 
-  if (cmd == "HELP")  { showHelp(); return; }
-  if (cmd == "SCAN")  { runFullScan(); return; }
+  if (cmd == "HELP")     { showHelp(); return; }
+  if (cmd == "SCAN")     { runFullScan(); return; }
+  if (cmd == "LOOPBACK") { testLoopback(); return; }
 
   if (cmd == "PING") {
     hdr("MANUAL PING TEST");
