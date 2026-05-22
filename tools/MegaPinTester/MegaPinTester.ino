@@ -80,8 +80,8 @@ const PinRef PIN_REF[] PROGMEM = {
   {"REAR_ECHO",         43},
   {"Serial1_TX(Pico)",  18},
   {"Serial1_RX(Pico)",  19},
-  {"Serial2_TX(R3)",    17},
-  {"Serial2_RX(R3)",    16},
+  {"Serial2_TX(R3)",    16},
+  {"Serial2_RX(R3)",    17},
   {"Serial3_TX(ESP32)", 14},
   {"Serial3_RX(ESP32)", 15},
 };

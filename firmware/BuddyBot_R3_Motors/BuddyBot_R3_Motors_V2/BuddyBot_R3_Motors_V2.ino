@@ -43,8 +43,8 @@
 
 #include <SoftwareSerial.h>
 
-// ── SoftwareSerial: A1=RX (from Mega TX pin 17), A0=TX (to Mega RX pin 16) — TX/RX swapped
-SoftwareSerial megaSerial(A1, A0);
+// ── SoftwareSerial: A0=RX (from Mega TX2 pin 16), A1=TX (to Mega RX2 pin 17)
+SoftwareSerial megaSerial(A0, A1);
 
 // ════════════════════════════════════════════════════════════════════
 //  MOTOR SHIELD PINS  (Adafruit V1 — 74HC595 shift register)

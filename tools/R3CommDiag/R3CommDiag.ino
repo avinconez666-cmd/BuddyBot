@@ -32,9 +32,9 @@
  */
 
 // ── Pin assignments — MATCHES BuddyBot V31 ───────────────────────────────────
-// Hardware Serial2: TX=pin17, RX=pin16
-#define MEGA_TX2   17
-#define MEGA_RX2   16
+// Hardware Serial2: TX=pin16, RX=pin17
+#define MEGA_TX2   16
+#define MEGA_RX2   17
 
 // ── Timing ───────────────────────────────────────────────────────────────────
 #define PING_TIMEOUT_MS   3000
