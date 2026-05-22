@@ -1020,7 +1020,9 @@ void handlePicoCommunication() {
 // ════════════════════════════════════════════════════════════════════
 void processR3Response(String resp) {
   if (debugVerbose) { Serial.print(F("[R3] RX: ")); Serial.println(resp); }
-  if (resp.startsWith("ACK:MOTOR|")) { toS9("ACK|" + resp + "|END"); return; }
+  if (resp.startsWith("ACK:MOTOR|"))  { toS9(resp); return; }
+  if (resp.startsWith("ACK:DEFENSE")) { toS9(resp); return; }
+  if (resp.startsWith("ACK:SPEED:"))  { toS9(resp); return; }
   if (resp == "ACK:DANCE:DONE")      { toS9("ACK|DANCE:DONE|END");   return; }
   if (resp == "ACK:DEFENSE:DONE")    { toS9("ACK|DEFENSE:DONE|END"); return; }
   if (resp.startsWith("PONG:"))      { toS9("PONG|" + resp.substring(5) + "|END"); return; }
