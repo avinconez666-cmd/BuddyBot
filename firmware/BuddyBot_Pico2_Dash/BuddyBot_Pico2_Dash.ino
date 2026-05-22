@@ -1135,11 +1135,11 @@ void handleMegaLine(String& line){
     MEGA_SERIAL.println("SENSOR_STATUS");
 }
 void handleMegaSerial(){
-  int budget=64;
-  while(MEGA_SERIAL.available()&&budget-->0){
+  // DEBUG: raw drain only — no parsing, just set megaLinked
+  while(MEGA_SERIAL.available()){
     char c=MEGA_SERIAL.read();
-    if(c=='\n'){handleMegaLine(megaBuf);megaBuf="";}
-    else if(c!='\r'){megaBuf+=c;if(megaBuf.length()>128)megaBuf="";}
+    if(c=='\n'){ lastMegaRx=millis(); megaLinked=true; megaBuf=""; }
+    else if(c!='\r'){ megaBuf+=c; if(megaBuf.length()>128)megaBuf=""; }
   }
 }
 
