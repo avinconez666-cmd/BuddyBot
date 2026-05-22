@@ -1181,6 +1181,7 @@ void handleMegaSerial(){
   int budget=64;
   while(MEGA_SERIAL.available()&&budget-->0){
     char c=MEGA_SERIAL.read();
+    Serial.print(c);  // DEBUG: echo all Mega bytes to USB so we can diagnose link
     if(c=='\n'){handleMegaLine(megaBuf);megaBuf="";}
     else if(c!='\r'){megaBuf+=c;if(megaBuf.length()>128)megaBuf="";}
   }
@@ -1190,6 +1191,7 @@ void handleMegaSerial(){
 //  SETUP & LOOP
 // ══════════════════════════════════════════════════════════════════════
 void setup(){
+  Serial.begin(115200);  // USB debug — echoes Mega serial to PC for diagnostics
   delay(500);
   displayInit();
   showStartupSplash();  // Reinsma + BuddyBot logo splash with orbital particles
