@@ -1181,7 +1181,6 @@ void handleMegaSerial(){
   int budget=64;
   while(MEGA_SERIAL.available()&&budget-->0){
     char c=MEGA_SERIAL.read();
-    Serial.print(c);  // DEBUG: echo all Mega bytes to USB so we can diagnose link
     if(c=='\n'){handleMegaLine(megaBuf);megaBuf="";}
     else if(c!='\r'){megaBuf+=c;if(megaBuf.length()>128)megaBuf="";}
   }
