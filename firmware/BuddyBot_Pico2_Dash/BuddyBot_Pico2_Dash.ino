@@ -1068,7 +1068,7 @@ void drawAlert(Touch& t){
   fillRR(bx,by,110,40,8,C_WHITE);
   drawRR(bx,by,110,40,8,alertCol);
   drawStrC(bx+55,by+16,"DISMISS",alertCol,0xFFFF,2);
-  if(hit(t,bx,by,110,40)||(alertTs&&millis()-alertTs>10000)){
+  if(hit(t,bx,by,110,40)||(alertTs&&millis()-alertTs>3000)){
     alertOn=false;alertTs=0;scrDirty=true;firstMainDraw=true;t.pressed=false;
   }
 }
@@ -1130,8 +1130,8 @@ void handleMegaLine(String& line){
   else if(line=="PING")                  MEGA_SERIAL.println("PONG");
   else if(line.startsWith("BAT:WARN"))    raisAlert("Battery Low","Charge soon",C_AMBER);
   else if(line.startsWith("BAT:LOW"))     raisAlert("Battery Critical","Plug in NOW",C_CORAL);
-  else if(line=="CHARGE:MANUAL:CONNECTED")    raisAlert("Charging","Manual charger connected",C_MINT);
-  else if(line=="CHARGE:MANUAL:DISCONNECTED") raisAlert("Ready","Charger disconnected",C_CYAN);
+  else if(line=="CHARGE:MANUAL:CONNECTED")    { scrDirty=true; }  // silent — avoid boot blackout
+  else if(line=="CHARGE:MANUAL:DISCONNECTED") { scrDirty=true; }  // silent
   else if(line.startsWith("SAFETY:FLAME"))raisAlert("FLAME DETECTED","Check area",C_CORAL);
   else if(line.startsWith("SAFETY:TILT"))raisAlert("Robot Tilted","Check robot",C_AMBER);
   else if(line.startsWith("SAFETY:GAS")) raisAlert("Gas Detected","Ventilate now",C_AMBER);
