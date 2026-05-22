@@ -1185,9 +1185,13 @@ void setup(){
 
   randomSeed(analogRead(A0));
   scrDirty=true;
+  // DEBUG: prove setup() completed
+  fillScreen(0xF800);  // pure red
+  delay(1500);
 }
 
 void loop(){
+  static bool firstLoop=true; if(firstLoop){firstLoop=false;fillScreen(0x07E0);delay(1500);}
   static unsigned long lastHB2=0; if(millis()-lastHB2>1000){lastHB2=millis();Serial.print("LOOP ms=");Serial.println(millis());}
   handleMegaSerial();
 
