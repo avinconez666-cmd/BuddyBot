@@ -1147,8 +1147,8 @@ void handleMegaSerial(){
 //  SETUP & LOOP
 // ══════════════════════════════════════════════════════════════════════
 void setup(){
-  Serial.begin(115200);  // USB debug — echoes Mega serial to PC for diagnostics
-  delay(2000);  // wait for USB host to enumerate
+  Serial.begin(115200);
+  while(!Serial && millis()<5000){}
   Serial.println("PICO BOOT OK");
   displayInit();
   showStartupSplash();  // Reinsma + BuddyBot logo splash with orbital particles
