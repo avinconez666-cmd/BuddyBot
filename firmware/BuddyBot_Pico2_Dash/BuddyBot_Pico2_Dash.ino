@@ -512,7 +512,8 @@ uint16_t alertCol=C_CORAL;
 unsigned long alertTs=0;
 
 #define MEGA_SERIAL  Serial1
-String        megaBuf="";
+static char   megaBuf[192];
+static uint8_t megaBufLen=0;
 bool          megaLinked=false;
 unsigned long lastMegaRx=0,lastPing=0;
 uint16_t      pingSeq=0;
@@ -1135,11 +1136,16 @@ void handleMegaLine(String& line){
     MEGA_SERIAL.println("SENSOR_STATUS");
 }
 void handleMegaSerial(){
-  // DEBUG: raw drain only — no parsing, just set megaLinked
   while(MEGA_SERIAL.available()){
     char c=MEGA_SERIAL.read();
-    if(c=='\n'){ lastMegaRx=millis(); megaLinked=true; megaBuf=""; }
-    else if(c!='\r'){ megaBuf+=c; if(megaBuf.length()>128)megaBuf=""; }
+    if(c=='\n'){
+      megaBuf[megaBufLen]=0;
+      String line=String(megaBuf);
+      handleMegaLine(line);
+      megaBufLen=0;
+    } else if(c!='\r'){
+      if(megaBufLen<191) megaBuf[megaBufLen++]=c;
+    }
   }
 }
 
