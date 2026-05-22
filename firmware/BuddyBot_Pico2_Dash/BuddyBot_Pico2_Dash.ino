@@ -1148,7 +1148,8 @@ void handleMegaSerial(){
 // ══════════════════════════════════════════════════════════════════════
 void setup(){
   Serial.begin(115200);  // USB debug — echoes Mega serial to PC for diagnostics
-  delay(500);
+  delay(2000);  // wait for USB host to enumerate
+  Serial.println("PICO BOOT OK");
   displayInit();
   showStartupSplash();  // Reinsma + BuddyBot logo splash with orbital particles
 
@@ -1188,6 +1189,7 @@ void loop(){
     MEGA_SERIAL.print("PING_PICO:");MEGA_SERIAL.println(pingSeq++);
     if(pingSeq>9999)pingSeq=0;
   }
+  static unsigned long lastHB=0; if(millis()-lastHB>2000){lastHB=millis();Serial.print("HB mega=");Serial.print(megaLinked);Serial.print(" scr=");Serial.println(curScr);}
   if(megaLinked&&millis()-lastMegaRx>12000)megaLinked=false;
   if(curScr==SCR_BOOT&&megaLinked){Serial.println("TRANSITION");curScr=SCR_MAIN;scrDirty=true;firstMainDraw=true;}
 
