@@ -370,14 +370,14 @@ void processCommand(String cmd) {
   // ── PATTERNS ───────────────────────────────────────────────────
   if (cmd == "MOTOR|DANCE") {
     if (danceState == DANCE_IDLE) {
-      danceState = DANCE_IDLE;  // Will start on next loop
+      danceState = DANCE_SET_SPEED;   // actually start the pattern
       megaSerial.println(F("ACK:MOTOR|DANCE"));
     }
     return;
   }
   if (cmd == "DEFENSE") {
     if (defenseState == DEFENSE_IDLE) {
-      defenseState = DEFENSE_IDLE;  // Will start on next loop
+      defenseState = DEFENSE_SET_SPEED;   // actually start the pattern
       megaSerial.println(F("ACK:DEFENSE"));
     }
     return;

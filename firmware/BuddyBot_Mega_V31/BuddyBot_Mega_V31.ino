@@ -154,14 +154,14 @@ void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorCo
 #define RIGHT_IR  -1
 
 // ── Ultrasonic sensors (4× HC-SR04) ─────────────────────────────────────────
-#define FRONT_TRIG  35
-#define FRONT_ECHO  34
-#define LEFT_TRIG   29
-#define LEFT_ECHO   28
+#define FRONT_TRIG  49
+#define FRONT_ECHO  4
+#define LEFT_TRIG   28
+#define LEFT_ECHO   29
 #define RIGHT_TRIG  38
 #define RIGHT_ECHO  40
-#define REAR_TRIG   42
-#define REAR_ECHO   43
+#define REAR_TRIG   51
+#define REAR_ECHO   50
 
 // ════════════════════════════════════════════════════════════════════
 //  OBJECTS
@@ -1388,7 +1388,15 @@ void runR3CommTest() {
 }
 
 bool waitForR3Ready() {
-  unsigned long timeout = millis() + 5000;  // bumped 2500→5000ms — R3 takes ~1.5s to boot
+  // Give R3 time to boot its SoftwareSerial before we start listening
+  // R3 delays 1000ms + 500ms in setup() before announcing READY
+  dbg("[R3] Waiting for R3 boot...");
+  delay(2000);
+
+  // Flush any garbage that accumulated during R3 boot
+  while (Serial2.available()) Serial2.read();
+
+  unsigned long timeout = millis() + 5000;
   String response = "";
   while (millis() < timeout) {
     if (motorComm.available()) {
@@ -1495,20 +1503,14 @@ void startupSequence() {
 //  SETUP
 // ════════════════════════════════════════════════════════════════════
 void setup() {
-  // FIRST: hammer R3 with STOP before anything else wakes up
-  Serial2.begin(9600);          // UNO R3 Motor Shield — hardware serial
-  delay(150);
-  motorComm.println(F("MOTOR|S"));
-  motorComm.println(F("MOTOR|S"));
-  motorComm.println(F("MOTOR|S"));
-
+  // Start USB debug first so we can see everything
   Serial.begin(115200);
   while (!Serial && millis() < 4000) {}
   delay(250);
 
-  Serial1.begin(115200);
-  // Serial2 already started above for R3 boot STOP sequence
-  Serial3.begin(115200);
+  Serial1.begin(115200);  // Pico
+  Serial2.begin(9600);    // R3 — started before STOP sequence below
+  Serial3.begin(115200);  // ESP32
   gpsSerial.begin(9600);        // GPS NEO-6M via SoftwareSerial
 
   delay(400);
