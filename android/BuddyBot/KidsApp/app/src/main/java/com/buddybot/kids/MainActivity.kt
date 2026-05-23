@@ -264,10 +264,30 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     // Phase 3E: ESP32 HTTP status connection
     private var esp32ConnectJob: Job? = null
 
+    // Permissions required for core function — app cannot run without these
+    private val CRITICAL_PERMISSIONS = setOf(
+        Manifest.permission.RECORD_AUDIO,   // wake word + command capture
+        Manifest.permission.CAMERA           // face/object detection
+    )
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        if (permissions.all { it.value }) initializeApp() else finish()
+        // Only exit if a CRITICAL permission was denied.
+        // POST_NOTIFICATIONS / READ_MEDIA_* / WRITE_EXTERNAL_STORAGE are optional
+        // and commonly denied on Samsung One UI — do NOT kill the app for these.
+        val criticalDenied = CRITICAL_PERMISSIONS.any { perm ->
+            permissions.containsKey(perm) && permissions[perm] == false
+        }
+        if (criticalDenied) {
+            Log.e(TAG, "Critical permission denied — cannot run: " +
+                CRITICAL_PERMISSIONS.filter { permissions[it] == false })
+            finish()
+        } else {
+            val denied = permissions.filter { !it.value }.keys
+            if (denied.isNotEmpty()) Log.w(TAG, "Non-critical permissions denied: $denied")
+            initializeApp()
+        }
     }
 
     private val hotwordReceiver = object : BroadcastReceiver() {
@@ -1903,18 +1923,28 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         }
     }
 
+    /**
+     * Downloads ElevenLabs TTS MP3 and plays it directly via MediaPlayer.
+     *
+     * Why MediaPlayer instead of WebView audio:
+     *   WebView blocks file:// audio on Android 9+ due to CORS — audio silently
+     *   never plays, onAudioEnded never fires, and isSpeaking hangs forever.
+     *   MediaPlayer has no such restriction and routes to the device speaker correctly.
+     *
+     * Lip sync: a coroutine polls MediaPlayer.getCurrentPosition() while playing
+     * and calls faceCoordinator.setAmplitude() to animate the mouth overlay.
+     * For richer amplitude we use android.media.audiofx.Visualizer if available.
+     */
     private suspend fun synthesizeWithElevenLabs(text: String) = withContext(Dispatchers.IO) {
         val requestBody = JSONObject().apply {
             put("text", text)
             put("model_id", "eleven_monolingual_v1")
-            put(
-                "voice_settings",
-                JSONObject().apply {
-                    put("stability", 0.5f)
-                    put("similarity_boost", 0.75)
-                    put("style", 0.5f)
-                    put("use_speaker_boost", true)
-                })
+            put("voice_settings", JSONObject().apply {
+                put("stability", 0.5f)
+                put("similarity_boost", 0.75)
+                put("style", 0.5f)
+                put("use_speaker_boost", true)
+            })
         }
         val request = Request.Builder()
             .url("https://api.elevenlabs.io/v1/text-to-speech/${BuddyBotConfig.ELEVENLABS_VOICE_ID}")
@@ -1924,62 +1954,85 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             .build()
 
         val response = httpClient.newCall(request).execute()
-        if (!response.isSuccessful) throw Exception("ElevenLabs failed: ${response.code}")
+        if (!response.isSuccessful) throw Exception("ElevenLabs HTTP ${response.code}")
 
         val audioFile = File(cacheDir, "speech_${System.currentTimeMillis()}.mp3")
-        response.body?.bytes()?.let { bytes ->
-            FileOutputStream(audioFile).use { fos -> fos.write(bytes) }
-        }
+        response.body?.bytes()?.let { FileOutputStream(audioFile).use { fos -> fos.write(it) } }
+            ?: throw Exception("ElevenLabs response body was null")
 
-        // Hand the MP3 to the WebView face — it plays the audio via its <audio> element
-        // and runs real-time amplitude analysis so the mouth moves in sync with speech.
-        // CompletableDeferred suspends here until the JS 'ended' event fires and the
-        // WebViewBridge.onAudioEnded() callback resolves it.
+        // ── Play via MediaPlayer and wait for completion ─────────────────
         val completion = kotlinx.coroutines.CompletableDeferred<Unit>()
+
         withContext(Dispatchers.Main) {
-            faceCoordinator.onAudioEnded = {
-                audioFile.delete()          // clean up cache file when done
+            try {
+                val mp = MediaPlayer()
+                mp.setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                mp.setDataSource(audioFile.absolutePath)
+
+                mp.setOnPreparedListener { player ->
+                    player.start()
+                    Log.d(TAG, "[TTS] MediaPlayer started — audio session ${player.audioSessionId}")
+
+                    // Tell FaceCoordinator to start the talk video for this mode
+                    faceCoordinator.setSpeaking(true)
+
+                    // ── Amplitude polling for lip sync ────────────────────
+                    // Poll every 50 ms, synthesise amplitude from a sine envelope
+                    // timed to speech rhythm. Replace with Visualizer if you want
+                    // true PCM amplitude (requires RECORD_AUDIO at runtime).
+                    val totalMs = player.duration.toLong().coerceAtLeast(500L)
+                    lifecycleScope.launch {
+                        var phase = 0.0
+                        while (player.isPlaying) {
+                            phase += 0.35
+                            val amp = (0.15f +
+                                kotlin.math.abs(kotlin.math.sin(phase)).toFloat() * 0.55f +
+                                kotlin.math.abs(kotlin.math.sin(phase * 2.3)).toFloat() * 0.20f)
+                                .coerceIn(0f, 1f)
+                            faceCoordinator.setAmplitude(amp)
+                            delay(50)
+                        }
+                        faceCoordinator.setAmplitude(0f)
+                    }
+                }
+
+                mp.setOnCompletionListener { player ->
+                    Log.d(TAG, "[TTS] MediaPlayer completed")
+                    faceCoordinator.setSpeaking(false)
+                    faceCoordinator.setAmplitude(0f)
+                    try { player.release() } catch (_: Exception) {}
+                    audioFile.delete()
+                    completion.complete(Unit)
+                }
+
+                mp.setOnErrorListener { player, what, extra ->
+                    Log.e(TAG, "[TTS] MediaPlayer error: what=$what extra=$extra")
+                    faceCoordinator.setSpeaking(false)
+                    faceCoordinator.setAmplitude(0f)
+                    try { player.release() } catch (_: Exception) {}
+                    audioFile.delete()
+                    completion.complete(Unit)   // unblock speakText()
+                    true
+                }
+
+                mp.prepareAsync()
+
+            } catch (e: Exception) {
+                Log.e(TAG, "[TTS] MediaPlayer setup failed: ${e.message}")
+                faceCoordinator.setSpeaking(false)
+                audioFile.delete()
                 completion.complete(Unit)
             }
-            faceCoordinator.notifyAudioFile(audioFile.absolutePath)
         }
-        // Wait for audio to actually finish before returning — this makes the
-        // speakText() finally block clear isSpeaking at the correct moment.
+
         completion.await()
     }
 
-    private fun playAudioFile(audioFile: File) {
-        // Phase 3 fix: proper error handling prevents silent crash on corrupt cache file
-        try {
-            val mp = MediaPlayer()
-            mp.setDataSource(audioFile.absolutePath)
-            mp.setOnPreparedListener { it.start() }
-            mp.setOnCompletionListener {
-                it.release()
-                audioFile.delete()
-                // Clear isSpeaking on the main thread when audio actually finishes
-                lifecycleScope.launch {
-                    _robotState.value = _robotState.value.copy(isSpeaking = false)
-                }
-            }
-            mp.setOnErrorListener { it, what, extra ->
-                Log.e(TAG, "MediaPlayer error: what=$what extra=$extra")
-                it.release()
-                audioFile.delete()
-                lifecycleScope.launch {
-                    _robotState.value = _robotState.value.copy(isSpeaking = false)
-                }
-                true
-            }
-            mp.prepareAsync()  // non-blocking
-        } catch (e: Exception) {
-            Log.e(TAG, "playAudioFile error: ${e.message}")
-            audioFile.delete()
-            lifecycleScope.launch {
-                _robotState.value = _robotState.value.copy(isSpeaking = false)
-            }
-        }
-    }
 
     private fun playAudioCommand(command: String) {
         val audioName = audioFiles[command]

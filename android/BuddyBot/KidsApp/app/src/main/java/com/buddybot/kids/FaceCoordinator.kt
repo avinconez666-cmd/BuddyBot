@@ -337,39 +337,36 @@ class FaceCoordinator(
         Log.d(TAG, "setSpeaking: $speaking")
 
         if (speaking) {
-            // Switch to the talk/bark video for this mode — mouth animation
-            // is driven by the WebView amplitude analyser via notifyAudioFile()
-            // playing simultaneously. The video plays once then idle resumes.
+            // Play the talk/bark video for this mode while ElevenLabs audio plays
+            // through MediaPlayer in MainActivity. The video loops until setSpeaking(false).
             val talkName = when (currentMode) {
                 RobotMode.NORMAL    -> "normal_talk"
                 RobotMode.DOG       -> "dog_barking"
                 RobotMode.BODYGUARD -> "bodyguard_talk"
-                RobotMode.UNHINGED  -> "normal_talk"   // no unhinged_talk yet
+                RobotMode.UNHINGED  -> "normal_talk"
                 RobotMode.PARTY     -> "normal_talk"
             }
             val resId = context.resources.getIdentifier(talkName, "raw", context.packageName)
             if (resId != 0) {
-                Log.d(TAG, "Speaking — playing talk video: $talkName")
+                Log.d(TAG, "Speaking — looping talk video: $talkName")
                 showVideoFace()
-                playVideo(talkName, loop = false)
-                // When done, resume the idle loop
-                onCompleteCallback = {
-                    startIdleLoop(when (currentMode) {
-                        RobotMode.NORMAL    -> "normal_idle"
-                        RobotMode.DOG       -> "dog_idle"
-                        RobotMode.BODYGUARD -> "bodyguard_looking"
-                        RobotMode.UNHINGED  -> "unhinged_idle"
-                        RobotMode.PARTY     -> "party_transition"
-                    })
-                }
+                // Loop the talk video while speaking — MainActivity calls
+                // setSpeaking(false) when MediaPlayer finishes, which stops the loop.
+                playVideo(talkName, loop = true)
+            } else {
+                Log.w(TAG, "Talk video missing for $currentMode — staying on idle")
             }
-            // Also notify the WebView to start amplitude analysis / fallback oscillation
-            setWebViewSpeaking(true)
         } else {
-            // ElevenLabs finished — the onCompleteCallback above handles
-            // returning to idle once the talk video ends naturally.
-            // Just stop the WebView mouth animation immediately.
-            setWebViewSpeaking(false)
+            // Audio finished — stop the talk loop and return to idle
+            Log.d(TAG, "Speaking ended — returning to idle loop")
+            val idleName = when (currentMode) {
+                RobotMode.NORMAL    -> "normal_idle"
+                RobotMode.DOG       -> "dog_idle"
+                RobotMode.BODYGUARD -> "bodyguard_looking"
+                RobotMode.UNHINGED  -> "unhinged_idle"
+                RobotMode.PARTY     -> "party_transition"
+            }
+            startIdleLoop(idleName)
         }
     }
 

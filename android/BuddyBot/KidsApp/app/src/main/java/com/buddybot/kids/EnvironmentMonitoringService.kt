@@ -138,8 +138,12 @@ class EnvironmentMonitoringService : Service() {
         }
         
         try {
+            // Use VOICE_COMMUNICATION instead of MIC so AudioRecord does NOT hold
+            // the hardware mic exclusively. MIC source blocks SpeechRecognizer entirely
+            // on Samsung devices — HotwordService gets ERROR_AUDIO on every attempt.
+            // VOICE_COMMUNICATION is shareable with SpeechRecognizer.
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 SAMPLE_RATE,
                 CHANNEL_CONFIG,
                 AUDIO_FORMAT,
