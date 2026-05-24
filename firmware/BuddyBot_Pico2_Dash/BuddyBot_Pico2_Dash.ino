@@ -1,1235 +1,1655 @@
 /*
  * ════════════════════════════════════════════════════════════════════
- *  BUDDYBOT  —  Pico RP2040  ·  NEXUS HMI  ·  V4.0
- *  Cyberpunk / Sci-Fi Dashboard  |  Portrait 320×480  |  Direct SPI
+ *  BUDDYBOT — Pico Dashboard  V5.0  (fresh start, no splash)
+ *  Board: ArtronShop RP2 Nano (RP2040)  ·  TFT_eSPI library
  * ════════════════════════════════════════════════════════════════════
- *  WIRING (unchanged)
- *  SPI0  GP16=MISO GP17=CS GP18=SCK GP19=MOSI GP20=RST GP21=DC GP22=BL
- *  I2C1  GP26=SDA  GP27=SCL  GP28=INT  GP15=RST  (FT6336U touch)
- *  UART0 GP0=TX→Mega18(RX)  GP1=RX←Mega19(TX via divider)
+ *  Mega Serial1 link:  GP0 (TX) ── Mega pin 19 (RX1)
+ *                      GP1 (RX) ── Mega pin 18 (TX1) via LLS
  * ════════════════════════════════════════════════════════════════════
  */
-#include <SPI.h>
+
+#include <TFT_eSPI.h>
 #include <Wire.h>
-#include "logos.h"  // RGB565 bitmap arrays for splash screen
+#include <SPI.h>
 
-// ── Forward declarations ──────────────────────────────────────────────
-void drawH(int16_t x,int16_t y,int16_t w,uint16_t c);
-void drawV(int16_t x,int16_t y,int16_t h,uint16_t c);
-void drawRR(int16_t x,int16_t y,int16_t w,int16_t h,int16_t r,uint16_t c);
-void fillCircle(int16_t cx,int16_t cy,int16_t r,uint16_t c);
-struct Touch { int16_t x,y; bool pressed; };
-Touch  readTouch();
-bool   hit(const Touch&,int16_t,int16_t,int16_t,int16_t);
-void   drawMain(Touch&);
-void   drawRadar(Touch&);
-void   drawGamesMenu(Touch&);
-void   drawGameColor(Touch&);
-void   drawGameShape(Touch&);
-void   drawGameCount(Touch&);
-void   drawInfo(Touch&);
-void   drawSensors(Touch&);
-void   drawAlert(Touch&);
-bool   drawBackBtn(Touch&);
+TFT_eSPI tft = TFT_eSPI();
 
-// ── Pins ──────────────────────────────────────────────────────────────
-#define PIN_BL       22
-#define PIN_CS       17
-#define PIN_DC       21
-#define PIN_RST      20
-#define PIN_CTP_SDA  26
-#define PIN_CTP_SCL  27
-#define PIN_CTP_INT  28
-#define PIN_CTP_RST  29   // FIX #1: was GP15 — wiring diagram shows GP29
+#define SCR_W  480
+#define SCR_H  320
 
-// ── ST7796S commands ──────────────────────────────────────────────────
-#define ST_SWRESET 0x01
-#define ST_SLPOUT  0x11
-#define ST_COLMOD  0x3A
-#define ST_MADCTL  0x36
-#define ST_DISPON  0x29
-#define ST_CASET   0x2A
-#define ST_PASET   0x2B
-#define ST_RAMWR   0x2C
+#define MEGA_SERIAL Serial1
 
-// ── Screen constants ──────────────────────────────────────────────────
-#define SCR_W  320
-#define SCR_H  480
-#define HDR_H   50
-#define FTR_H   48
-#define CNT_Y   HDR_H
-#define CNT_H   (SCR_H - HDR_H - FTR_H)
+// ── Colours (RGB565) ─────────────────────────────────────────────────
+#define C_BG     0x0209
+#define C_SURF   0x1082
+#define C_CYAN   0x07FF
+#define C_MINT   0x07E4
+#define C_AMBER  0xFD20
+#define C_CORAL  0xFB0C
+#define C_WHITE  0xFFFF
+#define C_LGRAY  0x8C71
+#define C_MGRAY  0x528A
 
-// ══════════════════════════════════════════════════════════════════════
-//  CYBERPUNK COLOUR PALETTE  (RGB565)
-// ══════════════════════════════════════════════════════════════════════
-#define C_VOID    0x0000u   // absolute black
-#define C_BG      0x0820u   // #081018 deep space
-#define C_SURF    0x0C41u   // #0C0820 card surface
-#define C_SURF2   0x1082u   // #101020 raised
-#define C_LINE    0x2124u   // subtle grid line
-#define C_GLOW    0x0410u   // dark glow base
-
-// Neon accents
-#define C_CYAN    0x07FFu   // #00D4FF electric cyan
-#define C_DCYAN   0x03EFu   // dim cyan
-#define C_XCYAN   0x001Fu   // deep cyan-blue
-#define C_MINT    0x07E4u   // #00FF90 mint green
-#define C_PURPLE  0x781Fu   // #7800FF ultraviolet
-#define C_DPURP   0x3009u   // dim purple
-#define C_AMBER   0xFD20u   // #FFB800 amber
-#define C_CORAL   0xF944u   // #FF3355 coral red
-#define C_MAG     0xF81Fu   // magenta
-#define C_YLLOW   0xFFE0u   // yellow
-#define C_WHITE   0xFFFFu
-#define C_LGRAY   0x8C71u
-#define C_MGRAY   0x4228u
-#define C_DGRAY   0x2104u
-#define C_RED     0xF800u
-#define C_GREEN   0x07E0u
-#define C_BLUE    0x001Fu
-
-// ── Forward declarations (after colour defines so defaults resolve) ────
-void neonBox(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t col,uint16_t bg);
-void hexFrame(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t col,uint8_t sz);
-void glowBar(int16_t x,int16_t y,int16_t w,int16_t h,float frac,uint16_t col,uint16_t bg);
-void drawH(int16_t x,int16_t y,int16_t w,uint16_t c);
-void drawV(int16_t x,int16_t y,int16_t h,uint16_t c);
-void drawRR(int16_t x,int16_t y,int16_t w,int16_t h,int16_t r,uint16_t c);
-void fillCircle(int16_t cx,int16_t cy,int16_t r,uint16_t c);
-
-// ══════════════════════════════════════════════════════════════════════
-//  LOW-LEVEL SPI DISPLAY DRIVER
-// ══════════════════════════════════════════════════════════════════════
-static SPISettings _spi(20000000, MSBFIRST, SPI_MODE0);
-
-inline void _cmd(uint8_t c){
-  digitalWrite(PIN_DC,LOW);  digitalWrite(PIN_CS,LOW);
-  SPI.transfer(c);           digitalWrite(PIN_CS,HIGH);
-}
-inline void _dat(uint8_t d){
-  digitalWrite(PIN_DC,HIGH); digitalWrite(PIN_CS,LOW);
-  SPI.transfer(d);           digitalWrite(PIN_CS,HIGH);
-}
-
-void setWindow(int16_t x0,int16_t y0,int16_t x1,int16_t y1){
-  _cmd(ST_CASET); _dat(x0>>8); _dat(x0&0xFF); _dat(x1>>8); _dat(x1&0xFF);
-  _cmd(ST_PASET); _dat(y0>>8); _dat(y0&0xFF); _dat(y1>>8); _dat(y1&0xFF);
-  _cmd(ST_RAMWR);
-}
-
-void fillRect(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t c){
-  if(w<=0||h<=0) return;
-  if(x<0){w+=x;x=0;} if(y<0){h+=y;y=0;}
-  if(x>=SCR_W||y>=SCR_H) return;
-  if(x+w>SCR_W) w=SCR_W-x; if(y+h>SCR_H) h=SCR_H-y;
-  if(w<=0||h<=0) return;
-  setWindow(x,y,x+w-1,y+h-1);
-  digitalWrite(PIN_DC,HIGH); digitalWrite(PIN_CS,LOW);
-  uint32_t n=(uint32_t)w*h;
-  uint8_t hi=c>>8,lo=c&0xFF;
-  for(uint32_t i=0;i<n;i++){SPI.transfer(hi);SPI.transfer(lo);}
-  digitalWrite(PIN_CS,HIGH);
-}
-
-void fillScreen(uint16_t c){ fillRect(0,0,SCR_W,SCR_H,c); }
-
-void drawPixel(int16_t x,int16_t y,uint16_t c){
-  if(x<0||x>=SCR_W||y<0||y>=SCR_H) return;
-  setWindow(x,y,x,y); _dat(c>>8); _dat(c&0xFF);
-}
-
-// Vertical gradient fill
-void fillGrad(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t c1,uint16_t c2){
-  uint8_t r1=c1>>11,g1=(c1>>5)&0x3F,b1=c1&0x1F;
-  uint8_t r2=c2>>11,g2=(c2>>5)&0x3F,b2=c2&0x1F;
-  for(int16_t i=0;i<h;i++){
-    int r=r1+(int)(r2-r1)*i/h;
-    int g=g1+(int)(g2-g1)*i/h;
-    int b=b1+(int)(b2-b1)*i/h;
-    fillRect(x,y+i,w,1,(r<<11)|(g<<5)|b);
-  }
-}
-
-
-// ══════════════════════════════════════════════════════════════════════
-//  SPLASH SCREEN — BITMAP RENDERER + ANIMATIONS
-// ══════════════════════════════════════════════════════════════════════
-void drawBitmap(int16_t x,int16_t y,const uint16_t* bmp,int16_t w,int16_t h){
-  setWindow(x,y,x+w-1,y+h-1);
-  digitalWrite(PIN_DC,HIGH); digitalWrite(PIN_CS,LOW);
-  for(uint32_t i=0;i<(uint32_t)w*h;i++){
-    uint16_t px=pgm_read_word(&bmp[i]);
-    SPI.transfer(px>>8); SPI.transfer(px&0xFF);
-  }
-  digitalWrite(PIN_CS,HIGH);
-}
-
-static float _orbitAngle=0.0f;
-void orbitalParticles(int16_t cx,int16_t cy,float radius,uint8_t count,uint16_t col){
-  _orbitAngle+=0.09f;
-  for(uint8_t i=0;i<count;i++){
-    float a=_orbitAngle+i*(6.2832f/count);
-    int16_t px=cx+(int16_t)(cosf(a)*radius);
-    int16_t py=cy+(int16_t)(sinf(a)*radius*0.65f);
-    if(px>=0&&px<SCR_W&&py>=0&&py<SCR_H){
-      drawPixel(px,py,col);
-      if((i&1)==0&&px+1<SCR_W) drawPixel(px+1,py,C_XCYAN);
-    }
-  }
-}
-
-void showStartupSplash(){
-  fillScreen(C_BG);
-  // Background grid
-  for(int16_t gx=0;gx<SCR_W;gx+=20) drawV(gx,0,SCR_H,0x0421u);
-  for(int16_t gy=0;gy<SCR_H;gy+=20) drawH(0,gy,SCR_W,0x0421u);
-
-  // ── PHASE 1: Reinsma Innovations ─────────────────────────────────
-  neonBox(30,75,SCR_W-60,185,C_CYAN,C_SURF);
-  hexFrame(40,90,SCR_W-80,155,C_PURPLE,14);
-  int16_t ri_x=(SCR_W-reinsma_logo_W)/2;
-  int16_t ri_y=88;
-  drawBitmap(ri_x,ri_y,reinsma_logo,reinsma_logo_W,reinsma_logo_H);
-  drawStrC(SCR_W/2,222,"GENERATIVE  AI  SOLUTIONS",C_PURPLE,0xFFFF,1);
-  drawStrC(SCR_W/2,238,"Proudly Powered by Arduino",C_MGRAY,0xFFFF,1);
-
-  // Particle burst
-  for(uint8_t i=0;i<65;i++){
-    drawPixel(random(40,SCR_W-40),random(90,240),C_CYAN);
-    if(i%6==0) delay(9);
-  }
-  delay(1800);
-
-  // Smooth fade out
-  for(uint8_t step=0;step<16;step++){
-    fillRect(25,70,SCR_W-50,200,(uint16_t)(step*0x0842u));
-    delay(35);
-  }
-
-  // ── PHASE 2: BuddyBot v1.0 ────────────────────────────────────────
-  fillScreen(C_BG);
-  for(int16_t gx=0;gx<SCR_W;gx+=20) drawV(gx,0,SCR_H,0x0421u);
-  for(int16_t gy=0;gy<SCR_H;gy+=20) drawH(0,gy,SCR_W,0x0421u);
-
-  int16_t bx=(SCR_W-buddybot_logo_W)/2;
-  int16_t by=30;
-  drawBitmap(bx,by,buddybot_logo,buddybot_logo_W,buddybot_logo_H);
-
-  // Loading bar + orbital particles during init
-  neonBox(24,296,SCR_W-48,44,C_PURPLE,C_SURF);
-  drawStrC(SCR_W/2,270,"INITIALIZING  NEXUS  OS...",C_LGRAY,0xFFFF,1);
-  drawStrC(SCR_W/2,256,"GUARDIAN SYSTEM",C_PURPLE,0xFFFF,1);
-
-  int16_t oc_x=bx+buddybot_logo_W/2;
-  int16_t oc_y=by+buddybot_logo_H/2;
-  for(int p=0;p<=100;p+=2){
-    // Erase old particles before drawing new (avoids trails)
-    fillCircle(oc_x,oc_y,130,C_BG);
-    // Redraw logo centre (particle orbit overlaps it)
-    drawBitmap(bx,by,buddybot_logo,buddybot_logo_W,buddybot_logo_H);
-    // Orbital rings
-    orbitalParticles(oc_x,oc_y,100,14,C_CYAN);
-    orbitalParticles(oc_x,oc_y,124,9,C_XCYAN);
-    orbitalParticles(oc_x,oc_y,80,6,C_PURPLE);
-    // Progress bar
-    glowBar(28,300,SCR_W-56,36,p/100.0f,C_CYAN,C_SURF2);
-    if(p%10==0) drawRR(24,296,SCR_W-48,44,6,C_WHITE);
-    delay(80);
-  }
-  delay(600);
-
-  // Fade to black
-  for(uint8_t step=0;step<20;step++){
-    fillRect(0,0,SCR_W,SCR_H,(uint16_t)((19-step)*0x0842u));
-    delay(25);
-  }
-  fillScreen(C_BG);
-}
-void displayInit(){
-  pinMode(PIN_CS,OUTPUT);  digitalWrite(PIN_CS,HIGH);
-  pinMode(PIN_DC,OUTPUT);  digitalWrite(PIN_DC,HIGH);
-  pinMode(PIN_RST,OUTPUT);
-  pinMode(PIN_BL,OUTPUT);  digitalWrite(PIN_BL,HIGH);
-  digitalWrite(PIN_RST,HIGH); delay(20);
-  digitalWrite(PIN_RST,LOW);  delay(50);
-  digitalWrite(PIN_RST,HIGH); delay(150);
-  SPI.setTX(19); SPI.setRX(16); SPI.setSCK(18);
-  SPI.begin(); SPI.beginTransaction(_spi);
-  _cmd(ST_SWRESET); delay(120);
-  _cmd(ST_SLPOUT);  delay(120);
-  _cmd(ST_COLMOD);  _dat(0x55);
-  _cmd(ST_MADCTL);  _dat(0x48);   // MX|BGR — portrait, X-mirrored
-  _cmd(ST_DISPON);  delay(50);
-}
-
-// ══════════════════════════════════════════════════════════════════════
-//  BITMAP FONT  (6×8 glyphs, scale for large/small text)
-// ══════════════════════════════════════════════════════════════════════
-static const uint8_t F6x8[][5] PROGMEM = {
-  {0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x5F,0x00,0x00},{0x00,0x07,0x00,0x07,0x00},
-  {0x14,0x7F,0x14,0x7F,0x14},{0x24,0x2A,0x7F,0x2A,0x12},{0x23,0x13,0x08,0x64,0x62},
-  {0x36,0x49,0x55,0x22,0x50},{0x00,0x05,0x03,0x00,0x00},{0x00,0x1C,0x22,0x41,0x00},
-  {0x00,0x41,0x22,0x1C,0x00},{0x08,0x2A,0x1C,0x2A,0x08},{0x08,0x08,0x3E,0x08,0x08},
-  {0x00,0x50,0x30,0x00,0x00},{0x08,0x08,0x08,0x08,0x08},{0x00,0x60,0x60,0x00,0x00},
-  {0x20,0x10,0x08,0x04,0x02},{0x3E,0x51,0x49,0x45,0x3E},{0x00,0x42,0x7F,0x40,0x00},
-  {0x42,0x61,0x51,0x49,0x46},{0x21,0x41,0x45,0x4B,0x31},{0x18,0x14,0x12,0x7F,0x10},
-  {0x27,0x45,0x45,0x45,0x39},{0x3C,0x4A,0x49,0x49,0x30},{0x01,0x71,0x09,0x05,0x03},
-  {0x36,0x49,0x49,0x49,0x36},{0x06,0x49,0x49,0x29,0x1E},{0x00,0x36,0x36,0x00,0x00},
-  {0x00,0x56,0x36,0x00,0x00},{0x08,0x14,0x22,0x41,0x00},{0x14,0x14,0x14,0x14,0x14},
-  {0x00,0x41,0x22,0x14,0x08},{0x02,0x01,0x51,0x09,0x06},{0x32,0x49,0x79,0x41,0x3E},
-  {0x7E,0x11,0x11,0x11,0x7E},{0x7F,0x49,0x49,0x49,0x36},{0x3E,0x41,0x41,0x41,0x22},
-  {0x7F,0x41,0x41,0x22,0x1C},{0x7F,0x49,0x49,0x49,0x41},{0x7F,0x09,0x09,0x09,0x01},
-  {0x3E,0x41,0x49,0x49,0x7A},{0x7F,0x08,0x08,0x08,0x7F},{0x00,0x41,0x7F,0x41,0x00},
-  {0x20,0x40,0x41,0x3F,0x01},{0x7F,0x08,0x14,0x22,0x41},{0x7F,0x40,0x40,0x40,0x40},
-  {0x7F,0x02,0x0C,0x02,0x7F},{0x7F,0x04,0x08,0x10,0x7F},{0x3E,0x41,0x41,0x41,0x3E},
-  {0x7F,0x09,0x09,0x09,0x06},{0x3E,0x41,0x51,0x21,0x5E},{0x7F,0x09,0x19,0x29,0x46},
-  {0x46,0x49,0x49,0x49,0x31},{0x01,0x01,0x7F,0x01,0x01},{0x3F,0x40,0x40,0x40,0x3F},
-  {0x1F,0x20,0x40,0x20,0x1F},{0x3F,0x40,0x38,0x40,0x3F},{0x63,0x14,0x08,0x14,0x63},
-  {0x07,0x08,0x70,0x08,0x07},{0x61,0x51,0x49,0x45,0x43},{0x00,0x7F,0x41,0x41,0x00},
-  {0x02,0x04,0x08,0x10,0x20},{0x00,0x41,0x41,0x7F,0x00},{0x04,0x02,0x01,0x02,0x04},
-  {0x40,0x40,0x40,0x40,0x40},{0x00,0x01,0x02,0x04,0x00},{0x20,0x54,0x54,0x54,0x78},
-  {0x7F,0x48,0x44,0x44,0x38},{0x38,0x44,0x44,0x44,0x20},{0x38,0x44,0x44,0x48,0x7F},
-  {0x38,0x54,0x54,0x54,0x18},{0x08,0x7E,0x09,0x01,0x02},{0x0C,0x52,0x52,0x52,0x3E},
-  {0x7F,0x08,0x04,0x04,0x78},{0x00,0x44,0x7D,0x40,0x00},{0x20,0x40,0x44,0x3D,0x00},
-  {0x7F,0x10,0x28,0x44,0x00},{0x00,0x41,0x7F,0x40,0x00},{0x7C,0x04,0x18,0x04,0x78},
-  {0x7C,0x08,0x04,0x04,0x78},{0x38,0x44,0x44,0x44,0x38},{0x7C,0x14,0x14,0x14,0x08},
-  {0x08,0x14,0x14,0x18,0x7C},{0x7C,0x08,0x04,0x04,0x08},{0x48,0x54,0x54,0x54,0x20},
-  {0x04,0x3F,0x44,0x40,0x20},{0x3C,0x40,0x40,0x40,0x3C},{0x1C,0x20,0x40,0x20,0x1C},
-  {0x3C,0x40,0x30,0x40,0x3C},{0x44,0x28,0x10,0x28,0x44},{0x0C,0x50,0x50,0x50,0x3C},
-  {0x44,0x64,0x54,0x4C,0x44},{0x00,0x08,0x36,0x41,0x00},{0x00,0x00,0x7F,0x00,0x00},
-  {0x00,0x41,0x36,0x08,0x00},{0x08,0x04,0x08,0x10,0x08},
-};
-
-void drawChar(int16_t x,int16_t y,char ch,uint16_t fg,uint16_t bg,uint8_t sz){
-  if(ch<0x20||ch>0x7E) ch='?';
-  const uint8_t* g=F6x8[ch-0x20];
-  for(int8_t col=0;col<6;col++){
-    uint8_t line=(col<5)?pgm_read_byte(&g[col]):0;
-    for(int8_t row=0;row<8;row++){
-      uint16_t c=(line&1)?fg:bg;
-      if(c!=0xFFFF) fillRect(x+col*sz,y+row*sz,sz,sz,c);
-      line>>=1;
-    }
-  }
-}
-
-void drawStr(int16_t x,int16_t y,const char* s,uint16_t fg,uint16_t bg,uint8_t sz){
-  while(*s){ drawChar(x,y,*s++,fg,bg,sz); x+=6*sz; }
-}
-
-// Centred
-void drawStrC(int16_t cx,int16_t y,const char* s,uint16_t fg,uint16_t bg,uint8_t sz){
-  drawStr(cx-(int16_t)(strlen(s)*6*sz/2),y,s,fg,bg,sz);
-}
-
-// Right-aligned
-void drawStrR(int16_t rx,int16_t y,const char* s,uint16_t fg,uint16_t bg,uint8_t sz){
-  drawStr(rx-(int16_t)(strlen(s)*6*sz),y,s,fg,bg,sz);
-}
-
-int16_t strW(const char* s,uint8_t sz=1){ return strlen(s)*6*sz; }
-
-// ══════════════════════════════════════════════════════════════════════
-//  SHAPE PRIMITIVES
-// ══════════════════════════════════════════════════════════════════════
-void drawH(int16_t x,int16_t y,int16_t w,uint16_t c){ fillRect(x,y,w,1,c); }
-void drawV(int16_t x,int16_t y,int16_t h,uint16_t c){ fillRect(x,y,1,h,c); }
-void drawRect(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t c){
-  drawH(x,y,w,c); drawH(x,y+h-1,w,c); drawV(x,y,h,c); drawV(x+w-1,y,h,c);
-}
-void fillRR(int16_t x,int16_t y,int16_t w,int16_t h,int16_t r,uint16_t c){
-  fillRect(x+r,y,w-2*r,h,c);
-  fillRect(x,y+r,r,h-2*r,c);
-  fillRect(x+w-r,y+r,r,h-2*r,c);
-}
-void drawRR(int16_t x,int16_t y,int16_t w,int16_t h,int16_t r,uint16_t c){
-  drawH(x+r,y,w-2*r,c); drawH(x+r,y+h-1,w-2*r,c);
-  drawV(x,y+r,h-2*r,c); drawV(x+w-1,y+r,h-2*r,c);
-}
-void fillCircle(int16_t cx,int16_t cy,int16_t r,uint16_t c){
-  for(int16_t dy=-r;dy<=r;dy++){
-    int16_t dx=(int16_t)sqrtf((float)(r*r-dy*dy));
-    fillRect(cx-dx,cy+dy,dx*2+1,1,c);
-  }
-}
-void drawCircle(int16_t cx,int16_t cy,int16_t r,uint16_t c){
-  int16_t x=r,y=0,e=0;
-  while(x>=y){
-    drawPixel(cx+x,cy+y,c);drawPixel(cx+y,cy+x,c);
-    drawPixel(cx-y,cy+x,c);drawPixel(cx-x,cy+y,c);
-    drawPixel(cx-x,cy-y,c);drawPixel(cx-y,cy-x,c);
-    drawPixel(cx+y,cy-x,c);drawPixel(cx+x,cy-y,c);
-    if(e<=0){y++;e+=2*y+1;} if(e>0){x--;e-=2*x+1;}
-  }
-}
-void fillTri(int16_t x0,int16_t y0,int16_t x1,int16_t y1,int16_t x2,int16_t y2,uint16_t c){
-  if(y0>y1){int16_t t=y0;y0=y1;y1=t;t=x0;x0=x1;x1=t;}
-  if(y1>y2){int16_t t=y1;y1=y2;y2=t;t=x1;x1=x2;x2=t;}
-  if(y0>y1){int16_t t=y0;y0=y1;y1=t;t=x0;x0=x1;x1=t;}
-  for(int16_t y=y0;y<=y2;y++){
-    int16_t a=(y<y1)?x0+(x1-x0)*(y-y0)/(y1-y0):x1+(x2-x1)*(y-y1)/(y2-y1);
-    int16_t b=x0+(x2-x0)*(y-y0)/(y2-y0);
-    if(a>b){int16_t t=a;a=b;b=t;}
-    drawH(a,y,b-a+1,c);
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════
-//  CYBERPUNK UI COMPONENTS
-// ══════════════════════════════════════════════════════════════════════
-
-// Glowing neon box — double border with inner glow colour
-void neonBox(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t col,uint16_t bg=C_SURF){
-  fillRR(x,y,w,h,6,bg);
-  drawRR(x,y,w,h,6,col);
-  // inner highlight
-  drawRR(x+2,y+2,w-4,h-4,4,col);
-  // top accent line
-  fillRect(x+8,y,w-16,2,col);
-}
-
-// Hex corner brackets (sci-fi frame)
-void hexFrame(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t col,uint8_t sz=8){
-  // TL
-  drawH(x,y,sz,col);      drawV(x,y,sz,col);
-  drawPixel(x+1,y+1,col);
-  // TR
-  drawH(x+w-sz,y,sz,col); drawV(x+w-1,y,sz,col);
-  drawPixel(x+w-2,y+1,col);
-  // BL
-  drawH(x,y+h-1,sz,col);  drawV(x,y+h-sz,sz,col);
-  drawPixel(x+1,y+h-2,col);
-  // BR
-  drawH(x+w-sz,y+h-1,sz,col); drawV(x+w-1,y+h-sz,sz,col);
-  drawPixel(x+w-2,y+h-2,col);
-}
-
-// Progress bar with glow
-void glowBar(int16_t x,int16_t y,int16_t w,int16_t h,float frac,uint16_t col,uint16_t bg=C_SURF2){
-  fillRR(x,y,w,h,h/2,bg);
-  int16_t filled=(int16_t)(frac*w); if(filled<2)filled=2; if(filled>w)filled=w;
-  fillRR(x,y,filled,h,h/2,col);
-  // highlight
-  fillRect(x+2,y+1,filled-4,1,C_WHITE);
-}
-
-// Status pill badge
-void drawPill(int16_t x,int16_t y,int16_t w,int16_t h,uint16_t col,bool on){
-  uint16_t bg=on?col:C_SURF2;
-  fillRR(x,y,w,h,h/2,bg);
-  drawRR(x,y,w,h,h/2,col);
-}
-
-// Animated pulsing dot (call each frame with millis)
-void pulseDot(int16_t cx,int16_t cy,int16_t r,uint16_t col,bool active){
-  if(!active){ fillCircle(cx,cy,r,C_MGRAY); return; }
-  float t=(millis()%1200)/1200.0f;
-  uint8_t alpha=(uint8_t)(128+127*sinf(t*2*3.14159f));
-  // Outer glow ring — fade in/out
-  uint8_t ar=((col>>11)*(alpha>>3))>>5;
-  uint8_t ag=(((col>>5)&0x3F)*(alpha>>2))>>6;
-  uint8_t ab=((col&0x1F)*(alpha>>3))>>5;
-  uint16_t glowCol=(ar<<11)|(ag<<5)|ab;
-  drawCircle(cx,cy,r+3,glowCol);
-  fillCircle(cx,cy,r,col);
-}
-
-// Scan line animation
-void scanLine(int16_t x,int16_t y,int16_t w,int16_t h){
-  static unsigned long lastScan=0;
-  static int16_t scanPos=0;
-  if(millis()-lastScan>18){ lastScan=millis(); scanPos=(scanPos+2)%h; }
-  // Subtle horizontal glow bar scrolling down the panel
-  if(scanPos>=0&&scanPos<h){
-    uint16_t slc=0x0421u;  // very dark tint
-    fillRect(x,y+scanPos,w,1,slc);
-    if(scanPos>0) fillRect(x,y+scanPos-1,w,1,slc);
-  }
-}
-
-// Value cell — label + large value — partial update
-void valueCell(int16_t x,int16_t y,int16_t w,int16_t h,
-               const char* label,const char* val,uint16_t vcol,uint16_t bg=C_SURF){
-  fillRect(x,y,w,h,bg);
-  drawRR(x,y,w,h,4,C_LINE);
-  // Top accent
-  fillRect(x+4,y,w-8,2,vcol);
-  // Label
-  int16_t lx=x+(w-strW(label,1))/2;
-  drawStr(lx,y+5,label,vcol,bg,1);
-  // Value large
-  uint8_t vsz=3;
-  int16_t vw=strW(val,vsz);
-  while(vw>w-6&&vsz>1){ vsz--; vw=strW(val,vsz); }
-  int16_t vx=x+(w-vw)/2;
-  int16_t vy=y+h/2-4*vsz;
-  drawStr(vx,vy,val,vcol,bg,vsz);
-}
-
-// Divider with label
-void sectionDiv(int16_t y,const char* lbl,uint16_t col=C_CYAN){
-  drawH(0,y,SCR_W,col);
-  int16_t tw=strW(lbl,1);
-  int16_t lx=(SCR_W-tw-8)/2;
-  fillRect(lx-2,y-4,tw+12,9,C_BG);
-  drawStr(lx+2,y-4,lbl,col,C_BG,1);
-}
-
-// Touch helper
-bool hit(const Touch& t,int16_t x,int16_t y,int16_t w,int16_t h){
-  return t.pressed&&t.x>=x&&t.x<x+w&&t.y>=y&&t.y<y+h;
-}
-
-// ══════════════════════════════════════════════════════════════════════
-//  APP STATE
-// ══════════════════════════════════════════════════════════════════════
-struct Telemetry {
-  int   gas=0; float temp=0,hum=0;
-  bool  haz=false,pir=false,tilt=false,ir=false;
-  float volt=8.4f; int pct=100; float amps=0;
-  long  dFront=-1,dRear=-1,dLeft=-1,dRight=-1;
-  bool  estop=false,autoM=false;
-  String mode="NORMAL",fw="";
-  bool  r3ok=false,espok=false,s9ok=false;
+// ── Telemetry — plain POD, no String ─────────────────────────────────
+struct {
+  int   gas    = 0;
+  float temp   = 0;
+  float hum    = 0;
+  float volt   = 0;
+  int   pct    = 0;
+  float amps   = 0;
+  long  dFront = -1, dRear = -1, dLeft = -1, dRight = -1;
+  bool  r3ok   = false;
+  bool  espok  = false;
+  bool  s9ok   = false;
+  bool  estop  = false;
+  bool  autoM  = false;
+  char  fw[16] = "";
+  char  mode[16] = "NORMAL";
 } T;
 
-// Previous telemetry for partial-update comparison
-struct Telemetry Tprev;
+// ── Serial parser — fixed buffer, zero heap ──────────────────────────
+char     megaBuf[256];
+uint16_t megaBufLen = 0;
+unsigned long lastMegaRx = 0;
+bool          megaLinked = false;
+bool          needsRedraw = true;
 
-struct SensFlags { bool dht=true,gas=true,flame=true,pir=false,tilt=true,ir=true,us=true,cur=true; } SF;
-
-enum Screen { SCR_BOOT,SCR_MAIN,SCR_RADAR,SCR_GAMES,
-              SCR_GAME_COLOR,SCR_GAME_SHAPE,SCR_GAME_COUNT,
-              SCR_INFO,SCR_SENSORS };
-Screen curScr=SCR_BOOT;
-bool   scrDirty=true;
-bool   firstMainDraw=true;  // force full main draw on first visit
-
-bool   alertOn=false;
-String alertTitle="",alertMsg="";
-uint16_t alertCol=C_CORAL;
-unsigned long alertTs=0;
-
-#define MEGA_SERIAL  Serial1
-static char   megaBuf[192];
-static uint8_t megaBufLen=0;
-bool          megaLinked=false;
-unsigned long lastMegaRx=0,lastPing=0;
-uint16_t      pingSeq=0;
-
-const uint16_t GCOLS[]={C_RED,C_GREEN,C_BLUE,C_YLLOW};
-const char* GCNAMES[]={"RED","GREEN","BLUE","YELLOW"};
-int   gTarget=0,gScore=0;
-unsigned long gFeedbackUntil=0;
-unsigned long lastTouchMs=0;
-
-// ══════════════════════════════════════════════════════════════════════
-//  TOUCH — FIX: mirror X for MADCTL 0x48 (MX bit set)
-// ══════════════════════════════════════════════════════════════════════
-#define CTP_ADDR 0x38
-Touch readTouch(){
-  Touch t={0,0,false};
-  // FIX #3 applied here: Wire instead of Wire1 — matches I2C0 init in setup()
-  Wire.beginTransmission(CTP_ADDR);
-  Wire.write(0x02);
-  if(Wire.endTransmission(false)!=0) return t;
-  Wire.requestFrom(CTP_ADDR,6);
-  if(Wire.available()<6) return t;
-  uint8_t n=Wire.read()&0x0F;
-  uint8_t xH=Wire.read(),xL=Wire.read();
-  uint8_t yH=Wire.read(),yL=Wire.read();
-  Wire.read();
-  if(n==0||n>2) return t;
-  int16_t rx=((xH&0x0F)<<8)|xL;
-  int16_t ry=((yH&0x0F)<<8)|yL;
-  t.x = constrain(319-rx, 0, SCR_W-1);   // mirror X for MADCTL 0x48
-  t.y = constrain(ry,     0, SCR_H-1);
-  t.pressed=true;
-  return t;
+// ════════════════════════════════════════════════════════════════════
+//  PARSERS  (all use static buffers — no String, no heap)
+// ════════════════════════════════════════════════════════════════════
+void parseStat(const char* s) {
+  // STAT:gas:temp:hum:haz:pir:tilt:ir:volt:pct:amps
+  static char buf[160]; static char* f[11]; int n = 0;
+  strncpy(buf, s + 5, sizeof(buf) - 1);
+  buf[sizeof(buf)-1] = 0;
+  char* p = strtok(buf, ":");
+  while (p && n < 11) { f[n++] = p; p = strtok(NULL, ":"); }
+  if (n < 10) return;
+  T.gas  = atoi(f[0]);
+  T.temp = atof(f[1]);
+  T.hum  = atof(f[2]);
+  T.volt = atof(f[7]);
+  T.pct  = atoi(f[8]);
+  T.amps = atof(f[9]);
+  needsRedraw = true;
 }
 
-// ══════════════════════════════════════════════════════════════════════
-//  CHROME — Header & Footer (persistent chrome — redrawn only on change)
-// ══════════════════════════════════════════════════════════════════════
-void drawHeader(const char* title){
-  fillGrad(0,0,SCR_W,HDR_H,0x0841u,C_BG);
-  drawH(0,HDR_H-1,SCR_W,C_CYAN);
-  drawH(0,HDR_H-2,SCR_W,C_XCYAN);
-
-  // Mode badge
-  uint16_t mc=C_CYAN;
-  if(T.estop)              mc=C_CORAL;
-  else if(T.mode=="BODYGUARD") mc=C_AMBER;
-  else if(T.mode=="DOG")       mc=C_MINT;
-  else if(T.mode=="UNHINGED")  mc=C_MAG;
-  else if(T.mode=="PARTY")     mc=C_PURPLE;
-  const char* ms=T.estop?"E-STOP":T.mode.c_str();
-  int16_t bw=strW(ms,1)+14;
-  fillRR(4,8,bw,34,5,mc);
-  drawRR(4,8,bw,34,5,C_WHITE);
-  drawStrC(4+bw/2,19,ms,C_VOID,mc,1);
-
-  // Title centred
-  drawStrC(SCR_W/2,(HDR_H-16)/2,title,C_WHITE,0xFFFF,2);
-
-  // Battery + link
-  uint16_t bc=T.pct>50?C_MINT:(T.pct>20?C_AMBER:C_CORAL);
-  char bat[10]; snprintf(bat,sizeof(bat),"%d%%",T.pct);
-  drawStrR(SCR_W-18,(HDR_H-8)/2,bat,bc,0xFFFF,1);
-  pulseDot(SCR_W-10,HDR_H/2,5,megaLinked?C_MINT:C_CORAL,megaLinked);
+void parseUS(const char* s) {
+  // US:front,rear,left,right
+  static char buf[64]; static char* f[4]; int n = 0;
+  strncpy(buf, s + 3, sizeof(buf) - 1);
+  buf[sizeof(buf)-1] = 0;
+  char* p = strtok(buf, ",");
+  while (p && n < 4) { f[n++] = p; p = strtok(NULL, ","); }
+  if (n < 4) return;
+  T.dFront = atol(f[0]); T.dRear = atol(f[1]);
+  T.dLeft  = atol(f[2]); T.dRight = atol(f[3]);
+  needsRedraw = true;
 }
 
-void drawFooter(){
-  int fy=SCR_H-FTR_H;
-  fillGrad(0,fy,SCR_W,FTR_H,C_BG,0x0841u);
-  drawH(0,fy,SCR_W,C_PURPLE);
-  drawH(0,fy+1,SCR_W,C_DPURP);
-
-  // E-STOP
-  uint16_t ec=T.estop?C_AMBER:C_CORAL;
-  fillRR(6,fy+8,86,32,6,T.estop?0x4200u:0x2800u);
-  drawRR(6,fy+8,86,32,6,ec);
-  drawRR(8,fy+10,82,28,4,ec);
-  const char* el=T.estop?"RESUME":"E-STOP";
-  drawStrC(49,fy+20,el,ec,0xFFFF,1);
-
-  // Hazard pills
-  int ix=100;
-  if(T.tilt){ fillRR(ix,fy+12,40,24,6,0x2200u); drawRR(ix,fy+12,40,24,6,C_AMBER); drawStrC(ix+20,fy+20,"TILT",C_AMBER,0xFFFF,1); ix+=46; }
-  if(T.ir)  { fillRR(ix,fy+12,28,24,6,0x0210u); drawRR(ix,fy+12,28,24,6,C_MINT);  drawStrC(ix+14,fy+20,"IR",  C_MINT, 0xFFFF,1); ix+=34; }
-
-  // Mega link
-  if(megaLinked){
-    unsigned long age=(millis()-lastMegaRx)/1000;
-    char buf[14];
-    if(age<5) snprintf(buf,sizeof(buf),"LIVE");
-    else      snprintf(buf,sizeof(buf),"%lus",age);
-    uint16_t lc=age<5?C_MINT:C_AMBER;
-    drawStrR(SCR_W-6,fy+13,"Mega",C_DGRAY,0xFFFF,1);
-    drawStrR(SCR_W-6,fy+23,buf,lc,0xFFFF,1);
-  } else {
-    drawStrR(SCR_W-6,fy+18,"NO LINK",C_CORAL,0xFFFF,1);
+void parseStatus(const char* s) {
+  T.estop = strstr(s, "ESTOP:YES")   != NULL;
+  T.autoM = strstr(s, "AUTO:ON")     != NULL;
+  T.r3ok  = strstr(s, "R3:OK")       != NULL;
+  T.espok = strstr(s, "ESP:OK")      != NULL;
+  T.s9ok  = strstr(s, "S9:OK")       != NULL;
+  // Extract FW: field
+  const char* fw = strstr(s, "FW:");
+  if (fw) {
+    fw += 3;
+    const char* end = strchr(fw, '|');
+    size_t len = end ? (size_t)(end - fw) : strlen(fw);
+    if (len > 15) len = 15;
+    memcpy(T.fw, fw, len);
+    T.fw[len] = 0;
   }
+  needsRedraw = true;
 }
 
-bool drawBackBtn(Touch& t){
-  int fy=SCR_H-FTR_H;
-  fillRR(SCR_W-74,fy+8,68,32,6,C_SURF2);
-  drawRR(SCR_W-74,fy+8,68,32,6,C_PURPLE);
-  drawStrC(SCR_W-40,fy+20,"< BACK",C_PURPLE,0xFFFF,1);
-  return hit(t,SCR_W-74,fy+8,68,32);
-}
-
-// ══════════════════════════════════════════════════════════════════════
-//  BOOT SCREEN — animated, no flicker
-// ══════════════════════════════════════════════════════════════════════
-void drawBoot(){
-  static unsigned long lastAnim=0;
-  static uint8_t di=0;
-  static uint8_t phase=0;
-
-  if(scrDirty){
-    fillScreen(C_BG);
-    // Background grid
-    for(int16_t gx=0;gx<SCR_W;gx+=20) drawV(gx,0,SCR_H,0x0421u);
-    for(int16_t gy=0;gy<SCR_H;gy+=20) drawH(0,gy,SCR_W,0x0421u);
-
-    // Logo box
-    fillGrad(20,60,SCR_W-40,110,0x0841u,C_BG);
-    hexFrame(20,60,SCR_W-40,110,C_CYAN,10);
-    drawStrC(SCR_W/2,80,"BUDDYBOT",C_CYAN,0xFFFF,4);
-    drawStrC(SCR_W/2,116,"NEXUS  HMI  v4.0",C_DCYAN,0xFFFF,1);
-    drawH(40,136,SCR_W-80,C_LINE);
-    drawStrC(SCR_W/2,144,"For AJ   |   Guardian System",C_MGRAY,0xFFFF,1);
-
-    // Hardware info
-    neonBox(20,174,SCR_W-40,76,C_PURPLE,C_SURF);
-    drawStrC(SCR_W/2,184,"HARDWARE",C_PURPLE,C_SURF,1);
-    drawStrC(SCR_W/2,200,"ST7796S  320x480  Direct SPI",C_LGRAY,C_SURF,1);
-    drawStrC(SCR_W/2,212,"FT6336U  Capacitive Touch",C_LGRAY,C_SURF,1);
-    drawStrC(SCR_W/2,224,"RP2040   Raspberry Pi Pico",C_LGRAY,C_SURF,1);
-    drawStrC(SCR_W/2,236,"NEXUS-OS  Serial1  115200",C_LGRAY,C_SURF,1);
-
-    drawStrC(SCR_W/2,270,"Waiting for Mega...",C_AMBER,0xFFFF,2);
-    scrDirty=false;
-  }
-
-  // Dot animation
-  if(millis()-lastAnim>200){ lastAnim=millis(); di=(di+1)%8; }
-  int16_t dx=SCR_W/2-56;
-  for(int i=0;i<8;i++){
-    uint16_t dc=(i<=di)?C_CYAN:C_DGRAY;
-    int16_t r=(i==di)?6:3;
-    fillRect(dx+i*16-r,300-r,r*2+1,r*2+1,C_BG);
-    fillCircle(dx+i*16,300,r,dc);
-    if(i==di){
-      drawCircle(dx+i*16,300,r+2,C_XCYAN);
-    }
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════
-//  MAIN DASHBOARD — smart partial updates (no flicker)
-// ══════════════════════════════════════════════════════════════════════
-
-// Cell positions for the telemetry grid
-#define CELL_W   ((SCR_W-18)/2)
-#define CELL_H   54
-#define CELL_X1  6
-#define CELL_X2  (CELL_X1+CELL_W+6)
-#define CELL_Y1  (CNT_Y+6)
-#define CELL_Y2  (CELL_Y1+CELL_H+4)
-#define CELL_Y3  (CELL_Y2+CELL_H+4)
-
-void updateTelCell(int16_t x,int16_t y,const char* lbl,const char* val,uint16_t col){
-  valueCell(x,y,CELL_W,CELL_H,lbl,val,col,C_SURF);
-}
-
-void drawMainFull(){
-  fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);
-  // Background grid lines
-  // grid lines disabled for debug
-
-  // Section: TELEMETRY
-  sectionDiv(CNT_Y+4,"TELEMETRY",C_CYAN);
-
-  // Mode selector row
-  int mw=(SCR_W-24)/3;
-  struct { const char* l; uint16_t c; const char* cmd; } modes[]={
-    {"NORMAL",C_CYAN,"NORMAL"},{"BODYGUARD",C_AMBER,"BODYGUARD"},{"DOG",C_MINT,"DOG"}
-  };
-  for(int i=0;i<3;i++){
-    int mx=6+i*(mw+6);
-    int my=CELL_Y3+CELL_H+10;
-    bool act=(T.mode==modes[i].cmd);
-    uint16_t bg=act?modes[i].c:C_SURF2;
-    uint16_t fg=act?C_VOID:modes[i].c;
-    fillRR(mx,my,mw,34,6,bg);
-    drawRR(mx,my,mw,34,6,modes[i].c);
-    if(act){ fillRect(mx+4,my,mw-8,2,C_WHITE); }
-    drawStrC(mx+mw/2,my+13,modes[i].l,fg,0xFFFF,1);
-  }
-  sectionDiv(CELL_Y3+CELL_H+54,"MODE",C_PURPLE);
-
-  // Nav buttons
-  int ny=CELL_Y3+CELL_H+64;
-  int nbw=(SCR_W-18)/2, nbh=44;
-  struct { const char* l; uint16_t c; Screen s; } nav[]={
-    {"RADAR",C_CYAN,SCR_RADAR},{"GAMES",C_MINT,SCR_GAMES},
-    {"SENSORS",C_AMBER,SCR_SENSORS},{"INFO",C_PURPLE,SCR_INFO}
-  };
-  for(int i=0;i<4;i++){
-    int nx2=6+(i%2)*(nbw+6);
-    int ny2=ny+(i/2)*(nbh+6);
-    neonBox(nx2,ny2,nbw,nbh,nav[i].c,C_SURF);
-    drawStrC(nx2+nbw/2,ny2+nbh/2-4,nav[i].l,nav[i].c,0xFFFF,2);
-  }
-}
-
-void updateTelemetryOnly(){
-  char buf[22];
-  // Row 1
-  snprintf(buf,sizeof(buf),"%.1fC",T.temp);
-  updateTelCell(CELL_X1,CELL_Y1,"TEMP",buf,T.temp>38?C_CORAL:T.temp>32?C_AMBER:C_CYAN);
-  snprintf(buf,sizeof(buf),"%.0f%%",T.hum);
-  updateTelCell(CELL_X2,CELL_Y1,"HUMIDITY",buf,C_CYAN);
-  // Row 2
-  snprintf(buf,sizeof(buf),"%d%%",T.pct);
-  updateTelCell(CELL_X1,CELL_Y2,"BATTERY",buf,T.pct>50?C_MINT:T.pct>20?C_AMBER:C_CORAL);
-  snprintf(buf,sizeof(buf),"%.1fV",T.volt);
-  updateTelCell(CELL_X2,CELL_Y2,"VOLTAGE",buf,T.volt>7.5f?C_MINT:T.volt>7.0f?C_AMBER:C_CORAL);
-  // Row 3
-  snprintf(buf,sizeof(buf),"%d",T.gas);
-  updateTelCell(CELL_X1,CELL_Y3,"GAS",buf,T.gas>400?C_CORAL:T.gas>200?C_AMBER:C_MINT);
-  // Sensor status flags
-  fillRect(CELL_X2,CELL_Y3,CELL_W,CELL_H,C_SURF);
-  drawRR(CELL_X2,CELL_Y3,CELL_W,CELL_H,4,C_LINE);
-  fillRect(CELL_X2+4,CELL_Y3,CELL_W-8,2,C_PURPLE);
-  drawStr(CELL_X2+4,CELL_Y3+5,"SENSORS",C_PURPLE,C_SURF,1);
-  // Status dots row
-  struct { const char* l; bool v; uint16_t c; } flags[]={
-    {"R3",T.r3ok,C_MINT},{"ESP",T.espok,C_CYAN},{"S9",T.s9ok,C_PURPLE},{"AUTO",T.autoM,C_AMBER}
-  };
-  int fx=CELL_X2+4;
-  for(int i=0;i<4;i++){
-    pulseDot(fx+6,CELL_Y3+CELL_H/2+4,4,flags[i].c,flags[i].v);
-    drawStr(fx+12,CELL_Y3+CELL_H/2,flags[i].l,flags[i].v?flags[i].c:C_MGRAY,C_SURF,1);
-    fx+=(CELL_W-8)/4;
-  }
-}
-
-void drawMain(Touch& t){
-  // DEBUG: bare minimum — just fill screen green to confirm transition works
-  fillRect(0,0,SCR_W,SCR_H,0x07E0);  // solid green
-  Serial.println("drawMain called");
-}
-
-// ══
-// ══════════════════════════════════════════════════════════════════════
-//  RADAR — animated neon sweep
-// ══════════════════════════════════════════════════════════════════════
-void drawRadar(Touch& t){
-  if(scrDirty){ fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG); scrDirty=false; }
-  drawHeader("PROXIMITY RADAR"); drawFooter();
-  if(drawBackBtn(t)){ curScr=SCR_MAIN; scrDirty=true; firstMainDraw=true; t.pressed=false; return; }
-
-  const int CX=SCR_W/2, CY=CNT_Y+CNT_H/2+20, MR=106;
-  // Animated sweep
-  float sweep=((millis()%3000)/3000.0f)*2*3.14159f;
-
-  // Clear radar area
-  fillCircle(CX,CY,MR+8,C_BG);
-
-  // Range rings with neon glow
-  uint16_t rings[]={0x2800u,0x4900u,0x0210u,C_XCYAN};
-  for(int r=1;r<=4;r++){
-    drawCircle(CX,CY,(MR*r)/4,rings[r-1]);
-    char rb[8]; snprintf(rb,sizeof(rb),"%d",r*25);
-    drawStr(CX+(MR*r)/4+2,CY-5,rb,C_DGRAY,0xFFFF,1);
-  }
-  // Cross hairs
-  drawH(CX-MR,CY,MR*2,C_SURF2);
-  drawV(CX,CY-MR,MR*2,C_SURF2);
-
-  // Sweep trail (fade)
-  for(int step=0;step<12;step++){
-    float a=sweep-step*0.15f;
-    int sx=CX+(int)(cosf(a-1.5708f)*MR);
-    int sy=CY+(int)(sinf(a-1.5708f)*MR);
-    uint8_t alpha=12-step;
-    uint16_t sc=((alpha>>1)<<5); // fading green
-    fillRect((CX+sx)/2-1,(CY+sy)/2-1,2,2,sc);
-  }
-  // Sweep line
-  int sx=CX+(int)(cosf(sweep-1.5708f)*MR);
-  int sy=CY+(int)(sinf(sweep-1.5708f)*MR);
-  // Draw sweep line pixel by pixel for glow
-  for(int r=2;r<=MR;r+=2){
-    int px=CX+(int)(cosf(sweep-1.5708f)*r);
-    int py=CY+(int)(sinf(sweep-1.5708f)*r);
-    fillRect(px-1,py-1,2,2,C_MINT);
-  }
-
-  // Centre
-  fillCircle(CX,CY,6,C_BG);
-  fillCircle(CX,CY,5,C_CYAN);
-  drawCircle(CX,CY,7,C_DCYAN);
-
-  // Plot sensors
-  auto plot=[&](long d,float ang,const char* l){
-    if(d<=0) return;
-    float a=(ang-90.0f)*0.01745329f;
-    float frac=1.0f-constrain(d,0,100)/100.0f;
-    int r=(int)(frac*MR); if(r<4)return;
-    int px=CX+(int)(cosf(a)*r);
-    int py=CY+(int)(sinf(a)*r);
-    uint16_t col=d<25?C_CORAL:d<60?C_AMBER:C_MINT;
-    // Glow
-    for(int gr=12;gr>=4;gr-=4){
-      uint8_t gv=12-gr+4;
-      drawCircle(px,py,gr,d<25?((gv>>1)<<11):(d<60?((gv>>1)<<11|(gv>>1)<<5):((gv>>1)<<5)));
-    }
-    fillCircle(px,py,5,col);
-    char db[12]; snprintf(db,sizeof(db),"%s%ldcm",l,d);
-    int lx=CX+(int)(cosf(a)*(MR+14))-strW(db)/2;
-    int ly=CY+(int)(sinf(a)*(MR+14))-4;
-    lx=constrain(lx,2,SCR_W-strW(db)-2);
-    ly=constrain(ly,CNT_Y+4,SCR_H-FTR_H-14);
-    drawStr(lx,ly,db,col,0xFFFF,1);
-  };
-  plot(T.dFront,0,"F:"); plot(T.dRear,180,"R:");
-  plot(T.dLeft,270,"L:"); plot(T.dRight,90,"Ri:");
-}
-
-// ══════════════════════════════════════════════════════════════════════
-//  GAMES MENU
-// ══════════════════════════════════════════════════════════════════════
-void drawGamesMenu(Touch& t){
-  if(scrDirty){ fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG); scrDirty=false; }
-  drawHeader("GAMES FOR AJ"); drawFooter();
-  if(drawBackBtn(t)){ curScr=SCR_MAIN; scrDirty=true; firstMainDraw=true; t.pressed=false; return; }
-
-  drawStrC(SCR_W/2,CNT_Y+10,"Choose your game!",C_MGRAY,0xFFFF,1);
-
-  struct { const char* n; Screen s; uint16_t c; const char* d; const char* ic; } g[]={
-    {"COLOURS",  SCR_GAME_COLOR, C_RED,    "Match the colour",  "C"},
-    {"SHAPES",   SCR_GAME_SHAPE, C_CYAN,   "Find the shape",    "S"},
-    {"COUNTING", SCR_GAME_COUNT, C_YLLOW,  "Count the stars",   "*"},
-  };
-  int gh=(CNT_H-52)/3;
-  for(int i=0;i<3;i++){
-    int gy=CNT_Y+30+i*(gh+8);
-    // Card
-    fillGrad(6,gy,SCR_W-12,gh,C_SURF,C_BG);
-    hexFrame(6,gy,SCR_W-12,gh,g[i].c,10);
-    // Neon accent
-    fillRect(6,gy,SCR_W-12,3,g[i].c);
-    // Icon circle
-    fillCircle(44,gy+gh/2,22,C_SURF2);
-    drawCircle(44,gy+gh/2,22,g[i].c);
-    drawCircle(44,gy+gh/2,20,g[i].c);
-    drawStrC(44,gy+gh/2-8,g[i].ic,g[i].c,0xFFFF,3);
-    // Text
-    drawStr(76,gy+gh/2-12,g[i].n,g[i].c,0xFFFF,2);
-    drawStr(76,gy+gh/2+6,g[i].d,C_MGRAY,0xFFFF,1);
-    // Arrow
-    drawStr(SCR_W-22,gy+gh/2-4,">",g[i].c,0xFFFF,2);
-    if(hit(t,6,gy,SCR_W-12,gh)){
-      gTarget=random(i==2?5:(i==0?4:3));
-      if(i==2)gTarget++;
-      gScore=0;gFeedbackUntil=0;
-      curScr=g[i].s;scrDirty=true;t.pressed=false;return;
-    }
-  }
-}
-
-void gameCorrect(uint8_t s,int nm){
-  gScore++;
-  fillRect(0,CNT_Y,SCR_W,CNT_H,0x0240u);
-  // Large check-like indicator
-  for(int i=0;i<3;i++) drawCircle(SCR_W/2,SCR_H/2-30,30+i*4,C_MINT);
-  fillCircle(SCR_W/2,SCR_H/2-30,28,C_MINT);
-  drawStrC(SCR_W/2,SCR_H/2-38,"OK",C_VOID,0xFFFF,4);
-  drawStrC(SCR_W/2,SCR_H/2+10,"CORRECT!",C_MINT,0xFFFF,3);
-  char sb[20];snprintf(sb,sizeof(sb),"Score: %d",gScore);
-  drawStrC(SCR_W/2,SCR_H/2+40,sb,C_WHITE,0xFFFF,2);
-  gTarget=random(nm)+(s==SCR_GAME_COUNT?1:0);
-  gFeedbackUntil=millis()+900;
-}
-
-void gameWrong(){
-  fillRect(0,CNT_Y,SCR_W,CNT_H,0x2800u);
-  for(int i=0;i<3;i++) drawCircle(SCR_W/2,SCR_H/2-30,30+i*4,C_CORAL);
-  fillCircle(SCR_W/2,SCR_H/2-30,28,C_CORAL);
-  drawStrC(SCR_W/2,SCR_H/2-38,"X",C_WHITE,0xFFFF,4);
-  drawStrC(SCR_W/2,SCR_H/2+10,"Try Again!",C_CORAL,0xFFFF,2);
-  gFeedbackUntil=millis()+700;
-}
-
-void drawGameColor(Touch& t){
-  if(millis()<gFeedbackUntil)return;
-  if(scrDirty){fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);scrDirty=false;}
-  drawHeader("COLOUR MATCH");drawFooter();
-  if(drawBackBtn(t)){curScr=SCR_GAMES;scrDirty=true;t.pressed=false;return;}
-  char sb[16];snprintf(sb,sizeof(sb),"Score: %d",gScore);
-  drawStrR(SCR_W-6,CNT_Y+8,sb,C_CYAN,0xFFFF,1);
-  drawStrC(SCR_W/2,CNT_Y+26,"Touch the colour:",C_LGRAY,0xFFFF,1);
-  drawStrC(SCR_W/2,CNT_Y+44,GCNAMES[gTarget],GCOLS[gTarget],0xFFFF,4);
-  int bw=(SCR_W-22)/2,bh=56;
-  for(int i=0;i<4;i++){
-    int bx=6+(i%2)*(bw+10);
-    int by=CNT_Y+108+(i/2)*(bh+10);
-    fillRR(bx,by,bw,bh,10,GCOLS[i]);
-    drawRR(bx,by,bw,bh,10,C_WHITE);
-    drawCircle(bx+bw/2,by+bh/2,14,C_WHITE);
-    if(hit(t,bx,by,bw,bh)){t.pressed=false;(i==gTarget)?gameCorrect(SCR_GAME_COLOR,4):gameWrong();scrDirty=true;return;}
-  }
-}
-
-void drawGameShape(Touch& t){
-  const char* SN[]={"CIRCLE","SQUARE","TRIANGLE"};
-  if(millis()<gFeedbackUntil)return;
-  if(scrDirty){fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);scrDirty=false;}
-  drawHeader("SHAPE MATCH");drawFooter();
-  if(drawBackBtn(t)){curScr=SCR_GAMES;scrDirty=true;t.pressed=false;return;}
-  char sb[16];snprintf(sb,sizeof(sb),"Score: %d",gScore);
-  drawStrR(SCR_W-6,CNT_Y+8,sb,C_CYAN,0xFFFF,1);
-  drawStrC(SCR_W/2,CNT_Y+26,"Find the shape:",C_LGRAY,0xFFFF,1);
-  drawStrC(SCR_W/2,CNT_Y+44,SN[gTarget],C_CYAN,0xFFFF,3);
-  int bw=SCR_W-20,bh=58,by=CNT_Y+110;
-  for(int i=0;i<3;i++){
-    neonBox(10,by,bw,bh,C_CYAN,C_SURF);
-    int cx2=54,cy2=by+bh/2,r=20;
-    if(i==0)fillCircle(cx2,cy2,r,C_CYAN);
-    else if(i==1)fillRect(cx2-r,cy2-r,r*2,r*2,C_CYAN);
-    else fillTri(cx2,cy2-r,cx2-r,cy2+r,cx2+r,cy2+r,C_CYAN);
-    drawStr(88,by+bh/2-8,SN[i],C_WHITE,0xFFFF,2);
-    if(hit(t,10,by,bw,bh)){t.pressed=false;(i==gTarget)?gameCorrect(SCR_GAME_SHAPE,3):gameWrong();scrDirty=true;return;}
-    by+=bh+8;
-  }
-}
-
-void drawGameCount(Touch& t){
-  if(millis()<gFeedbackUntil)return;
-  if(scrDirty){fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);scrDirty=false;}
-  drawHeader("COUNT THE STARS");drawFooter();
-  if(drawBackBtn(t)){curScr=SCR_GAMES;scrDirty=true;t.pressed=false;return;}
-  char sb[16];snprintf(sb,sizeof(sb),"Score: %d",gScore);
-  drawStrR(SCR_W-6,CNT_Y+8,sb,C_CYAN,0xFFFF,1);
-  drawStrC(SCR_W/2,CNT_Y+26,"How many stars?",C_LGRAY,0xFFFF,1);
-  // Stars panel
-  neonBox(10,CNT_Y+52,SCR_W-20,80,C_YLLOW,C_SURF);
-  int sp=(gTarget>1)?((SCR_W-60)/(gTarget-1)):0;
-  for(int i=0;i<gTarget;i++){
-    int sx=(gTarget>1)?(26+i*sp):(SCR_W/2-9);
-    drawStrC(sx,CNT_Y+76,"*",C_YLLOW,C_SURF,4);
-  }
-  // Number buttons
-  int bw=(SCR_W-32)/5,bh=58,by=CNT_Y+148;
-  for(int i=0;i<5;i++){
-    int bx=6+i*(bw+4);
-    char nb[3];snprintf(nb,sizeof(nb),"%d",i+1);
-    bool sel=(i+1==gTarget);
-    fillRR(bx,by,bw,bh,8,sel?0x0840u:C_SURF2);
-    drawRR(bx,by,bw,bh,8,C_YLLOW);
-    if(sel)drawRR(bx+2,by+2,bw-4,bh-4,6,C_YLLOW);
-    drawStrC(bx+bw/2,by+bh/2-16,nb,C_YLLOW,0xFFFF,4);
-    if(hit(t,bx,by,bw,bh)){t.pressed=false;(i+1==gTarget)?gameCorrect(SCR_GAME_COUNT,5):gameWrong();scrDirty=true;return;}
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════
-//  INFO SCREEN
-// ══════════════════════════════════════════════════════════════════════
-void drawInfo(Touch& t){
-  if(scrDirty){fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);scrDirty=false;}
-  drawHeader("SYSTEM INFO");drawFooter();
-  if(drawBackBtn(t)){curScr=SCR_MAIN;scrDirty=true;firstMainDraw=true;t.pressed=false;return;}
-
-  int y=CNT_Y+8,rh=22,cw=SCR_W-12;
-  // Card
-  fillRR(6,y,cw,rh*10+12,6,C_SURF);
-  drawRR(6,y,cw,rh*10+12,6,C_LINE);
-  fillRect(6,y,cw,3,C_PURPLE);
-
-  auto ir=[&](const char* l,const char* v,uint16_t vc){
-    drawStr(14,y+6,l,C_MGRAY,C_SURF,1);
-    drawStrR(SCR_W-14,y+6,v,vc,C_SURF,1);
-    drawH(10,y+rh-1,cw-8,C_LINE);
-    y+=rh;
-  };
-  char buf[28];
-  ir("Mega Firmware", T.fw.length()?T.fw.c_str():"--", C_CYAN);
-  snprintf(buf,sizeof(buf),"%.2f V",T.volt);
-  ir("Battery Voltage",buf,T.volt>7.5f?C_MINT:T.volt>7.0f?C_AMBER:C_CORAL);
-  snprintf(buf,sizeof(buf),"%d%%",T.pct);
-  ir("Battery Level",buf,T.pct>50?C_MINT:C_AMBER);
-  snprintf(buf,sizeof(buf),"%.2f A",T.amps);
-  ir("Current Draw",buf,C_LGRAY);
-  ir("R3 Motors",T.r3ok?"LINKED":"OFFLINE",T.r3ok?C_MINT:C_CORAL);
-  ir("ESP32 Bridge",T.espok?"LINKED":"WAITING",T.espok?C_MINT:C_AMBER);
-  ir("S9 Android",T.s9ok?"LINKED":"WAITING",T.s9ok?C_MINT:C_AMBER);
-  ir("Auto Mode",T.autoM?"ACTIVE":"OFF",T.autoM?C_MINT:C_DGRAY);
-  snprintf(buf,sizeof(buf),"%lu s",millis()/1000);
-  ir("Pico Uptime",buf,C_LGRAY);
-  snprintf(buf,sizeof(buf),"%lu s ago",(millis()-lastMegaRx)/1000);
-  ir("Last Mega RX",buf,megaLinked?C_MINT:C_CORAL);
-}
-
-// ══════════════════════════════════════════════════════════════════════
-//  SENSORS SCREEN
-// ══════════════════════════════════════════════════════════════════════
-void drawSensors(Touch& t){
-  if(scrDirty){fillRect(0,CNT_Y,SCR_W,CNT_H,C_BG);scrDirty=false;}
-  drawHeader("SENSOR CONFIG");drawFooter();
-  if(drawBackBtn(t)){curScr=SCR_MAIN;scrDirty=true;firstMainDraw=true;t.pressed=false;return;}
-
-  struct SBtn { const char* id;bool* f;const char* l; };
-  SBtn sb[]={
-    {"DHT",&SF.dht,"DHT Temp"},{"GAS",&SF.gas,"Gas"},
-    {"FLAME",&SF.flame,"Flame"},{"PIR",&SF.pir,"PIR"},
-    {"TILT",&SF.tilt,"Tilt"},{"IR",&SF.ir,"IR Obst."},
-    {"US",&SF.us,"Ultrasonic"},{"CURRENT",&SF.cur,"Current"},
-  };
-  int bw=(SCR_W-18)/2,bh=42;
-  for(int i=0;i<8;i++){
-    int bx=6+(i%2)*(bw+6),by=CNT_Y+6+(i/2)*(bh+6);
-    bool on=*sb[i].f;
-    uint16_t col=on?C_MINT:C_CORAL;
-    fillRR(bx,by,bw,bh,8,on?0x0240u:0x2800u);
-    drawRR(bx,by,bw,bh,8,col);
-    if(on)fillRect(bx+4,by,bw-8,2,col);
-    pulseDot(bx+14,by+bh/2,5,col,on);
-    drawStr(bx+26,by+bh/2-4,sb[i].l,col,0xFFFF,1);
-    drawStrR(bx+bw-6,by+bh/2-4,on?"ON":"OFF",col,0xFFFF,1);
-    if(hit(t,bx,by,bw,bh)){
-      *sb[i].f=!(*sb[i].f);
-      MEGA_SERIAL.print("TOGGLE_SENSOR:");MEGA_SERIAL.print(sb[i].id);
-      MEGA_SERIAL.println(*sb[i].f?":ON":":OFF");
-      scrDirty=true;t.pressed=false;
-    }
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════
-//  ALERT OVERLAY
-// ══════════════════════════════════════════════════════════════════════
-void drawAlert(Touch& t){
-  const int AX=16,AY=90,AW=SCR_W-32,AH=260;
-  fillGrad(AX,AY,AW,AH,alertCol,C_BG);
-  hexFrame(AX,AY,AW,AH,alertCol,14);
-  drawH(AX,AY+2,AW,alertCol);
-  drawH(AX,AY+4,AW,C_WHITE);
-  drawStrC(AX+AW/2,AY+24,alertTitle.c_str(),C_WHITE,0xFFFF,3);
-  drawH(AX+20,AY+66,AW-40,C_WHITE);
-  drawStrC(AX+AW/2,AY+80,alertMsg.c_str(),C_WHITE,0xFFFF,2);
-  // Dismiss button
-  int bx=AX+(AW-110)/2,by=AY+AH-54;
-  fillRR(bx,by,110,40,8,C_WHITE);
-  drawRR(bx,by,110,40,8,alertCol);
-  drawStrC(bx+55,by+16,"DISMISS",alertCol,0xFFFF,2);
-  if(hit(t,bx,by,110,40)||(alertTs&&millis()-alertTs>3000)){
-    alertOn=false;alertTs=0;scrDirty=true;firstMainDraw=true;t.pressed=false;
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════
-//  MEGA PROTOCOL PARSER
-// ══════════════════════════════════════════════════════════════════════
-void raisAlert(const char* ti,const char* msg,uint16_t c){
-  alertTitle=ti;alertMsg=msg;alertCol=c;alertOn=true;alertTs=millis();
-}
-void parseStat(const String& s){
-  static char buf[160]; static char* fld[11]; int n=0;
-  s.substring(5).toCharArray(buf,sizeof(buf));
-  char* p=strtok(buf,":"); while(p&&n<11){fld[n++]=p;p=strtok(NULL,":");}
-  if(n<10)return;
-  T.gas=atoi(fld[0]);T.temp=atof(fld[1]);T.hum=atof(fld[2]);
-  T.haz=atoi(fld[3]);T.pir=atoi(fld[4]);T.tilt=atoi(fld[5]);T.ir=atoi(fld[6]);
-  T.volt=atof(fld[7]);T.pct=atoi(fld[8]);T.amps=atof(fld[9]);
-}
-void parseUS(const String& s){
-  static char buf2[40]; static char* g[4]; int n=0;
-  s.substring(3).toCharArray(buf2,sizeof(buf2));
-  char* p=strtok(buf2,","); while(p&&n<4){g[n++]=p;p=strtok(NULL,",");}
-  if(n<4)return;
-  T.dFront=atoi(g[0]);T.dRear=atoi(g[1]);T.dLeft=atoi(g[2]);T.dRight=atoi(g[3]);
-}
-void parseStatus(const String& s){
-  T.estop=(s.indexOf("ESTOP:YES")>=0);
-  T.autoM=(s.indexOf("AUTO:ON")>=0);
-  T.r3ok=(s.indexOf("R3:OK")>=0);
-  T.espok=(s.indexOf("ESP:OK")>=0);
-  T.s9ok=(s.indexOf("S9:OK")>=0);
-  int fi=s.indexOf("FW:");
-  if(fi>=0){int fe=s.indexOf('|',fi);T.fw=(fe>0)?s.substring(fi+3,fe):s.substring(fi+3);}
-}
-void parseSensStatus(const String& s){
-  SF.dht=s.indexOf("DHT:1")>=0; SF.gas=s.indexOf("GAS:1")>=0;
-  SF.flame=s.indexOf("FLAME:1")>=0; SF.pir=s.indexOf("PIR:1")>=0;
-  SF.tilt=s.indexOf("TILT:1")>=0; SF.ir=s.indexOf("IR:1")>=0;
-  SF.us=s.indexOf("US:1")>=0; SF.cur=s.indexOf("CUR:1")>=0;
-}
-void handleMegaLine(String& line){
-  line.trim();if(!line.length())return;
-  lastMegaRx=millis();megaLinked=true;
-  int crcIdx=line.indexOf("|CRC:");
-  if(crcIdx>0)line=line.substring(0,crcIdx);
-  if(!line.length())return;
-  if(line.startsWith("STAT:"))           parseStat(line);
-  else if(line.startsWith("US:"))        parseUS(line);
-  else if(line.startsWith("STATUS|")||line.startsWith("MEGA_READY|")||line.startsWith("SYSTEM|READY|")) parseStatus(line);
-  else if(line.startsWith("CONN_STATUS|"))  parseStatus(line);
-  else if(line.startsWith("SENS_ST|"))      parseSensStatus(line);
-  else if(line.startsWith("MODE:"))      T.mode=line.substring(5);
-  else if(line=="PING")                  MEGA_SERIAL.println("PONG");
-  else if(line.startsWith("BAT:WARN"))    raisAlert("Battery Low","Charge soon",C_AMBER);
-  else if(line.startsWith("BAT:LOW"))     raisAlert("Battery Critical","Plug in NOW",C_CORAL);
-  else if(line=="CHARGE:MANUAL:CONNECTED")    { scrDirty=true; }  // silent — avoid boot blackout
-  else if(line=="CHARGE:MANUAL:DISCONNECTED") { scrDirty=true; }  // silent
-  else if(line.startsWith("SAFETY:FLAME"))raisAlert("FLAME DETECTED","Check area",C_CORAL);
-  else if(line.startsWith("SAFETY:TILT"))raisAlert("Robot Tilted","Check robot",C_AMBER);
-  else if(line.startsWith("SAFETY:GAS")) raisAlert("Gas Detected","Ventilate now",C_AMBER);
-  else if(line.startsWith("SAFETY:OVER"))raisAlert("OVERHEATING","Battery too hot",C_CORAL);
-  if(line.startsWith("MEGA_READY|")||line.startsWith("SYSTEM|READY|"))
+// ════════════════════════════════════════════════════════════════════
+//  SERIAL HANDLER  (zero String allocation)
+// ════════════════════════════════════════════════════════════════════
+void handleMegaLine(const char* line) {
+  lastMegaRx = millis();
+  megaLinked = true;
+  if      (strncmp(line, "STAT:", 5)        == 0) parseStat(line);
+  else if (strncmp(line, "US:", 3)          == 0) parseUS(line);
+  else if (strncmp(line, "STATUS|", 7)      == 0) parseStatus(line);
+  else if (strncmp(line, "SYSTEM|READY|", 13) == 0) {
+    parseStatus(line);
     MEGA_SERIAL.println("SENSOR_STATUS");
+  }
+  else if (strcmp(line, "PING") == 0) MEGA_SERIAL.println("PONG");
 }
-void handleMegaSerial(){
-  while(MEGA_SERIAL.available()){
-    char c=MEGA_SERIAL.read();
-    if(c=='\n'){
-      megaBuf[megaBufLen]=0;
-      String line=String(megaBuf);
-      handleMegaLine(line);
-      megaBufLen=0;
-    } else if(c!='\r'){
-      if(megaBufLen<191) megaBuf[megaBufLen++]=c;
+
+void handleMegaSerial() {
+  while (MEGA_SERIAL.available()) {
+    char c = MEGA_SERIAL.read();
+    if (c == '\n') {
+      megaBuf[megaBufLen] = 0;
+      if (megaBufLen > 0) handleMegaLine(megaBuf);
+      megaBufLen = 0;
+    } else if (c != '\r') {
+      if (megaBufLen < sizeof(megaBuf) - 1) megaBuf[megaBufLen++] = c;
+      else megaBufLen = 0;  // overflow guard
     }
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+//  UI DRAWING  (simple, fast, no animations)
+// ════════════════════════════════════════════════════════════════════
+void drawCell(int x, int y, int w, int h, const char* label, const char* value, uint16_t valCol) {
+  tft.fillRect(x, y, w, h, C_SURF);
+  tft.drawRect(x, y, w, h, C_MGRAY);
+  tft.fillRect(x + 4, y, w - 8, 2, valCol);
+
+  // Label
+  tft.setTextColor(valCol, C_SURF);
+  tft.setTextSize(1);
+  tft.setCursor(x + 6, y + 6);
+  tft.print(label);
+
+  // Value
+  tft.setTextColor(C_WHITE, C_SURF);
+  tft.setTextSize(3);
+  int16_t tw = strlen(value) * 6 * 3;
+  tft.setCursor(x + (w - tw) / 2, y + h / 2 - 8);
+  tft.print(value);
+}
+
+void drawHeader() {
+  tft.fillRect(0, 0, SCR_W, 36, C_SURF);
+  tft.drawLine(0, 36, SCR_W, 36, C_CYAN);
+
+  tft.setTextColor(C_CYAN, C_SURF);
+  tft.setTextSize(2);
+  tft.setCursor(8, 10);
+  tft.print("BUDDYBOT");
+
+  tft.setTextSize(1);
+  tft.setTextColor(C_LGRAY, C_SURF);
+  tft.setCursor(120, 14);
+  tft.print("NEXUS HMI v5.0");
+
+  // Link status
+  tft.setTextColor(megaLinked ? C_MINT : C_CORAL, C_SURF);
+  tft.setCursor(SCR_W - 80, 14);
+  tft.print(megaLinked ? "LINKED" : "NO LINK");
+
+  // Battery %
+  char buf[12];
+  snprintf(buf, sizeof(buf), "%d%%", T.pct);
+  uint16_t pc = T.pct > 50 ? C_MINT : T.pct > 20 ? C_AMBER : C_CORAL;
+  tft.setTextColor(pc, C_SURF);
+  tft.setTextSize(2);
+  tft.setCursor(SCR_W - 60, 8);
+  tft.print(buf);
+}
+
+void drawFooter() {
+  int fy = SCR_H - 30;
+  tft.fillRect(0, fy, SCR_W, 30, C_SURF);
+  tft.drawLine(0, fy, SCR_W, fy, C_MGRAY);
+
+  tft.setTextSize(1);
+  // R3 / ESP / S9 status dots
+  const struct { const char* l; bool v; } st[] = {
+    {"R3",  T.r3ok}, {"ESP", T.espok}, {"S9", T.s9ok}, {"AUTO", T.autoM}
+  };
+  int x = 8;
+  for (int i = 0; i < 4; i++) {
+    uint16_t col = st[i].v ? C_MINT : C_MGRAY;
+    tft.fillCircle(x + 4, fy + 15, 4, col);
+    tft.setTextColor(col, C_SURF);
+    tft.setCursor(x + 14, fy + 12);
+    tft.print(st[i].l);
+    x += 70;
+  }
+
+  // FW version on right
+  if (T.fw[0]) {
+    tft.setTextColor(C_LGRAY, C_SURF);
+    int16_t tw = strlen(T.fw) * 6 + 24;
+    tft.setCursor(SCR_W - tw, fy + 12);
+    tft.print("FW:");
+    tft.print(T.fw);
+  }
+}
+
+void drawTelemetry() {
+  char buf[20];
+  int cw = (SCR_W - 18) / 3;  // 3 columns
+  int ch = 80;
+  int y1 = 50;
+  int y2 = y1 + ch + 6;
+
+  // Row 1
+  snprintf(buf, sizeof(buf), "%.1fC", T.temp);
+  drawCell(6, y1, cw, ch, "TEMP", buf,
+           T.temp > 38 ? C_CORAL : T.temp > 32 ? C_AMBER : C_CYAN);
+
+  snprintf(buf, sizeof(buf), "%.0f%%", T.hum);
+  drawCell(6 + cw + 6, y1, cw, ch, "HUMIDITY", buf, C_CYAN);
+
+  snprintf(buf, sizeof(buf), "%.2fV", T.volt);
+  drawCell(6 + (cw + 6) * 2, y1, cw, ch, "VOLTAGE", buf,
+           T.volt > 7.5f ? C_MINT : T.volt > 7.0f ? C_AMBER : C_CORAL);
+
+  // Row 2 — ultrasonics
+  snprintf(buf, sizeof(buf), "%ld", T.dFront);
+  drawCell(6, y2, cw, ch, "FRONT", buf, C_CYAN);
+
+  snprintf(buf, sizeof(buf), "%ld", T.dLeft);
+  drawCell(6 + cw + 6, y2, cw, ch, "LEFT", buf, C_CYAN);
+
+  snprintf(buf, sizeof(buf), "%ld", T.dRight);
+  drawCell(6 + (cw + 6) * 2, y2, cw, ch, "RIGHT", buf, C_CYAN);
+}
+
+void drawScreen() {
+  tft.fillScreen(C_BG);
+  drawHeader();
+  drawTelemetry();
+  drawFooter();
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  SETUP & LOOP
-// ══════════════════════════════════════════════════════════════════════
-void setup(){
+// ════════════════════════════════════════════════════════════════════
+void setup() {
   Serial.begin(115200);
-  while(!Serial && millis()<5000){}
-  Serial.println("PICO BOOT OK");
-  displayInit();
-  showStartupSplash();  // Reinsma + BuddyBot logo splash with orbital particles
+  delay(500);
+  Serial.println("PICO BOOT");
 
-  // Touch
-  pinMode(PIN_CTP_RST, OUTPUT);
-  digitalWrite(PIN_CTP_RST, LOW);  delay(20);
-  digitalWrite(PIN_CTP_RST, HIGH); delay(200);  // FT6336U needs 200ms after reset
-  // FIX #2: INPUT_PULLUP — FT6336U INT is open-drain; floats without pullup
-  // and the touch condition (!digitalRead) would never reliably trigger.
-  pinMode(PIN_CTP_INT, INPUT_PULLUP);
+  // TFT
+  tft.init();
+  tft.setRotation(1);          // landscape 480x320
+  tft.fillScreen(C_BG);
 
-  // FIX #3: Use Wire (I2C0) matching the DisplayTest — Wire1 default routing
-  // on RP2040 does not map to GP26/GP27 unless explicitly configured.
+  // Splash-free status line
+  tft.setTextColor(C_CYAN, C_BG);
+  tft.setTextSize(2);
+  tft.setCursor(8, 8);
+  tft.print("BuddyBot Dash v5.0");
+  tft.setTextSize(1);
+  tft.setTextColor(C_LGRAY, C_BG);
+  tft.setCursor(8, 40);
+  tft.print("Waiting for Mega telemetry...");
+
+  // Mega UART — TX=GP0, RX=GP1
+  Serial1.setTX(0);
+  Serial1.setRX(1);
+  MEGA_SERIAL.begin(115200);
+  delay(100);
+  MEGA_SERIAL.println("PONG");
+  MEGA_SERIAL.println("SENSOR_STATUS");
+
+  Serial.println("SETUP DONE");
+}
+
+void loop() {
+  handleMegaSerial();
+
+  // Drop link after 12s without data
+  if (megaLinked && millis() - lastMegaRx > 12000) {
+    megaLinked = false;
+    needsRedraw = true;
+  }
+
+  // Throttle redraws to ~5 Hz so the screen doesn't flicker
+  static unsigned long lastDraw = 0;
+  if (needsRedraw && millis() - lastDraw > 200) {
+    lastDraw = millis();
+    needsRedraw = false;
+    drawScreen();
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  UI PRIMITIVES  — neon glow aesthetic
+// ════════════════════════════════════════════════════════════════════
+// Simulate glow by drawing 2 concentric rect outlines (dim then bright)
+void neonBox(int x,int y,int w,int h,uint16_t col,uint16_t bg=C_SURF) {
+  uint16_t dimCol = (uint16_t)(((col>>11)>>1)<<11)
+                  | (uint16_t)((((col>>5)&0x3F)>>1)<<5)
+                  | (uint16_t)(((col&0x1F)>>1));
+  tft.fillRoundRect(x,y,w,h,6,bg);
+  tft.drawRoundRect(x+2,y+2,w-4,h-4,5,dimCol);
+  tft.drawRoundRect(x,y,w,h,6,col);
+}
+
+// Glow text: draw dimmed shadow then bright text
+void glowText(int x,int y,const char* txt,uint16_t col,uint8_t sz=1) {
+  uint16_t dim=(uint16_t)(((col>>11)>>2)<<11)
+              |(uint16_t)((((col>>5)&0x3F)>>2)<<5)
+              |(uint16_t)(((col&0x1F)>>2));
+  tft.setTextSize(sz);
+  tft.setTextColor(dim,C_BG);
+  tft.setCursor(x+1,y+1); tft.print(txt);
+  tft.setTextColor(col,C_BG);
+  tft.setCursor(x,y); tft.print(txt);
+}
+
+// Centred text helper
+void centreText(int cx,int y,const char* txt,uint16_t col,uint8_t sz,uint16_t bg=C_BG) {
+  tft.setTextSize(sz);
+  tft.setTextColor(col,bg);
+  int16_t tw=strlen(txt)*6*sz;
+  tft.setCursor(cx-tw/2,y); tft.print(txt);
+}
+
+// Neon button with icon emoji hint and label
+void neonBtn(int x,int y,int w,int h,const char* top,const char* bot,
+             uint16_t col, bool pressed=false) {
+  uint16_t bg = pressed ? col : C_SURF;
+  uint16_t tc = pressed ? C_BLACK : col;
+  neonBox(x,y,w,h,col,bg);
+  // Top text (icon/emoji represented as big text)
+  tft.setTextSize(3); tft.setTextColor(tc,bg);
+  int16_t tw=strlen(top)*18;
+  tft.setCursor(x+(w-tw)/2, y+h/2-28); tft.print(top);
+  // Bottom label
+  tft.setTextSize(2); tft.setTextColor(tc,bg);
+  tw=strlen(bot)*12;
+  tft.setCursor(x+(w-tw)/2, y+h/2+10); tft.print(bot);
+}
+
+// Small stat pill (coloured bar with label:value)
+void statPill(int x,int y,int w,const char* lbl,const char* val,uint16_t col) {
+  tft.fillRoundRect(x,y,w,22,4,C_SURF);
+  tft.drawRoundRect(x,y,w,22,4,col);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF);
+  tft.setCursor(x+4,y+4); tft.print(lbl);
+  tft.setTextColor(col,C_SURF);
+  int16_t tw=strlen(val)*6;
+  tft.setCursor(x+w-tw-4,y+8); tft.print(val);
+}
+
+// US distance bar (horizontal proportional to distance)
+void usBar(int x,int y,int w,long dist,const char* lbl) {
+  tft.fillRect(x,y,w,32,C_SURF);
+  tft.drawRect(x,y,w,32,C_BORDER);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF);
+  tft.setCursor(x+3,y+3); tft.print(lbl);
+  if(dist<0){
+    tft.setTextColor(C_DGRAY,C_SURF); tft.setCursor(x+3,y+16); tft.print("---");
+    return;
+  }
+  long capped=min(dist,200L);
+  int barW=(int)((capped*( w-6))/200);
+  uint16_t col = dist<20?C_RED : dist<50?C_ORANGE : dist<100?C_YELLOW : C_GREEN;
+  tft.fillRect(x+3,y+16,barW,10,col);
+  char buf[12]; snprintf(buf,12,"%ldcm",dist);
+  tft.setTextColor(C_WHITE,C_SURF); tft.setCursor(x+w-40,y+18); tft.print(buf);
+}
+
+// Back button (top-left corner)
+void drawBack(uint16_t col=C_CYAN) {
+  tft.fillRoundRect(4,4,60,28,4,C_SURF);
+  tft.drawRoundRect(4,4,60,28,4,col);
+  tft.setTextSize(2); tft.setTextColor(col,C_SURF);
+  tft.setCursor(10,9); tft.print("< ");
+  tft.setTextSize(1); tft.setCursor(28,12); tft.print("BACK");
+}
+
+// Horizontal neon divider
+void hRule(int y,uint16_t col=C_CYAN) {
+  uint16_t dim=(uint16_t)(((col>>11)>>2)<<11)
+              |(uint16_t)((((col>>5)&0x3F)>>2)<<5)
+              |(uint16_t)(((col&0x1F)>>2));
+  tft.drawFastHLine(8,y+1,SCR_W-16,dim);
+  tft.drawFastHLine(8,y,  SCR_W-16,col);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  HEADER  (shared across all non-game screens)
+// ════════════════════════════════════════════════════════════════════
+void drawHeader() {
+  // Title bar
+  tft.fillRect(0,0,SCR_W,52,C_SURF);
+  hRule(51,C_CYAN);
+
+  // Title — animated cyan glow
+  tft.setTextSize(2); tft.setTextColor(C_CYAN,C_SURF);
+  centreText(SCR_W/2,6,"AJ2BUDDYCOMMS",C_CYAN,2,C_SURF);
+
+  // Vitals row
+  char buf[24];
+  // Link status
+  uint16_t lkCol = megaLinked ? C_GREEN : C_RED;
+  tft.fillCircle(10,42,4,lkCol);
+  tft.setTextSize(1); tft.setTextColor(lkCol,C_SURF);
+  tft.setCursor(17,38); tft.print(megaLinked?"LIVE":"WAIT");
+
+  // Battery
+  snprintf(buf,sizeof(buf),"%d%%",T.pct);
+  uint16_t batCol = T.pct>50?C_GREEN:T.pct>20?C_ORANGE:C_RED;
+  tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(55,38); tft.print("BAT");
+  tft.setTextColor(batCol,C_SURF);  tft.setCursor(76,38); tft.print(buf);
+
+  // Voltage
+  snprintf(buf,sizeof(buf),"%.1fV",T.volt);
+  tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(110,38); tft.print("V");
+  tft.setTextColor(C_CYAN,C_SURF);  tft.setCursor(120,38); tft.print(buf);
+
+  // Mode
+  tft.setTextColor(C_PURPLE,C_SURF);
+  int16_t tw=strlen(T.mode)*6;
+  tft.setCursor(SCR_W-tw-4,38); tft.print(T.mode);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  MAIN SCREEN  — 2x2 hub buttons
+// ════════════════════════════════════════════════════════════════════
+void drawMain() {
+  tft.fillScreen(C_BG);
+  drawHeader();
+
+  // 2x2 buttons — each 148x148 with 8px padding
+  //  (8) [GAMES 148x148] (8) [SENSORS 148x148] (8)
+  //       y=60                                       y = 60+148+8 = 216
+  const int BW=148, BH=148, PAD=8;
+  const int ROW1=60, ROW2=ROW1+BH+PAD;
+
+  neonBtn(PAD,         ROW1, BW, BH, ">",  "GAMES",   C_GREEN);
+  neonBtn(PAD+BW+PAD,  ROW1, BW, BH, "o",  "SENSORS", C_CYAN);
+  neonBtn(PAD,         ROW2, BW, BH, "~",  "COMMS",   C_PURPLE);
+  neonBtn(PAD+BW+PAD,  ROW2, BW, BH, "*",  "SETTINGS",C_ORANGE);
+
+  // Bottom sensor strip
+  int sy=ROW2+BH+PAD;
+  tft.fillRect(0,sy,SCR_W,SCR_H-sy,C_SURF);
+  hRule(sy,C_CYAN);
+
+  char buf[16];
+  snprintf(buf,16,"F:%ldcm",T.dFront<0?0:T.dFront);
+  tft.setTextSize(1); tft.setTextColor(T.dFront<30?C_RED:C_CYAN,C_SURF);
+  tft.setCursor(6,sy+8); tft.print(buf);
+
+  snprintf(buf,16,"R:%ldcm",T.dRear<0?0:T.dRear);
+  tft.setTextColor(T.dRear<30?C_RED:C_CYAN,C_SURF);
+  tft.setCursor(86,sy+8); tft.print(buf);
+
+  snprintf(buf,16,"L:%ldcm",T.dLeft<0?0:T.dLeft);
+  tft.setTextColor(T.dLeft<30?C_RED:C_CYAN,C_SURF);
+  tft.setCursor(166,sy+8); tft.print(buf);
+
+  snprintf(buf,16,"Bk:%ldcm",T.dRear<0?0:T.dRear);
+  tft.setTextColor(C_LGRAY,C_SURF);
+  tft.setCursor(246,sy+8); tft.print(buf);
+}
+
+void handleMainTouch(Touch& t) {
+  const int BW=148,BH=148,PAD=8,ROW1=60,ROW2=ROW1+BH+PAD;
+  if(t.x>=PAD && t.x<PAD+BW) {
+    if(t.y>=ROW1 && t.y<ROW1+BH) { curScreen=SCR_GAMES;   screenDirty=true; }
+    if(t.y>=ROW2 && t.y<ROW2+BH) { curScreen=SCR_COMMS;   screenDirty=true; }
+  }
+  if(t.x>=PAD+BW+PAD && t.x<PAD+BW+PAD+BW) {
+    if(t.y>=ROW1 && t.y<ROW1+BH) { curScreen=SCR_SENSORS; screenDirty=true; }
+    if(t.y>=ROW2 && t.y<ROW2+BH) { curScreen=SCR_SETTINGS;screenDirty=true; }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  GAMES MENU
+// ════════════════════════════════════════════════════════════════════
+void drawGames() {
+  tft.fillScreen(C_BG);
+  drawHeader();
+  drawBack(C_GREEN);
+  glowText(SCR_W/2-48,55,"GAMES MENU",C_GREEN,2);
+  hRule(72,C_GREEN);
+
+  const char* names[]={"SUPER MARIO","PACMAN","STARSHIP","MEMORY","COLOR MATCH","MATH"};
+  uint16_t    cols[] ={C_RED,C_YELLOW,C_CYAN,C_PURPLE,C_ORANGE,C_GREEN};
+  for(int i=0;i<6;i++){
+    int bx=8, by=80+i*62;
+    neonBox(bx,by,SCR_W-16,54,cols[i],C_SURF);
+    tft.setTextSize(2); tft.setTextColor(cols[i],C_SURF);
+    int16_t tw=strlen(names[i])*12;
+    tft.setCursor(bx+(SCR_W-16-tw)/2, by+16); tft.print(names[i]);
+  }
+}
+
+void handleGamesTouch(Touch& t) {
+  if(t.y<40){ curScreen=SCR_MAIN; screenDirty=true; return; }
+  Screen games[]={GAME_MARIO,GAME_PACMAN,GAME_STARSHIP,GAME_MEMORY,GAME_COLORMATCH,GAME_MATH};
+  for(int i=0;i<6;i++){
+    int by=80+i*62;
+    if(t.y>=by && t.y<by+54 && t.x>=8 && t.x<SCR_W-8){
+      prevScreen=SCR_GAMES; curScreen=games[i]; screenDirty=true; return;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SENSORS MENU  (4 submenus)
+// ════════════════════════════════════════════════════════════════════
+void drawSensors() {
+  tft.fillScreen(C_BG);
+  drawHeader();
+  drawBack(C_CYAN);
+  glowText(SCR_W/2-56,55,"SENSOR MENU",C_CYAN,2);
+  hRule(72,C_CYAN);
+
+  const char* labels[]={"EYES","NOSE","BRAIN","TUMMY"};
+  const char* subs[]  ={"US+IR+Camera","Gas Sensors","All Telemetry","Power Data"};
+  uint16_t    cols[]  ={C_CYAN,C_GREEN,C_PURPLE,C_ORANGE};
+
+  for(int i=0;i<4;i++){
+    int by=80+i*96;
+    neonBox(8,by,SCR_W-16,86,cols[i],C_SURF);
+    tft.setTextSize(3); tft.setTextColor(cols[i],C_SURF);
+    int16_t tw=strlen(labels[i])*18;
+    tft.setCursor(8+(SCR_W-16-tw)/2,by+10); tft.print(labels[i]);
+    tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF);
+    tw=strlen(subs[i])*6;
+    tft.setCursor(8+(SCR_W-16-tw)/2,by+50); tft.print(subs[i]);
+  }
+}
+
+void handleSensorsTouch(Touch& t) {
+  if(t.y<40){ curScreen=SCR_MAIN; screenDirty=true; return; }
+  Screen subs[]={SCR_SENS_EYES,SCR_SENS_NOSE,SCR_SENS_BRAIN,SCR_SENS_TUMMY};
+  for(int i=0;i<4;i++){
+    int by=80+i*96;
+    if(t.y>=by && t.y<by+86 && t.x>=8 && t.x<SCR_W-8){
+      curScreen=subs[i]; screenDirty=true; return;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SENSOR — EYES  (US distances + IR sensors visual layout)
+// ════════════════════════════════════════════════════════════════════
+void drawSensEyes() {
+  tft.fillScreen(C_BG);
+  drawHeader();
+  drawBack(C_CYAN);
+  glowText(SCR_W/2-24,55,"EYES",C_CYAN,2);
+  hRule(72,C_CYAN);
+
+  // Robot outline in center
+  int rx=SCR_W/2, ry=230;
+  tft.drawRoundRect(rx-30,ry-40,60,80,8,C_LGRAY);  // body
+  tft.drawRect(rx-20,ry-60,40,22,C_LGRAY);           // head
+  // eyes
+  tft.fillCircle(rx-8,ry-50,4,C_CYAN);
+  tft.fillCircle(rx+8,ry-50,4,C_CYAN);
+
+  // US sensor readouts — radial around robot
+  char buf[16];
+  uint16_t fc=T.dFront<0?C_DGRAY:T.dFront<30?C_RED:T.dFront<80?C_ORANGE:C_GREEN;
+  uint16_t rc=T.dRear <0?C_DGRAY:T.dRear <30?C_RED:T.dRear <80?C_ORANGE:C_GREEN;
+  uint16_t lc=T.dLeft <0?C_DGRAY:T.dLeft <30?C_RED:T.dLeft <80?C_ORANGE:C_GREEN;
+  uint16_t rrc=T.dRight<0?C_DGRAY:T.dRight<30?C_RED:T.dRight<80?C_ORANGE:C_GREEN;
+
+  // FRONT (top)
+  snprintf(buf,16,T.dFront<0?"--":"%ldcm",T.dFront);
+  neonBox(rx-35,80,70,36,fc,C_SURF);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(rx-32,83); tft.print("FRONT");
+  tft.setTextSize(2); tft.setTextColor(fc,C_SURF);
+  tft.setCursor(rx-strlen(buf)*6,95); tft.print(buf);
+  tft.drawFastVLine(rx,117,50,fc);
+
+  // REAR (bottom)
+  snprintf(buf,16,T.dRear<0?"--":"%ldcm",T.dRear);
+  neonBox(rx-35,334,70,36,rc,C_SURF);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(rx-30,337); tft.print("REAR");
+  tft.setTextSize(2); tft.setTextColor(rc,C_SURF);
+  tft.setCursor(rx-strlen(buf)*6,349); tft.print(buf);
+  tft.drawFastVLine(rx,310,24,rc);
+
+  // LEFT
+  snprintf(buf,16,T.dLeft<0?"--":"%ldcm",T.dLeft);
+  neonBox(8,ry-18,74,36,lc,C_SURF);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(12,ry-15); tft.print("LEFT");
+  tft.setTextSize(2); tft.setTextColor(lc,C_SURF); tft.setCursor(12,ry-3); tft.print(buf);
+  tft.drawFastHLine(82,ry,rx-112,lc);
+
+  // RIGHT
+  snprintf(buf,16,T.dRight<0?"--":"%ldcm",T.dRight);
+  neonBox(SCR_W-82,ry-18,74,36,rrc,C_SURF);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(SCR_W-78,ry-15); tft.print("RIGHT");
+  tft.setTextSize(2); tft.setTextColor(rrc,C_SURF); tft.setCursor(SCR_W-78,ry-3); tft.print(buf);
+  tft.drawFastHLine(rx+31,ry,SCR_W-82-rx-31,rrc);
+
+  // IR sensors
+  hRule(380,C_CYAN);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(8,388); tft.print("IR SENSORS");
+  uint16_t ilCol=T.irL?C_RED:C_DGRAY;
+  uint16_t irCol=T.irR?C_RED:C_DGRAY;
+  tft.fillRoundRect(8,400,148,36,6,C_SURF);
+  tft.drawRoundRect(8,400,148,36,6,ilCol);
+  tft.setTextColor(ilCol,C_SURF); tft.setTextSize(2); tft.setCursor(16,412);
+  tft.print(T.irL?"IR-L DETECT":"IR-L clear ");
+  tft.fillRoundRect(164,400,148,36,6,C_SURF);
+  tft.drawRoundRect(164,400,148,36,6,irCol);
+  tft.setTextColor(irCol,C_SURF); tft.setCursor(172,412);
+  tft.print(T.irR?"IR-R DETECT":"IR-R clear ");
+
+  // Camera placeholder
+  hRule(440,C_PURPLE);
+  tft.setTextSize(1); tft.setTextColor(C_PURPLE,C_SURF); tft.setCursor(8,448); tft.print("CAMERA: S9 USB feed via Android app");
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SENSOR — NOSE  (gas)
+// ════════════════════════════════════════════════════════════════════
+void drawSensNose() {
+  tft.fillScreen(C_BG);
+  drawHeader();
+  drawBack(C_GREEN);
+  glowText(SCR_W/2-24,55,"NOSE",C_GREEN,2);
+  hRule(72,C_GREEN);
+
+  int gasVal=T.gas;
+  uint16_t gc= gasVal>700?C_RED:gasVal>400?C_ORANGE:gasVal>200?C_YELLOW:C_GREEN;
+
+  // Big gas reading
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(SCR_W/2-30,90); tft.print("GAS LEVEL");
+  char buf[12]; snprintf(buf,12,"%d",gasVal);
+  tft.setTextSize(6); tft.setTextColor(gc,C_BG);
+  int16_t tw=strlen(buf)*36;
+  tft.setCursor(SCR_W/2-tw/2,110); tft.print(buf);
+  tft.setTextSize(2); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(SCR_W/2-12,172); tft.print("ppm");
+
+  // Status label
+  const char* status = gasVal>700?"DANGER!":gasVal>400?"WARNING":gasVal>200?"ELEVATED":"CLEAR";
+  neonBox(SCR_W/2-60,200,120,40,gc,C_SURF);
+  tft.setTextSize(2); tft.setTextColor(gc,C_SURF);
+  int16_t sl=strlen(status)*12;
+  tft.setCursor(SCR_W/2-sl/2,212); tft.print(status);
+
+  // Horizontal gauge bar
+  hRule(258,gc);
+  int bw=SCR_W-20; int filled=(int)((min(gasVal,1023)*bw)/1023);
+  tft.fillRect(10,265,bw,24,C_SURF);
+  tft.fillRect(10,265,filled,24,gc);
+  tft.drawRect(10,265,bw,24,C_BORDER);
+
+  // Thresholds
+  tft.setTextSize(1);
+  tft.setTextColor(C_GREEN,C_BG);  tft.setCursor(10,296);  tft.print("SAFE<200");
+  tft.setTextColor(C_YELLOW,C_BG); tft.setCursor(90,296);  tft.print("ELEV<400");
+  tft.setTextColor(C_ORANGE,C_BG); tft.setCursor(178,296); tft.print("WARN<700");
+  tft.setTextColor(C_RED,C_BG);    tft.setCursor(258,296); tft.print("DANGER");
+
+  // Flame + PIR
+  hRule(310,C_ORANGE);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(8,318); tft.print("ENVIRONMENT");
+  uint16_t flCol=T.flame?C_RED:C_DGRAY;
+  tft.fillRoundRect(8,328,148,44,6,C_SURF);
+  tft.drawRoundRect(8,328,148,44,6,flCol);
+  tft.setTextSize(2); tft.setTextColor(flCol,C_SURF);
+  tft.setCursor(14,338); tft.print(T.flame?"FLAME!":"No Flame");
+  uint16_t pirCol=T.pir?C_CYAN:C_DGRAY;
+  tft.fillRoundRect(164,328,148,44,6,C_SURF);
+  tft.drawRoundRect(164,328,148,44,6,pirCol);
+  tft.setTextColor(pirCol,C_SURF);
+  tft.setCursor(170,338); tft.print(T.pir?"MOTION!":"No Motion");
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SENSOR — BRAIN  (all telemetry with toggles)
+// ════════════════════════════════════════════════════════════════════
+void drawSensBrain() {
+  tft.fillScreen(C_BG);
+  drawHeader();
+  drawBack(C_PURPLE);
+  glowText(SCR_W/2-30,55,"BRAIN",C_PURPLE,2);
+  hRule(72,C_PURPLE);
+
+  char buf[32]; int y=80;
+  // TEMP
+  if(brainToggle[0]) {
+    snprintf(buf,32,"TEMP   %.1f C  HUM %.0f%%",T.temp,T.hum);
+    uint16_t c=T.temp>38?C_RED:T.temp>32?C_ORANGE:C_CYAN;
+    statPill(8,y,SCR_W-16,buf,"",c); y+=28;
+  }
+  // GAS
+  if(brainToggle[1]) {
+    snprintf(buf,32,"GAS    %d ppm",T.gas);
+    uint16_t c=T.gas>700?C_RED:T.gas>400?C_ORANGE:C_GREEN;
+    statPill(8,y,SCR_W-16,buf,"",c); y+=28;
+  }
+  // VOLTAGE
+  if(brainToggle[2]) {
+    snprintf(buf,32,"VOLT   %.2fV   %.2fA   %d%%",T.volt,T.amps,T.pct);
+    uint16_t c=T.volt>7.5?C_GREEN:T.volt>7.0?C_ORANGE:C_RED;
+    statPill(8,y,SCR_W-16,buf,"",c); y+=28;
+  }
+  // ULTRASONICS
+  if(brainToggle[3]) {
+    snprintf(buf,32,"US  F%ld R%ld L%ld Rg%ld",
+      T.dFront<0?-1:T.dFront, T.dRear<0?-1:T.dRear,
+      T.dLeft<0?-1:T.dLeft,   T.dRight<0?-1:T.dRight);
+    statPill(8,y,SCR_W-16,buf,"",C_CYAN); y+=28;
+  }
+  // STATUS
+  if(brainToggle[4]) {
+    uint16_t sc=T.estop?C_RED:C_GREEN;
+    snprintf(buf,32,"R3:%s ESP:%s S9:%s AUTO:%s",
+      T.r3ok?"Y":"N", T.espok?"Y":"N", T.s9ok?"Y":"N", T.autoM?"ON":"OFF");
+    statPill(8,y,SCR_W-16,buf,"",sc); y+=28;
+  }
+  // MODE
+  if(brainToggle[5]) {
+    snprintf(buf,32,"MODE   %s   FW:%s",T.mode,T.fw);
+    statPill(8,y,SCR_W-16,buf,"",C_PURPLE); y+=28;
+  }
+
+  // Toggle buttons
+  hRule(y+4,C_PURPLE); y+=12;
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG);
+  tft.setCursor(8,y); tft.print("FEED TOGGLES:"); y+=12;
+  for(int i=0;i<6;i++) {
+    int bx=8+(i%3)*(SCR_W/3), by=y+(i/3)*28;
+    uint16_t tc=brainToggle[i]?C_PURPLE:C_DGRAY;
+    tft.fillRoundRect(bx,by,(SCR_W/3)-4,22,4,C_SURF);
+    tft.drawRoundRect(bx,by,(SCR_W/3)-4,22,4,tc);
+    tft.setTextColor(tc,C_SURF); tft.setTextSize(1);
+    tft.setCursor(bx+3,by+7); tft.print(brainLabels[i]);
+  }
+}
+
+void handleBrainTouch(Touch& t) {
+  if(t.y<40){ curScreen=SCR_SENSORS; screenDirty=true; return; }
+  // Check toggles
+  int firstToggleY=0;
+  int y=80; int used=0;
+  for(int i=0;i<6;i++) if(brainToggle[i]) used++;
+  firstToggleY = 80 + used*28 + 24;
+  for(int i=0;i<6;i++){
+    int bx=8+(i%3)*(SCR_W/3), by=firstToggleY+(i/3)*28;
+    if(t.x>=bx && t.x<bx+(SCR_W/3)-4 && t.y>=by && t.y<by+22){
+      brainToggle[i]=!brainToggle[i]; screenDirty=true; return;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SENSOR — TUMMY  (power data)
+// ════════════════════════════════════════════════════════════════════
+void drawSensTummy() {
+  tft.fillScreen(C_BG);
+  drawHeader();
+  drawBack(C_ORANGE);
+  glowText(SCR_W/2-30,55,"TUMMY",C_ORANGE,2);
+  hRule(72,C_ORANGE);
+
+  char buf[20];
+  uint16_t vc=T.volt>7.5?C_GREEN:T.volt>7.0?C_ORANGE:C_RED;
+  uint16_t ac=T.amps>3.0?C_RED:T.amps>2.0?C_ORANGE:C_GREEN;
+  uint16_t pc=T.pct>50?C_GREEN:T.pct>20?C_ORANGE:C_RED;
+
+  // Big voltage
+  snprintf(buf,20,"%.2f V",T.volt);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(SCR_W/2-24,88); tft.print("VOLTAGE");
+  tft.setTextSize(5); tft.setTextColor(vc,C_BG);
+  int16_t tw=strlen(buf)*30; tft.setCursor(SCR_W/2-tw/2,102); tft.print(buf);
+
+  // Big current
+  snprintf(buf,20,"%.2f A",T.amps);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(SCR_W/2-22,174); tft.print("CURRENT");
+  tft.setTextSize(5); tft.setTextColor(ac,C_BG);
+  tw=strlen(buf)*30; tft.setCursor(SCR_W/2-tw/2,188); tft.print(buf);
+
+  // Battery % with big bar
+  snprintf(buf,20,"%d%%",T.pct);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(SCR_W/2-24,260); tft.print("BATTERY");
+  tft.setTextSize(5); tft.setTextColor(pc,C_BG);
+  tw=strlen(buf)*30; tft.setCursor(SCR_W/2-tw/2,274); tft.print(buf);
+
+  // Percentage bar
+  int bw=SCR_W-40;
+  tft.fillRect(20,330,bw,28,C_SURF);
+  int filled=(int)(T.pct*bw/100);
+  for(int x=0;x<filled;x+=4) {
+    uint16_t col=x<filled/3?C_RED:x<2*filled/3?C_ORANGE:C_GREEN;
+    tft.fillRect(20+x,330,3,28,col);
+  }
+  tft.drawRect(20,330,bw,28,C_BORDER);
+
+  // Power = V*A
+  float watts=T.volt*T.amps;
+  snprintf(buf,20,"%.1f W",watts);
+  hRule(374,C_ORANGE);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(8,382); tft.print("POWER DRAW:");
+  tft.setTextSize(3); tft.setTextColor(C_ORANGE,C_BG);
+  tw=strlen(buf)*18; tft.setCursor(SCR_W-tw-8,378); tft.print(buf);
+
+  // Est runtime
+  float mAh=2000.0f; // assume 2Ah pack
+  float runtimeH = (T.amps>0.1) ? (mAh/1000.0f)*(T.pct/100.0f)/T.amps : 0;
+  int rMin=(int)(runtimeH*60);
+  snprintf(buf,20,"%dm left",rMin);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(8,420); tft.print("EST RUNTIME:");
+  tft.setTextSize(2); tft.setTextColor(pc,C_BG);
+  tw=strlen(buf)*12; tft.setCursor(SCR_W-tw-8,416); tft.print(buf);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  COMMS SCREEN
+// ════════════════════════════════════════════════════════════════════
+void drawComms() {
+  tft.fillScreen(C_BG);
+  drawHeader();
+  drawBack(C_PURPLE);
+  glowText(SCR_W/2-30,55,"COMMS",C_PURPLE,2);
+  hRule(72,C_PURPLE);
+
+  char buf[40]; int y=84;
+  const char* labels[]={"MEGA LINK","R3 MOTOR","ESP32 WIFI","S9 ANDROID"};
+  bool* states[]={&megaLinked,&T.r3ok,&T.espok,&T.s9ok};
+  uint16_t cols[]={C_CYAN,C_GREEN,C_ORANGE,C_PURPLE};
+
+  for(int i=0;i<4;i++){
+    bool ok=*(states[i]);
+    uint16_t c=ok?cols[i]:C_DGRAY;
+    neonBox(8,y,SCR_W-16,76,c,C_SURF);
+    tft.fillCircle(24,y+22,8,ok?c:C_DGRAY);
+    tft.setTextSize(2); tft.setTextColor(c,C_SURF);
+    tft.setCursor(40,y+14); tft.print(labels[i]);
+    tft.setTextSize(1); tft.setTextColor(ok?C_WHITE:C_DGRAY,C_SURF);
+    tft.setCursor(40,y+38); tft.print(ok?"CONNECTED - ONLINE":"NOT DETECTED");
+    y+=84;
+  }
+
+  // Mega RX timer
+  hRule(y+4,C_PURPLE);
+  unsigned long since=(millis()-lastMegaRx)/1000;
+  snprintf(buf,40,"Last Mega RX: %lus ago",since);
+  tft.setTextSize(1); tft.setTextColor(since>10?C_RED:C_GREEN,C_BG);
+  tft.setCursor(8,y+12); tft.print(buf);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SETTINGS SCREEN
+// ════════════════════════════════════════════════════════════════════
+void drawSettings() {
+  tft.fillScreen(C_BG);
+  drawHeader();
+  drawBack(C_ORANGE);
+  glowText(SCR_W/2-36,55,"SETTINGS",C_ORANGE,2);
+  hRule(72,C_ORANGE);
+
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG);
+  tft.setCursor(8,84); tft.print("BuddyBot Pico2 Dash v6.0");
+  tft.setCursor(8,98); tft.print("Mega UART: GP0/GP1 @ 115200");
+  tft.setCursor(8,112); tft.print("Touch: FT6336U I2C @ 400kHz");
+  tft.setCursor(8,126); tft.print("Display: ST7796S SPI 320x480");
+
+  // Send test commands to Mega
+  const char* cmds[]={"PING MEGA","REQ STATUS","REQ SENSOR","ESTOP"};
+  uint16_t cc[]={C_CYAN,C_GREEN,C_ORANGE,C_RED};
+  for(int i=0;i<4;i++){
+    neonBox(8,150+i*72,SCR_W-16,60,cc[i],C_SURF);
+    tft.setTextSize(2); tft.setTextColor(cc[i],C_SURF);
+    int16_t tw=strlen(cmds[i])*12;
+    tft.setCursor(8+(SCR_W-16-tw)/2,168+i*72); tft.print(cmds[i]);
+  }
+}
+
+void handleSettingsTouch(Touch& t) {
+  if(t.y<40){ curScreen=SCR_MAIN; screenDirty=true; return; }
+  const char* megaCmds[]={"PING","STATUS","SENSOR_STATUS","ESTOP"};
+  for(int i=0;i<4;i++){
+    if(t.y>=150+i*72 && t.y<210+i*72 && t.x>=8 && t.x<SCR_W-8){
+      MEGA_SERIAL.println(megaCmds[i]);
+      // Flash feedback
+      neonBox(8,150+i*72,SCR_W-16,60,C_WHITE,C_WHITE);
+      delay(80);
+      screenDirty=true;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  GAME: SUPER MARIO BROS
+// ════════════════════════════════════════════════════════════════════
+#define MARIO_GRAV  0.5f
+#define MARIO_JUMP -9.0f
+#define MARIO_SPD   3.0f
+#define GROUND_Y   420
+#define NUM_PLAT    5
+#define NUM_COIN    6
+#define NUM_ENEMY   3
+
+struct Platform { int x,y,w; };
+struct Coin     { int x,y; bool alive; };
+struct Enemy    { float x,y,vx; bool alive; };
+
+struct MarioGame {
+  float  px=60,py=GROUND_Y-24,pvx=0,pvy=0;
+  bool   onGround=false, jumping=false;
+  int    score=0, lives=3;
+  float  camX=0;
+  bool   running=false, gameOver=false;
+  unsigned long lastFrame=0;
+  Platform plats[NUM_PLAT]={{0,GROUND_Y,3200},{200,300,120},{400,240,100},{650,280,140},{900,200,160}};
+  Coin     coins[NUM_COIN]={{220,268,true},{260,268,true},{420,208,true},{670,248,true},{920,168,true},{1000,168,true}};
+  Enemy    enemies[NUM_ENEMY]={{400,GROUND_Y-16,1.0f,true},{700,GROUND_Y-16,-1.0f,true},{960,220-16,1.0f,true}};
+} M;
+
+void marioReset() {
+  M.px=60; M.py=GROUND_Y-24; M.pvx=0; M.pvy=0;
+  M.onGround=false; M.score=0; M.lives=3; M.camX=0; M.gameOver=false;
+  for(auto& c:M.coins) c.alive=true;
+  for(auto& e:M.enemies){ e.alive=true; }
+  M.enemies[0].x=400; M.enemies[1].x=700; M.enemies[2].x=960;
+}
+
+void drawMario(int sx,int sy,bool flip) {
+  // Hat
+  tft.fillRect(sx+2,sy,12,4,C_MRED);
+  // Face
+  tft.fillRect(sx,sy+4,16,5,C_MSKIN);
+  // Eyes
+  tft.fillRect(sx+(flip?3:9),sy+5,3,3,C_BLACK);
+  // Body
+  tft.fillRect(sx+2,sy+9,12,7,C_MRED);
+  // Overalls
+  tft.fillRect(sx,sy+9,4,5,C_MBLUE);
+  tft.fillRect(sx+12,sy+9,4,5,C_MBLUE);
+  tft.fillRect(sx+2,sy+14,12,5,C_MBLUE);
+  // Feet (alternate for walk animation)
+  int wa=(millis()/120)%2;
+  tft.fillRect(sx+(wa?0:6),sy+19,6,4,C_MBROWN);
+  tft.fillRect(sx+(wa?10:4),sy+19,6,4,C_MBROWN);
+}
+
+void drawMarioGame() {
+  tft.fillScreen(C_MSKY);
+  if(M.gameOver) {
+    glowText(SCR_W/2-48,200,"GAME OVER",C_RED,3);
+    char buf[20]; snprintf(buf,20,"Score: %d",M.score);
+    centreText(SCR_W/2,260,buf,C_WHITE,2,C_MSKY);
+    centreText(SCR_W/2,300,"Tap to restart",C_YELLOW,2,C_MSKY);
+    return;
+  }
+
+  int camX=(int)M.camX;
+  // Ground platform
+  tft.fillRect(0,GROUND_Y,SCR_W,SCR_H-GROUND_Y,C_MGRND);
+  tft.fillRect(0,GROUND_Y,SCR_W,8,0x0300);  // dark top edge of ground
+
+  // Platforms
+  for(auto& p:M.plats){
+    int sx=p.x-camX, sw=p.w;
+    if(sx+sw<0||sx>SCR_W) continue;
+    tft.fillRect(sx,p.y,sw,14,C_MPIPE);
+    tft.fillRect(sx,p.y,sw,4,0x0700);
+  }
+  // Coins
+  for(auto& c:M.coins){
+    if(!c.alive) continue;
+    int sx=c.x-camX;
+    if(sx<0||sx>SCR_W) continue;
+    tft.fillCircle(sx,c.y,6,C_MYELL);
+    tft.fillCircle(sx,c.y,3,C_ORANGE);
+  }
+  // Enemies (Goombas)
+  for(auto& e:M.enemies){
+    if(!e.alive) continue;
+    int sx=(int)e.x-camX;
+    if(sx<-20||sx>SCR_W+20) continue;
+    tft.fillRect(sx,  (int)e.y,16,6,C_MBROWN);
+    tft.fillRect(sx+2,(int)e.y+6,12,8,C_MBROWN);
+    tft.fillRect(sx+1,(int)e.y+2,4,4,C_BLACK);
+    tft.fillRect(sx+11,(int)e.y+2,4,4,C_BLACK);
+  }
+  // Mario
+  int msx=(int)(M.px-camX);
+  drawMario(msx,(int)M.py, M.pvx<0);
+
+  // HUD
+  tft.fillRect(0,0,SCR_W,24,0x0000A0>>1);
+  tft.setTextSize(1); tft.setTextColor(C_WHITE,C_BLACK);
+  char buf[32]; snprintf(buf,32,"SCORE:%05d  LIVES:%d",M.score,M.lives);
+  tft.setCursor(4,8); tft.print(buf);
+  tft.setCursor(SCR_W-72,8); tft.print("[TAP=JUMP]");
+}
+
+void updateMario() {
+  unsigned long now=millis();
+  if(now-M.lastFrame<33) return; // ~30fps
+  M.lastFrame=now;
+
+  Touch t; bool tpressed=false;
+  if(touchReady()){ t=readTouch(); tpressed=t.pressed; if(tpressed) lastTouchMs=millis(); }
+
+  // Controls
+  if(tpressed) {
+    if(t.y>24) {  // not HUD area
+      if(t.x<SCR_W/3) M.pvx=-MARIO_SPD;
+      else if(t.x>2*SCR_W/3) M.pvx=MARIO_SPD;
+      else if(M.onGround) { M.pvy=MARIO_JUMP; M.onGround=false; }
+    }
+  } else {
+    M.pvx*=0.8f; // friction
+  }
+
+  // Gravity
+  M.pvy+=MARIO_GRAV;
+  M.py+=M.pvy; M.px+=M.pvx;
+  if(M.px<0) M.px=0;
+
+  // Platform collision
+  M.onGround=false;
+  for(auto& p:M.plats){
+    if(M.px+14>p.x && M.px<p.x+p.w && M.py+24>=p.y && M.py+24<=p.y+16 && M.pvy>=0){
+      M.py=p.y-24; M.pvy=0; M.onGround=true;
+    }
+  }
+
+  // Coin collection
+  for(auto& c:M.coins){
+    if(!c.alive) continue;
+    if(abs((int)M.px+8-c.x)<12 && abs((int)M.py+12-c.y)<12){ c.alive=false; M.score+=100; }
+  }
+
+  // Enemy update & collision
+  for(auto& e:M.enemies){
+    if(!e.alive) continue;
+    e.x+=e.vx;
+    // Bounce at platform edges (simplified)
+    if(e.x<0||e.x>1200) e.vx*=-1;
+    // Stomp
+    if(abs((int)M.px+8-(int)e.x+8)<14 && abs((int)M.py+24-(int)e.y)<14){
+      if(M.pvy>0){ e.alive=false; M.score+=200; M.pvy=-6; }
+      else { M.lives--; M.px=60; M.py=GROUND_Y-24; M.pvy=0; M.camX=0; if(M.lives<=0) M.gameOver=true; }
+    }
+  }
+
+  // Camera follows Mario
+  M.camX=M.px-SCR_W/3;
+  if(M.camX<0) M.camX=0;
+
+  // Fall off world
+  if(M.py>SCR_H+40){ M.lives--; M.px=60; M.py=GROUND_Y-24; M.pvy=0; M.camX=0; if(M.lives<=0) M.gameOver=true; }
+
+  drawMarioGame();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  GAME: PACMAN
+// ════════════════════════════════════════════════════════════════════
+#define PM_COLS  16
+#define PM_ROWS  20
+#define PM_CELL  14   // 16*14=224, 20*14=280 (fits in 320x480 portrait)
+#define PM_OX    ((SCR_W-PM_COLS*PM_CELL)/2)
+#define PM_OY    50
+
+// 1=wall 0=dot 2=empty 3=power
+const uint8_t pmMaze[PM_ROWS][PM_COLS] PROGMEM = {
+  {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+  {1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1},
+  {1,3,1,1,0,1,0,1,1,0,1,0,1,1,3,1},
+  {1,0,1,1,0,1,0,0,0,0,1,0,1,1,0,1},
+  {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+  {1,0,1,1,0,1,1,1,1,1,1,0,1,1,0,1},
+  {1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1},
+  {1,1,1,1,0,1,0,0,0,0,1,0,1,1,1,1},
+  {2,2,2,1,0,1,0,2,2,0,1,0,1,2,2,2},
+  {1,1,1,1,0,1,0,2,2,0,1,0,1,1,1,1},
+  {2,2,2,2,0,0,0,2,2,0,0,0,2,2,2,2},
+  {1,1,1,1,0,1,0,2,2,0,1,0,1,1,1,1},
+  {2,2,2,1,0,1,0,2,2,0,1,0,1,2,2,2},
+  {1,1,1,1,0,1,1,1,1,1,1,0,1,1,1,1},
+  {1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1},
+  {1,3,1,0,0,0,0,0,0,0,0,0,0,1,3,1},
+  {1,0,1,0,1,1,0,1,1,0,1,1,0,1,0,1},
+  {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+  {1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1},
+  {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
+};
+
+struct PacGame {
+  uint8_t maze[PM_ROWS][PM_COLS];
+  float px,py,pvx,pvy;  // pacman pos (cell coords)
+  int   dx,dy;           // desired direction
+  int   score; int lives; int dots;
+  bool  gameOver, win;
+  // Ghost
+  float gx[2],gy[2]; int gdx[2],gdy[2];
+  uint16_t gcol[2];
+  unsigned long lastFrame;
+  bool powered; unsigned long powerEnd;
+} PM;
+
+void pacReset(){
+  for(int r=0;r<PM_ROWS;r++) for(int c=0;c<PM_COLS;c++) PM.maze[r][c]=pgm_read_byte(&pmMaze[r][c]);
+  PM.px=1; PM.py=1; PM.pvx=0; PM.pvy=0; PM.dx=1; PM.dy=0;
+  PM.score=0; PM.lives=3; PM.gameOver=false; PM.win=false; PM.powered=false;
+  PM.gx[0]=7; PM.gy[0]=8; PM.gdx[0]=1; PM.gdy[0]=0;
+  PM.gx[1]=8; PM.gy[1]=8; PM.gdx[1]=-1;PM.gdy[1]=0;
+  PM.gcol[0]=C_RED; PM.gcol[1]=C_PINK;
+  PM.dots=0;
+  for(int r=0;r<PM_ROWS;r++) for(int c=0;c<PM_COLS;c++) if(PM.maze[r][c]==0||PM.maze[r][c]==3) PM.dots++;
+}
+
+void drawPacGame(){
+  tft.fillScreen(C_BLACK);
+  // Maze
+  for(int r=0;r<PM_ROWS;r++){
+    for(int c=0;c<PM_COLS;c++){
+      int x=PM_OX+c*PM_CELL, y=PM_OY+r*PM_CELL;
+      uint8_t cell=PM.maze[r][c];
+      if(cell==1){ tft.fillRect(x,y,PM_CELL,PM_CELL,0x000D); tft.drawRect(x,y,PM_CELL,PM_CELL,C_BLUE); }
+      else if(cell==0) tft.fillCircle(x+PM_CELL/2,y+PM_CELL/2,2,C_YELLOW);
+      else if(cell==3) tft.fillCircle(x+PM_CELL/2,y+PM_CELL/2,5,C_WHITE);
+    }
+  }
+  // Pacman
+  int pac_px=PM_OX+(int)(PM.px*PM_CELL)+PM_CELL/2;
+  int pac_py=PM_OY+(int)(PM.py*PM_CELL)+PM_CELL/2;
+  int mouth=(millis()/100)%2?30:5;
+  tft.fillCircle(pac_px,pac_py,6,C_YELLOW);
+  if(mouth>10) tft.fillTriangle(pac_px,pac_py,pac_px+8*(PM.dx?PM.dx:1),pac_py-4,pac_px+8*(PM.dx?PM.dx:1),pac_py+4,C_BLACK);
+
+  // Ghosts
+  for(int i=0;i<2;i++){
+    int gx=PM_OX+(int)(PM.gx[i]*PM_CELL)+PM_CELL/2;
+    int gy=PM_OY+(int)(PM.gy[i]*PM_CELL)+PM_CELL/2;
+    uint16_t gc=PM.powered?C_BLUE:PM.gcol[i];
+    tft.fillCircle(gx,gy,6,gc);
+    tft.fillRect(gx-6,gy,12,6,gc);
+  }
+  // HUD
+  tft.setTextSize(1); tft.setTextColor(C_YELLOW,C_BLACK);
+  char buf[24]; snprintf(buf,24,"SC:%d LV:%d",PM.score,PM.lives);
+  tft.setCursor(4,34); tft.print(buf);
+  if(PM.gameOver){ centreText(SCR_W/2,200,"GAME OVER!",C_RED,3,C_BLACK); centreText(SCR_W/2,240,"Tap restart",C_WHITE,2,C_BLACK); }
+  if(PM.win)     { centreText(SCR_W/2,200,"YOU WIN!",C_GREEN,3,C_BLACK); }
+}
+
+void updatePacman(){
+  unsigned long now=millis();
+  if(now-PM.lastFrame<80) return; PM.lastFrame=now;
+  if(PM.gameOver||PM.win) { if(touchReady()){readTouch();lastTouchMs=millis();pacReset();screenDirty=true;} return; }
+
+  // Touch to set direction
+  if(touchReady()){
+    Touch t=readTouch(); lastTouchMs=millis();
+    int dx=t.x-( PM_OX+(int)(PM.px*PM_CELL)+PM_CELL/2 );
+    int dy=t.y-( PM_OY+(int)(PM.py*PM_CELL)+PM_CELL/2 );
+    if(abs(dx)>abs(dy)){ PM.dx=dx>0?1:-1; PM.dy=0; } else { PM.dx=0; PM.dy=dy>0?1:-1; }
+  }
+  // Try desired direction, else continue
+  int nr=(int)PM.py+PM.dy, nc=(int)PM.px+PM.dx;
+  if(nr>=0&&nr<PM_ROWS&&nc>=0&&nc<PM_COLS&&PM.maze[nr][nc]!=1){
+    PM.pvx=PM.dx*0.5f; PM.pvy=PM.dy*0.5f;
+  }
+  float nx=PM.px+PM.pvx, ny=PM.py+PM.pvy;
+  int ci=(int)(nx+0.5f), ri=(int)(ny+0.5f);
+  if(ci>=0&&ci<PM_COLS&&ri>=0&&ri<PM_ROWS&&PM.maze[ri][ci]!=1){ PM.px=nx; PM.py=ny; }
+  // Eat dot
+  int cr=(int)(PM.py+0.5f),cc=(int)(PM.px+0.5f);
+  if(cr>=0&&cr<PM_ROWS&&cc>=0&&cc<PM_COLS){
+    if(PM.maze[cr][cc]==0){ PM.maze[cr][cc]=2; PM.score+=10; PM.dots--; if(PM.dots<=0) PM.win=true; }
+    if(PM.maze[cr][cc]==3){ PM.maze[cr][cc]=2; PM.score+=50; PM.powered=true; PM.powerEnd=now+6000; }
+  }
+  if(PM.powered&&now>PM.powerEnd) PM.powered=false;
+  // Ghost AI (random walk)
+  for(int i=0;i<2;i++){
+    int gr=(int)(PM.gy[i]+0.5f), gc2=(int)(PM.gx[i]+0.5f);
+    int nr2=gr+PM.gdy[i], nc2=gc2+PM.gdx[i];
+    if(nr2<0||nr2>=PM_ROWS||nc2<0||nc2>=PM_COLS||PM.maze[nr2][nc2]==1||random(8)==0){
+      int dirs[4][2]={{1,0},{-1,0},{0,1},{0,-1}};
+      int tries=0;
+      do{ int d=random(4); PM.gdx[i]=dirs[d][0]; PM.gdy[i]=dirs[d][1]; tries++; }
+      while(tries<8&&(PM.maze[gr+PM.gdy[i]][gc2+PM.gdx[i]]==1));
+    }
+    PM.gx[i]+=PM.gdx[i]*0.4f; PM.gy[i]+=PM.gdy[i]*0.4f;
+    // Collision with Pacman
+    if(abs(PM.gx[i]-PM.px)<1.2f&&abs(PM.gy[i]-PM.py)<1.2f){
+      if(PM.powered){ PM.gx[i]=7; PM.gy[i]=8; PM.score+=200; }
+      else{ PM.lives--; PM.px=1; PM.py=1; PM.pvx=0; PM.pvy=0; if(PM.lives<=0) PM.gameOver=true; }
+    }
+  }
+  drawPacGame();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  GAME: STARSHIP TROOPERS (Space Shooter)
+// ════════════════════════════════════════════════════════════════════
+#define SS_MAX_BULLETS 10
+#define SS_MAX_BUGS    15
+
+struct SSBullet { float x,y; bool alive; };
+struct SSBug    { float x,y,vx,vy; bool alive; uint16_t col; };
+
+struct StarShip {
+  float sx;
+  SSBullet bullets[SS_MAX_BULLETS];
+  SSBug    bugs[SS_MAX_BUGS];
+  int  score, lives, wave;
+  bool gameOver;
+  unsigned long lastFrame, lastShot;
+  int  bugsAlive;
+} SS;
+
+void ssReset(){
+  SS.sx=SCR_W/2; SS.score=0; SS.lives=3; SS.wave=1; SS.gameOver=false; SS.bugsAlive=0;
+  for(auto& b:SS.bullets) b.alive=false;
+  for(int i=0;i<SS_MAX_BUGS;i++){
+    SS.bugs[i]={(float)(20+i*18),(float)(40+(i/8)*32),(float)(random(3)-1)*0.8f,0.3f,true,(uint16_t)(i%2?C_RED:C_GREEN)};
+    SS.bugsAlive++;
+  }
+}
+
+void drawStarship(){
+  tft.fillScreen(C_BG);
+  if(SS.gameOver){
+    glowText(SCR_W/2-48,180,"GAME OVER",C_RED,3);
+    char buf[24]; snprintf(buf,24,"SCORE: %d",SS.score);
+    centreText(SCR_W/2,230,buf,C_WHITE,2,C_BG);
+    centreText(SCR_W/2,270,"Tap to play again",C_CYAN,1,C_BG); return;
+  }
+  int shipY=SCR_H-40;
+  tft.fillTriangle((int)SS.sx,shipY-20,(int)SS.sx-14,shipY+10,(int)SS.sx+14,shipY+10,C_CYAN);
+  tft.fillRect((int)SS.sx-3,shipY+8,6,8,C_ORANGE);
+  for(auto& b:SS.bullets){ if(!b.alive)continue; tft.fillRect((int)b.x-1,(int)b.y-6,3,10,C_YELLOW); }
+  for(auto& b:SS.bugs){
+    if(!b.alive)continue;
+    tft.fillCircle((int)b.x,(int)b.y,8,b.col);
+    tft.drawLine((int)b.x-8,(int)b.y-4,(int)b.x-14,(int)b.y-8,b.col);
+    tft.drawLine((int)b.x+8,(int)b.y-4,(int)b.x+14,(int)b.y-8,b.col);
+  }
+  tft.fillRect(0,0,SCR_W,24,C_BLACK);
+  tft.setTextSize(1); tft.setTextColor(C_CYAN,C_BLACK);
+  char buf[32]; snprintf(buf,32,"SC:%05d LV:%d W:%d",SS.score,SS.lives,SS.wave);
+  tft.setCursor(4,8); tft.print(buf);
+}
+
+void updateStarship(){
+  unsigned long now=millis();
+  if(now-SS.lastFrame<40)return; SS.lastFrame=now;
+  if(SS.gameOver){if(touchReady()){readTouch();lastTouchMs=millis();ssReset();drawStarship();}return;}
+  if(touchReady()){Touch t=readTouch();lastTouchMs=millis();if(t.y>24)SS.sx=t.x;}
+  SS.sx=constrain(SS.sx,16,SCR_W-16);
+  if(now-SS.lastShot>250){
+    SS.lastShot=now;
+    for(auto& b:SS.bullets){if(!b.alive){b={SS.sx,SCR_H-50,true};break;}}
+  }
+  for(auto& b:SS.bullets){if(b.alive){b.y-=8;if(b.y<24)b.alive=false;}}
+  for(auto& b:SS.bugs){
+    if(!b.alive)continue;
+    b.x+=b.vx; b.y+=b.vy;
+    if(b.x<8||b.x>SCR_W-8)b.vx*=-1;
+    if(b.y>SCR_H-50){SS.lives--;b.alive=false;SS.bugsAlive--;if(SS.lives<=0)SS.gameOver=true;}
+    for(auto& blt:SS.bullets){if(!blt.alive)continue;if(abs(blt.x-b.x)<12&&abs(blt.y-b.y)<12){blt.alive=false;b.alive=false;SS.bugsAlive--;SS.score+=100;}}
+  }
+  if(SS.bugsAlive<=0){
+    SS.wave++; SS.bugsAlive=0;
+    for(int i=0;i<min(SS_MAX_BUGS,8+SS.wave*2);i++){
+      SS.bugs[i]={(float)(16+i*20),(float)(30+(i/8)*28),(float)(random(3)-1)*(0.8f+SS.wave*0.2f),0.25f+SS.wave*0.05f,true,(uint16_t)(i%3==0?C_RED:i%3==1?C_PURPLE:C_ORANGE)};
+      SS.bugsAlive++;
+    }
+  }
+  drawStarship();
+}
+// ════════════════════════════════════════════════════════════════════
+//  GAME: MEMORY  (4x4 card flip)
+// ════════════════════════════════════════════════════════════════════
+#define MEM_COLS 4
+#define MEM_ROWS 4
+#define MEM_CW   70
+#define MEM_CH   58
+#define MEM_PAD  4
+#define MEM_OX   ((SCR_W-(MEM_COLS*(MEM_CW+MEM_PAD)-MEM_PAD))/2)
+#define MEM_OY   55
+
+uint16_t memColors[8]={C_RED,C_GREEN,C_BLUE,C_YELLOW,C_PURPLE,C_ORANGE,C_PINK,C_CYAN};
+
+struct MemGame {
+  uint8_t cards[MEM_ROWS][MEM_COLS];
+  bool    flipped[MEM_ROWS][MEM_COLS];
+  bool    matched[MEM_ROWS][MEM_COLS];
+  int     firstR,firstC,secondR,secondC,state,score,pairs;
+  bool    win;
+  unsigned long checkStart;
+} MEM;
+
+void memShuffle(){
+  uint8_t vals[16]; for(int i=0;i<16;i++) vals[i]=i/2;
+  for(int i=15;i>0;i--){int j=random(i+1);uint8_t t=vals[i];vals[i]=vals[j];vals[j]=t;}
+  for(int r=0;r<MEM_ROWS;r++) for(int c=0;c<MEM_COLS;c++){
+    MEM.cards[r][c]=vals[r*MEM_COLS+c]; MEM.flipped[r][c]=MEM.matched[r][c]=false;
+  }
+  MEM.state=0; MEM.score=0; MEM.pairs=0; MEM.win=false;
+}
+
+void drawMemCard(int r,int c){
+  int x=MEM_OX+c*(MEM_CW+MEM_PAD), y=MEM_OY+r*(MEM_CH+MEM_PAD);
+  uint16_t col=MEM.matched[r][c]?C_DGRAY:MEM.flipped[r][c]?memColors[MEM.cards[r][c]]:C_SURF2;
+  neonBox(x,y,MEM_CW,MEM_CH,MEM.flipped[r][c]||MEM.matched[r][c]?col:C_PURPLE,col);
+  if(MEM.flipped[r][c]&&!MEM.matched[r][c]){
+    char v[4]; snprintf(v,4,"%d",MEM.cards[r][c]+1);
+    tft.setTextSize(3); tft.setTextColor(C_WHITE,col);
+    int16_t tw=strlen(v)*18; tft.setCursor(x+(MEM_CW-tw)/2,y+MEM_CH/2-10); tft.print(v);
+  }
+}
+
+void drawMemGame(){
+  tft.fillScreen(C_BG);
+  char buf[24]; snprintf(buf,24,"MEMORY  Pairs:%d/8",MEM.pairs);
+  centreText(SCR_W/2,8,buf,C_PURPLE,2,C_BG);
+  hRule(34,C_PURPLE);
+  for(int r=0;r<MEM_ROWS;r++) for(int c=0;c<MEM_COLS;c++) drawMemCard(r,c);
+  snprintf(buf,24,"Score: %d",MEM.score);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(8,460); tft.print(buf);
+  tft.setTextColor(C_DGRAY,C_BG); tft.setCursor(SCR_W-88,460); tft.print("[top-left=back]");
+  if(MEM.win){glowText(SCR_W/2-48,420,"YOU WIN!",C_GREEN,3);}
+}
+
+void updateMemory(){
+  if(MEM.win){if(touchReady()){readTouch();lastTouchMs=millis();memShuffle();drawMemGame();}return;}
+  if(MEM.state==2){
+    if(millis()-MEM.checkStart>900){
+      bool ok=(MEM.cards[MEM.firstR][MEM.firstC]==MEM.cards[MEM.secondR][MEM.secondC]);
+      if(ok){MEM.matched[MEM.firstR][MEM.firstC]=MEM.matched[MEM.secondR][MEM.secondC]=true;MEM.score+=100;MEM.pairs++;if(MEM.pairs==8)MEM.win=true;}
+      else  {MEM.flipped[MEM.firstR][MEM.firstC]=MEM.flipped[MEM.secondR][MEM.secondC]=false;}
+      MEM.state=0; drawMemGame();
+    }
+    return;
+  }
+  if(!touchReady())return;
+  Touch t=readTouch(); lastTouchMs=millis();
+  if(t.y<40&&t.x<70){curScreen=SCR_GAMES;screenDirty=true;return;}
+  int c=(t.x-MEM_OX)/(MEM_CW+MEM_PAD), r=(t.y-MEM_OY)/(MEM_CH+MEM_PAD);
+  if(r<0||r>=MEM_ROWS||c<0||c>=MEM_COLS)return;
+  if(MEM.flipped[r][c]||MEM.matched[r][c])return;
+  MEM.flipped[r][c]=true;
+  if(MEM.state==0){MEM.firstR=r;MEM.firstC=c;MEM.state=1;}
+  else{MEM.secondR=r;MEM.secondC=c;MEM.state=2;MEM.checkStart=millis();}
+  drawMemCard(r,c);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  GAME: COLOR MATCH
+// ════════════════════════════════════════════════════════════════════
+uint16_t cmPalette[]={C_RED,C_GREEN,C_BLUE,C_YELLOW,C_PURPLE,C_ORANGE,C_PINK,C_CYAN};
+const char* cmNames[]={"RED","GREEN","BLUE","YELLOW","PURPLE","ORANGE","PINK","CYAN"};
+
+struct ColMatch {
+  uint16_t targetCol; const char* targetName;
+  uint16_t options[4]; const char* names[4];
+  int correct, score, streak;
+  unsigned long roundStart;
+} CM;
+
+void cmNewRound(){
+  int ti=random(8); CM.targetCol=cmPalette[ti]; CM.targetName=cmNames[ti];
+  CM.correct=random(4);
+  bool used[8]={0}; used[ti]=true;
+  CM.options[CM.correct]=CM.targetCol; CM.names[CM.correct]=CM.targetName;
+  for(int i=0;i<4;i++){
+    if(i==CM.correct)continue;
+    int ci; do{ci=random(8);}while(used[ci]);
+    used[ci]=true; CM.options[i]=cmPalette[ci]; CM.names[i]=cmNames[ci];
+  }
+  CM.roundStart=millis();
+}
+
+void drawColMatch(){
+  tft.fillScreen(C_BG);
+  centreText(SCR_W/2,8,"COLOR MATCH",C_ORANGE,2,C_BG);
+  hRule(34,C_ORANGE);
+  unsigned long el=millis()-CM.roundStart;
+  int bw=(int)((max(0UL,5000-el)*(SCR_W-20))/5000);
+  tft.fillRect(10,42,SCR_W-20,8,C_SURF);
+  tft.fillRect(10,42,bw,8,el<3500?C_GREEN:C_RED);
+  tft.fillRoundRect(50,56,SCR_W-100,108,10,CM.targetCol);
+  tft.setTextSize(3); tft.setTextColor(C_WHITE,CM.targetCol);
+  int16_t tw=strlen(CM.targetName)*18;
+  tft.setCursor(50+(SCR_W-100-tw)/2,98); tft.print(CM.targetName);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); centreText(SCR_W/2,170,"TAP THE MATCHING COLOR",C_LGRAY,1,C_BG);
+  const int BW=(SCR_W-28)/2,BH=96;
+  for(int i=0;i<4;i++){
+    int bx=8+(i%2)*(BW+12),by=180+(i/2)*(BH+10);
+    tft.fillRoundRect(bx,by,BW,BH,8,CM.options[i]);
+    tft.drawRoundRect(bx,by,BW,BH,8,C_WHITE);
+    tft.setTextSize(2); tft.setTextColor(C_WHITE,CM.options[i]);
+    tw=strlen(CM.names[i])*12; tft.setCursor(bx+(BW-tw)/2,by+BH/2-8); tft.print(CM.names[i]);
+  }
+  char buf[32]; snprintf(buf,32,"Score:%d  Streak:%d",CM.score,CM.streak);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(8,392); tft.print(buf);
+  if(el>5000){CM.streak=0;cmNewRound();drawColMatch();}
+}
+
+void updateColMatch(){
+  if(!touchReady())return;
+  Touch t=readTouch(); lastTouchMs=millis();
+  if(t.y<40&&t.x<70){curScreen=SCR_GAMES;screenDirty=true;return;}
+  const int BW=(SCR_W-28)/2,BH=96;
+  for(int i=0;i<4;i++){
+    int bx=8+(i%2)*(BW+12),by=180+(i/2)*(BH+10);
+    if(t.x>=bx&&t.x<bx+BW&&t.y>=by&&t.y<by+BH){
+      if(i==CM.correct){CM.score+=10+CM.streak*5;CM.streak++;}else CM.streak=0;
+      cmNewRound(); drawColMatch(); return;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  GAME: MATH QUIZ
+// ════════════════════════════════════════════════════════════════════
+struct MathGame {
+  int a,b,op,answer,choices[4],correct,score,streak,lives;
+  bool gameOver;
+  unsigned long roundStart;
+} MQ;
+
+void mqNewRound(){
+  MQ.op=random(3);
+  if(MQ.op==0){MQ.a=random(1,21);MQ.b=random(1,21);MQ.answer=MQ.a+MQ.b;}
+  else if(MQ.op==1){MQ.a=random(2,21);MQ.b=random(1,MQ.a);MQ.answer=MQ.a-MQ.b;}
+  else{MQ.a=random(2,13);MQ.b=random(2,11);MQ.answer=MQ.a*MQ.b;}
+  MQ.correct=random(4); MQ.choices[MQ.correct]=MQ.answer;
+  bool used[4]={0}; used[MQ.correct]=true;
+  for(int i=0;i<4;i++){
+    if(i==MQ.correct)continue;
+    int v; int tries=0;
+    do{v=MQ.answer+(random(11)-5);tries++;} while((v==MQ.answer||v<0)&&tries<30);
+    MQ.choices[i]=v;
+  }
+  MQ.roundStart=millis();
+}
+
+void drawMathGame(){
+  tft.fillScreen(C_BG);
+  if(MQ.gameOver){
+    glowText(SCR_W/2-48,180,"GAME OVER!",C_RED,3);
+    char b[24]; snprintf(b,24,"Score: %d",MQ.score);
+    centreText(SCR_W/2,240,b,C_WHITE,2,C_BG);
+    centreText(SCR_W/2,280,"Tap to play again",C_CYAN,1,C_BG); return;
+  }
+  centreText(SCR_W/2,8,"MATH QUIZ",C_GREEN,2,C_BG);
+  hRule(34,C_GREEN);
+  char buf[32]; const char* ops[]={"+","-","x"};
+  snprintf(buf,32,"%d %s %d = ?",MQ.a,ops[MQ.op],MQ.b);
+  tft.setTextSize(4); tft.setTextColor(C_YELLOW,C_BG);
+  int16_t tw=strlen(buf)*24; tft.setCursor(SCR_W/2-tw/2,88); tft.print(buf);
+  unsigned long el=millis()-MQ.roundStart;
+  int bw2=(int)((max(0UL,8000-el)*(SCR_W-20))/8000);
+  tft.fillRect(10,152,SCR_W-20,8,C_SURF); tft.fillRect(10,152,bw2,8,el<5000?C_GREEN:C_RED);
+  const int BW=(SCR_W-28)/2,BH=92;
+  uint16_t cc[]={C_CYAN,C_PURPLE,C_ORANGE,C_GREEN};
+  for(int i=0;i<4;i++){
+    int bx=8+(i%2)*(BW+12),by=168+(i/2)*(BH+10);
+    neonBox(bx,by,BW,BH,cc[i],C_SURF);
+    snprintf(buf,8,"%d",MQ.choices[i]);
+    tft.setTextSize(4); tft.setTextColor(cc[i],C_SURF);
+    tw=strlen(buf)*24; tft.setCursor(bx+(BW-tw)/2,by+BH/2-16); tft.print(buf);
+  }
+  snprintf(buf,32,"Sc:%d Str:%d Lv:%d",MQ.score,MQ.streak,MQ.lives);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(8,390); tft.print(buf);
+  if(el>8000){MQ.lives--;MQ.streak=0;if(MQ.lives<=0){MQ.gameOver=true;drawMathGame();}else{mqNewRound();drawMathGame();}}
+}
+
+void updateMath(){
+  if(MQ.gameOver){if(touchReady()){readTouch();lastTouchMs=millis();MQ.score=0;MQ.streak=0;MQ.lives=3;MQ.gameOver=false;mqNewRound();drawMathGame();}return;}
+  if(!touchReady())return;
+  Touch t=readTouch(); lastTouchMs=millis();
+  if(t.y<40&&t.x<70){curScreen=SCR_GAMES;screenDirty=true;return;}
+  const int BW=(SCR_W-28)/2,BH=92;
+  for(int i=0;i<4;i++){
+    int bx=8+(i%2)*(BW+12),by=168+(i/2)*(BH+10);
+    if(t.x>=bx&&t.x<bx+BW&&t.y>=by&&t.y<by+BH){
+      if(i==MQ.correct){MQ.score+=10+MQ.streak*5;MQ.streak++;}
+      else{MQ.lives--;MQ.streak=0;if(MQ.lives<=0){MQ.gameOver=true;drawMathGame();return;}}
+      mqNewRound(); drawMathGame(); return;
+    }
+  }
+}
+// ════════════════════════════════════════════════════════════════════
+//  SCREEN ROUTER  — initialise + dispatch touch
+// ════════════════════════════════════════════════════════════════════
+void initScreen(Screen s) {
+  switch(s) {
+    case SCR_MAIN:        drawMain();         break;
+    case SCR_GAMES:       drawGames();        break;
+    case SCR_SENSORS:     drawSensors();      break;
+    case SCR_SENS_EYES:   drawSensEyes();     break;
+    case SCR_SENS_NOSE:   drawSensNose();     break;
+    case SCR_SENS_BRAIN:  drawSensBrain();    break;
+    case SCR_SENS_TUMMY:  drawSensTummy();    break;
+    case SCR_COMMS:       drawComms();        break;
+    case SCR_SETTINGS:    drawSettings();     break;
+    case GAME_MARIO:      marioReset();       drawMarioGame();  break;
+    case GAME_PACMAN:     pacReset();         drawPacGame();    break;
+    case GAME_STARSHIP:   ssReset();          drawStarship();   break;
+    case GAME_MEMORY:     memShuffle();       drawMemGame();    break;
+    case GAME_COLORMATCH: cmNewRound();       drawColMatch();   break;
+    case GAME_MATH:       MQ.score=0;MQ.streak=0;MQ.lives=3;MQ.gameOver=false;mqNewRound();drawMathGame(); break;
+    default: break;
+  }
+}
+
+void handleTouch(Touch& t) {
+  switch(curScreen) {
+    case SCR_MAIN:       handleMainTouch(t);     break;
+    case SCR_GAMES:      handleGamesTouch(t);    break;
+    case SCR_SENSORS:    handleSensorsTouch(t);  break;
+    case SCR_SENS_BRAIN: handleBrainTouch(t);    break;
+    case SCR_SETTINGS:   handleSettingsTouch(t); break;
+    // Sensor submenus — BACK = top-left corner
+    case SCR_SENS_EYES:
+    case SCR_SENS_NOSE:
+    case SCR_SENS_TUMMY:
+      if(t.y<40&&t.x<80){curScreen=SCR_SENSORS;screenDirty=true;}
+      break;
+    case SCR_COMMS:
+      if(t.y<40&&t.x<80){curScreen=SCR_MAIN;screenDirty=true;}
+      break;
+    // Game back buttons (top-left tap)
+    case GAME_MARIO:
+      if(t.y<26&&t.x<SCR_W/2&&!M.gameOver){curScreen=SCR_GAMES;screenDirty=true;}
+      else if(M.gameOver){marioReset();drawMarioGame();}
+      break;
+    case GAME_PACMAN:
+      if(t.y<40&&t.x<70){curScreen=SCR_GAMES;screenDirty=true;}
+      break;
+    case GAME_STARSHIP:
+      if(t.y<26&&t.x<80&&!SS.gameOver){curScreen=SCR_GAMES;screenDirty=true;}
+      break;
+    default: break;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SETUP
+// ════════════════════════════════════════════════════════════════════
+void setup() {
+  Serial.begin(115200);
+  delay(300);
+  Serial.println("[PICO] BuddyBot Dash v6.0 booting...");
+
+  // TFT init
+  tft.init();
+  tft.setRotation(ROTATION);
+  tft.fillScreen(C_BG);
+  pinMode(22,OUTPUT); digitalWrite(22,HIGH); // backlight on
+
+  // Boot splash
+  tft.setTextSize(2); tft.setTextColor(C_CYAN,C_BG);
+  centreText(SCR_W/2,SCR_H/2-30,"AJ2BUDDYCOMMS",C_CYAN,2,C_BG);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG);
+  centreText(SCR_W/2,SCR_H/2+10,"BuddyBot Dash v6.0",C_LGRAY,1,C_BG);
+  centreText(SCR_W/2,SCR_H/2+28,"Pico 2 | ST7796S | FT6336U",C_DGRAY,1,C_BG);
+  delay(1500);
+
+  // Touch init
   Wire.setSDA(PIN_CTP_SDA);
   Wire.setSCL(PIN_CTP_SCL);
   Wire.begin();
-  // FIX #4: Set 400 kHz fast-mode (FT6336U supports up to 400 kHz)
   Wire.setClock(400000);
-  delay(100);
+  pinMode(PIN_CTP_RST,OUTPUT);
+  digitalWrite(PIN_CTP_RST,LOW); delay(20);
+  digitalWrite(PIN_CTP_RST,HIGH); delay(200);
+  pinMode(PIN_CTP_INT,INPUT_PULLUP);
 
   // Mega UART
-  Serial1.setTX(0);Serial1.setRX(1);
+  Serial1.setTX(0); Serial1.setRX(1);
   MEGA_SERIAL.begin(115200);
-  delay(200);
+  delay(100);
   MEGA_SERIAL.println("PONG");
-  MEGA_SERIAL.println("PING_PICO:0");
+  MEGA_SERIAL.println("SENSOR_STATUS");
 
-  randomSeed(analogRead(A0));
-  scrDirty=true;
-  // DEBUG: prove setup() completed
-  fillScreen(0xF800);  // pure red
-  delay(1500);
+  // Draw main screen
+  initScreen(SCR_MAIN);
+  screenDirty=false;
+
+  Serial.println("[PICO] Ready.");
 }
 
-void loop(){
-  static bool firstLoop=true; if(firstLoop){firstLoop=false;fillScreen(0x07E0);delay(1500);}
-  static unsigned long lastHB2=0; if(millis()-lastHB2>1000){lastHB2=millis();Serial.print("LOOP ms=");Serial.println(millis());}
+// ════════════════════════════════════════════════════════════════════
+//  LOOP
+// ════════════════════════════════════════════════════════════════════
+void loop() {
   handleMegaSerial();
 
-  if(millis()-lastPing>5000){
-    lastPing=millis();
-    MEGA_SERIAL.print("PING_PICO:");MEGA_SERIAL.println(pingSeq++);
-    if(pingSeq>9999)pingSeq=0;
-  }
-  static unsigned long lastHB=0; if(millis()-lastHB>2000){lastHB=millis();Serial.print("HB mega=");Serial.print(megaLinked);Serial.print(" scr=");Serial.println(curScr);}
-  if(megaLinked&&millis()-lastMegaRx>12000)megaLinked=false;
-  if(curScr==SCR_BOOT&&megaLinked){Serial.println("TRANSITION");curScr=SCR_MAIN;scrDirty=true;firstMainDraw=true;}
-
-  // Touch — debounced 80ms
-  Touch t={0,0,false};
-  if(millis()-lastTouchMs>80&&!digitalRead(PIN_CTP_INT)){
-    t=readTouch();if(t.pressed)lastTouchMs=millis();
+  // Drop Mega link after 12s silence
+  if(megaLinked && millis()-lastMegaRx>12000){
+    megaLinked=false; screenDirty=true;
   }
 
-  // Global E-STOP
-  if(hit(t,6,SCR_H-FTR_H+8,86,32)){
-    if(T.estop){MEGA_SERIAL.println("ESTOP_CLEAR");T.estop=false;}
-    else        {MEGA_SERIAL.println("EMERGENCY_STOP");T.estop=true;}
-    scrDirty=true;firstMainDraw=true;t.pressed=false;
+  // Game loops (run every iteration — they have their own timing)
+  if     (curScreen==GAME_MARIO)     updateMario();
+  else if(curScreen==GAME_PACMAN)    updatePacman();
+  else if(curScreen==GAME_STARSHIP)  updateStarship();
+  else if(curScreen==GAME_MEMORY)    updateMemory();
+  else if(curScreen==GAME_COLORMATCH)updateColMatch();
+  else if(curScreen==GAME_MATH)      updateMath();
+  else {
+    // Non-game screens: redraw on dirty flag ~5Hz
+    if(screenDirty) {
+      screenDirty=false;
+      initScreen(curScreen);
+    }
+    // Periodic telemetry refresh on sensor screens
+    static unsigned long lastRefresh=0;
+    bool isSensorScreen=(curScreen==SCR_SENS_EYES||curScreen==SCR_SENS_NOSE||
+                         curScreen==SCR_SENS_BRAIN||curScreen==SCR_SENS_TUMMY||
+                         curScreen==SCR_COMMS||curScreen==SCR_MAIN);
+    if(isSensorScreen && millis()-lastRefresh>2000){
+      lastRefresh=millis(); initScreen(curScreen);
+    }
   }
 
-  if(alertOn){drawHeader("ALERT");drawFooter();drawAlert(t);return;}
-
-  // NO timed scrDirty=true — partial updates handle telemetry
-  switch(curScr){
-    case SCR_BOOT:       drawBoot();       break;
-    case SCR_MAIN:       drawMain(t);      break;
-    case SCR_RADAR:      drawRadar(t);     break;
-    case SCR_GAMES:      drawGamesMenu(t); break;
-    case SCR_GAME_COLOR: drawGameColor(t); break;
-    case SCR_GAME_SHAPE: drawGameShape(t); break;
-    case SCR_GAME_COUNT: drawGameCount(t); break;
-    case SCR_INFO:       drawInfo(t);      break;
-    case SCR_SENSORS:    drawSensors(t);   break;
-    default:             drawMain(t);      break;
+  // Touch handling (all screens)
+  if(touchReady()){
+    Touch t=readTouch();
+    if(t.pressed){
+      lastTouchMs=millis();
+      Screen prev=curScreen;
+      handleTouch(t);
+      if(curScreen!=prev){ screenDirty=true; initScreen(curScreen); }
+    }
   }
 }
