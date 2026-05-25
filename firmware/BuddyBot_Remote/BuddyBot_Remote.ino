@@ -1,41 +1,75 @@
 /*
  * ════════════════════════════════════════════════════════════════════
- *  BUDDYBOT  —  Remote Control  ·  SAMD21 WiFi  ·  V1.0
+ *  BUDDYBOT  —  Remote Control  ·  XC3812 Duinotech SAMD21  ·  V2.0
+ *  6-Button tactile layout
  * ════════════════════════════════════════════════════════════════════
  *
  *  HARDWARE
  *  ─────────────────────────────────────────────────────────────────
- *  MCU     : SAMD21 with WiFi (e.g. MKR WiFi 1010 or Nano 33 IoT)
- *  Display : 1.5" colour OLED  128×128  (SSD1351, SPI)
- *  Encoder : XC3736 incremental rotary encoder (CLK/DT/SW)
- *  RF TX   : 433 MHz transmitter module (DATA pin)
+ *  MCU     : Duinotech XC3812 — Seeed WIO Lite Wireless (SAMD21+W600)
+ *  Board   : "Seeeduino Wio Lite W600" in Arduino IDE
+ *  Package : File > Preferences > Additional Boards Manager URLs:
+ *            https://raw.githubusercontent.com/SeeedStudio/Seeed_Platform
+ *            /master/package_seeeduino_boards_index.json
+ *            Then: Boards Manager > search "SAMD_zero" by Seeed Studio
+ *  Display : 1.5" SSD1351 colour OLED  128x128  SPI  (XC3726)
+ *  Buttons : 6x tactile switches — all INPUT_PULLUP to GND
+ *  RF TX   : 433 MHz transmitter module
  *  Power   : 173040 3.7V LiPo via onboard regulator
+ *
+ *  ⚠  XC3812 is a 3.3V board — NEVER connect 5V signals to any pin!
+ *
+ *  PHYSICAL BUTTON LAYOUT
+ *  ─────────────────────────────────────────────────────────────────
+ *              [ ▲  FWD  ]
+ *  [ ◀ LEFT ]  [  ● STOP ]  [ ▶ RIGHT ]
+ *              [ ▼  REV  ]
+ *                                        [ ☰ MENU ]
  *
  *  WIRING
  *  ─────────────────────────────────────────────────────────────────
- *  OLED (SPI):
- *    MOSI  → D11 (SPI MOSI)
- *    SCK   → D13 (SPI SCK)
+ *  OLED SSD1351 (SPI — XC3726):
+ *    MOSI  → MOSI pad (underside silkscreen of XC3812 — NOT D11)
+ *    SCK   → SCK  pad (underside silkscreen of XC3812 — NOT D13)
  *    CS    → D10
  *    DC    → D9
  *    RST   → D8
- *    VCC   → 3.3V   GND → GND
+ *    VCC   → 3.3V     GND → GND
  *
- *  Rotary Encoder (XC3736):
- *    CLK   → D2   (interrupt-capable)
- *    DT    → D3   (interrupt-capable)
- *    SW    → D4   (button press)
- *    +     → 3.3V   GND → GND
+ *  Buttons (all INPUT_PULLUP — connect other leg to GND):
+ *    BTN_FWD   → D2
+ *    BTN_REV   → D3
+ *    BTN_LEFT  → D4
+ *    BTN_RIGHT → D5
+ *    BTN_STOP  → D6   (STOP when driving / SELECT in menus)
+ *    BTN_MENU  → D7   (open menus / back to drive)
  *
- *  RF Transmitter:
- *    DATA  → D6
- *    VCC   → 5V (or 3.3V depending on module) GND → GND
+ *  RF Transmitter 433MHz:
+ *    DATA  → D1   ⚠ D0 = Serial1 RX on SAMD21 — never use for RF
+ *    VCC   → 3.3V     GND → GND
  *
- *  LIBRARIES REQUIRED (Arduino Library Manager)
+ *  Battery ADC:
+ *    LiPo+ → 2x 100kΩ voltage divider → A0   (gives half of LiPo V)
+ *
+ *  LIBRARIES (Arduino Library Manager)
  *  ─────────────────────────────────────────────────────────────────
- *  1. Adafruit SSD1351 (for OLED display)
+ *  1. Adafruit SSD1351
  *  2. Adafruit GFX
- *  3. RCSwitch  (for 433 MHz RF transmission)
+ *  3. RCSwitch
+ *
+ *  OPERATION
+ *  ─────────────────────────────────────────────────────────────────
+ *  Drive screen:
+ *    Hold FWD/REV/LEFT/RIGHT  → drives robot (auto-stop on release)
+ *    Press STOP               → send STOP command
+ *    Hold STOP (600ms)        → toggle E-STOP
+ *    Press MENU               → Mode selector screen
+ *    Hold MENU (600ms)        → Special commands screen
+ *
+ *  Menu screens:
+ *    FWD / REV                → scroll up / down
+ *    STOP                     → confirm selection
+ *    MENU                     → back to drive
  *
  * ════════════════════════════════════════════════════════════════════
  */
@@ -45,571 +79,506 @@
 #include <Adafruit_SSD1351.h>
 #include <RCSwitch.h>
 
-// ── Pin assignments ───────────────────────────────────────────────
-#define OLED_CS   10
-#define OLED_DC    9
-#define OLED_RST   8
+// ── Pins ──────────────────────────────────────────────────────────
+#define OLED_CS    10
+#define OLED_DC     9
+#define OLED_RST    8
+#define BTN_FWD     2
+#define BTN_REV     3
+#define BTN_LEFT    4
+#define BTN_RIGHT   5
+#define BTN_STOP    6
+#define BTN_MENU    7
+#define RF_PIN      1   // D0 = Serial1 RX on SAMD21 — use D1 instead
+#define BAT_PIN     A0
 
-#define ENC_CLK    2   // interrupt-capable
-#define ENC_DT     3   // interrupt-capable
-#define ENC_SW     4   // button
+// ── Display ───────────────────────────────────────────────────────
+#define OLED_W 128
+#define OLED_H 128
 
-#define RF_PIN     6   // RF transmitter DATA
+// ── RF codes (24-bit, protocol 1, 189us — matches Mega RCSwitch) ──
+#define RF_FORWARD   0xA10001UL
+#define RF_BACKWARD  0xA10002UL
+#define RF_LEFT      0xA10003UL
+#define RF_RIGHT     0xA10004UL
+#define RF_STOP      0xA10005UL
+#define RF_SPD_SLOW  0xA10030UL
+#define RF_SPD_NORM  0xA10031UL
+#define RF_SPD_FAST  0xA10032UL
+#define RF_MODE_NRM  0xA10010UL
+#define RF_MODE_BOD  0xA10011UL
+#define RF_MODE_DOG  0xA10012UL
+#define RF_MODE_UNH  0xA10013UL
+#define RF_ESTOP     0xA100FFUL
+#define RF_DANCE     0xA10020UL
+#define RF_DEFENSE   0xA10021UL
 
-// ── Display dimensions ────────────────────────────────────────────
-#define OLED_W  128
-#define OLED_H  128
-
-// ── RF codes (must match robot's RCSwitch receiver) ───────────────
-// Using 24-bit codes — protocol 1 — 189us pulse width
-#define RF_FORWARD  0xA10001UL
-#define RF_BACKWARD 0xA10002UL
-#define RF_LEFT     0xA10003UL
-#define RF_RIGHT    0xA10004UL
-#define RF_STOP     0xA10005UL
-#define RF_SPEED_UP 0xA10006UL
-#define RF_SPEED_DN 0xA10007UL
-#define RF_MODE_NRM 0xA10010UL
-#define RF_MODE_BOD 0xA10011UL
-#define RF_MODE_DOG 0xA10012UL
-#define RF_MODE_UNH 0xA10013UL
-#define RF_ESTOP    0xA100FFul
-#define RF_DANCE    0xA10020UL
-#define RF_DEFENSE  0xA10021UL
-
-// ── Colour palette (RGB565) ───────────────────────────────────────
-#define C_BG      0x0000
-#define C_SURF    0x0821
-#define C_CYAN    0x07FF
-#define C_MINT    0x07E4
-#define C_AMBER   0xFD20
-#define C_CORAL   0xF944
-#define C_PURPLE  0x781F
-#define C_WHITE   0xFFFF
-#define C_LGRAY   0x8C71
-#define C_MGRAY   0x4228
-#define C_DGRAY   0x2104
-#define C_RED     0xF800
-#define C_GREEN   0x07E0
-#define C_BLUE    0x001F
+// ── Colours (RGB565) ──────────────────────────────────────────────
+#define C_BG     0x0000u
+#define C_SURF   0x0821u
+#define C_SURF2  0x10A2u
+#define C_CYAN   0x07FFu
+#define C_MINT   0x07E4u
+#define C_AMBER  0xFD20u
+#define C_CORAL  0xF944u
+#define C_PURPLE 0x781Fu
+#define C_WHITE  0xFFFFu
+#define C_LGRAY  0x8C71u
+#define C_MGRAY  0x4228u
+#define C_DGRAY  0x2104u
 
 // ── Objects ───────────────────────────────────────────────────────
 Adafruit_SSD1351 oled(OLED_W, OLED_H, &SPI, OLED_CS, OLED_DC, OLED_RST);
-RCSwitch         rfSwitch;
+RCSwitch         rf;
 
-// ── State ─────────────────────────────────────────────────────────
-enum RemoteState { ST_DRIVE, ST_MODE, ST_SPECIAL, ST_SPEED };
-RemoteState state     = ST_DRIVE;
-int8_t      encPos    = 0;
-int8_t      lastPos   = 0;
-bool        btnPress  = false;
-bool        longPress = false;
+// ── Screens ───────────────────────────────────────────────────────
+enum Screen { SCR_DRIVE, SCR_MODE, SCR_SPECIAL, SCR_SPEED };
+Screen curScr = SCR_DRIVE;
+bool   redraw = true;
 
-// Speed: 0=SLOW 1=NORMAL 2=FAST
-uint8_t speedLevel = 1;
-const char* speedNames[] = { "SLOW", "NORMAL", "FAST" };
-const uint32_t speedCodes[] = { RF_SPEED_DN, RF_FORWARD, RF_SPEED_UP };
-
-// Mode selection
+// ── Selections ────────────────────────────────────────────────────
 uint8_t modeIdx = 0;
-const char* modeNames[]  = { "NORMAL", "BODYGUARD", "DOG GUARD", "UNHINGED" };
-const uint32_t modeCodes[] = { RF_MODE_NRM, RF_MODE_BOD, RF_MODE_DOG, RF_MODE_UNH };
+uint8_t specIdx = 0;
+uint8_t spdIdx  = 1;   // 0=SLOW 1=NORMAL 2=FAST
 
-// Drive direction (encoder position → direction)
-// Encoder click 0 = STOP, rotating CW = FWD/RIGHT, CCW = BACK/LEFT
-int8_t driveDir = 0;  // -2=back-left, -1=back, 0=stop, 1=forward, 2=forward-right
+const char*    modeNames[]  = { "NORMAL", "BODYGUARD", "DOG GUARD", "UNHINGED" };
+const uint16_t modeCols[]   = { C_CYAN, C_AMBER, C_MINT, C_CORAL };
+const uint32_t modeCodes[]  = { RF_MODE_NRM, RF_MODE_BOD, RF_MODE_DOG, RF_MODE_UNH };
 
-// Current transmit code
-uint32_t lastCode = 0;
+const char*    specNames[]  = { "DANCE", "DEFENSE", "E-STOP", "< BACK" };
+const uint16_t specCols[]   = { C_PURPLE, C_AMBER, C_CORAL, C_LGRAY };
+const uint32_t specCodes[]  = { RF_DANCE, RF_DEFENSE, RF_ESTOP, 0 };
 
-// Button timing
-unsigned long btnDownMs   = 0;
-bool          btnWasDown  = false;
-#define LONG_PRESS_MS 600
+const char*    spdNames[]   = { "SLOW", "NORMAL", "FAST" };
+const uint16_t spdCols[]    = { C_MINT, C_CYAN, C_CORAL };
+const uint32_t spdCodes[]   = { RF_SPD_SLOW, RF_SPD_NORM, RF_SPD_FAST };
 
-// Display refresh
-unsigned long lastDraw    = 0;
-#define DRAW_INTERVAL_MS  80
+// ── Drive state ───────────────────────────────────────────────────
+bool     eStop      = false;
+uint32_t lastRFCode = 0;
 
-// Battery (ADC on A0 via voltage divider)
-#define BAT_PIN   A0
-float batVoltage  = 3.7f;
-uint8_t batPct    = 100;
-unsigned long lastBatRead = 0;
+// ── Button state ──────────────────────────────────────────────────
+#define NUM_BTNS    6
+#define DEBOUNCE_MS 20
+#define LONG_MS     600
+#define RF_MS        80
 
-// ── Encoder ISR ───────────────────────────────────────────────────
-volatile int8_t encDelta = 0;
-volatile uint8_t lastEncState = 0;
+struct Btn {
+  uint8_t       pin;
+  bool          state;      // debounced: LOW=pressed
+  bool          rawPrev;
+  bool          pressed;    // true for one frame on press
+  bool          released;   // true for one frame on release
+  bool          held;
+  unsigned long downAt;
+};
 
-void IRAM_ATTR encoderISR() {
-  uint8_t clk = digitalRead(ENC_CLK);
-  uint8_t dt  = digitalRead(ENC_DT);
-  uint8_t encState = (clk << 1) | dt;
-  if ((lastEncState == 0b00 && encState == 0b01) ||
-      (lastEncState == 0b01 && encState == 0b11) ||
-      (lastEncState == 0b11 && encState == 0b10) ||
-      (lastEncState == 0b10 && encState == 0b00)) {
-    encDelta++;
-  } else if ((lastEncState == 0b00 && encState == 0b10) ||
-             (lastEncState == 0b10 && encState == 0b11) ||
-             (lastEncState == 0b11 && encState == 0b01) ||
-             (lastEncState == 0b01 && encState == 0b00)) {
-    encDelta--;
+Btn btns[NUM_BTNS];
+#define B_FWD   0
+#define B_REV   1
+#define B_LEFT  2
+#define B_RIGHT 3
+#define B_STOP  4
+#define B_MENU  5
+
+void initBtns() {
+  const uint8_t pins[NUM_BTNS] = {
+    BTN_FWD, BTN_REV, BTN_LEFT, BTN_RIGHT, BTN_STOP, BTN_MENU
+  };
+  for (int i = 0; i < NUM_BTNS; i++) {
+    btns[i] = { pins[i], HIGH, HIGH, false, false, false, 0 };
+    pinMode(pins[i], INPUT_PULLUP);
   }
-  lastEncState = encState;
+}
+
+void readBtns() {
+  for (int i = 0; i < NUM_BTNS; i++) {
+    btns[i].pressed  = false;
+    btns[i].released = false;
+    bool raw = digitalRead(btns[i].pin);
+    if (raw != btns[i].state) {
+      btns[i].state = raw;
+      if (raw == LOW) {
+        btns[i].pressed = true;
+        btns[i].held    = true;
+        btns[i].downAt  = millis();
+      } else {
+        btns[i].released = true;
+        btns[i].held     = false;
+      }
+    }
+  }
+}
+
+bool longHeld(int i) {
+  return btns[i].held && (millis() - btns[i].downAt >= LONG_MS);
+}
+
+// ── Battery ───────────────────────────────────────────────────────
+uint8_t       batPct  = 100;
+unsigned long lastBat = 0;
+
+void readBat() {
+  if (millis() - lastBat < 10000) return;
+  lastBat = millis();
+  // SAMD21 analogRead: 10-bit (0-1023), 3.3V reference
+  // 173040 LiPo: 3.0V (0%) → 4.2V (100%), via 2x100k divider
+  float v  = (analogRead(BAT_PIN) / 1023.0f) * 3.3f * 2.0f;
+  batPct   = (uint8_t)constrain((v - 3.0f) / 1.2f * 100.0f, 0.0f, 100.0f);
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  DISPLAY HELPERS
+//  DRAW HELPERS
 // ════════════════════════════════════════════════════════════════════
 
-void drawBg() {
-  oled.fillScreen(C_BG);
-  // Subtle grid
-  for (int x = 0; x < OLED_W; x += 8)
-    oled.drawFastVLine(x, 0, OLED_H, 0x0421);
-  for (int y = 0; y < OLED_H; y += 8)
-    oled.drawFastHLine(0, y, OLED_W, 0x0421);
+void drawGrid() {
+  for (int x = 0; x < OLED_W; x += 8) oled.drawFastVLine(x, 0, OLED_H, 0x0421);
+  for (int y = 0; y < OLED_H; y += 8) oled.drawFastHLine(0, y, OLED_W, 0x0421);
 }
 
-void neonRect(int x, int y, int w, int h, uint16_t col) {
-  oled.fillRect(x, y, w, h, C_SURF);
-  oled.drawRect(x, y, w, h, col);
-  oled.drawFastHLine(x + 2, y, w - 4, col);   // top accent
+void drawBat(int x, int y) {
+  uint16_t c = batPct > 50 ? C_MINT : batPct > 20 ? C_AMBER : C_CORAL;
+  oled.drawRect(x, y, 18, 9, c);
+  oled.fillRect(x + 18, y + 3, 2, 3, c);
+  int f = (int)(batPct / 100.0f * 16);
+  if (f > 0) oled.fillRect(x + 1, y + 1, f, 7, c);
 }
 
-void drawLabel(int x, int y, const char* txt, uint16_t col) {
-  oled.setTextSize(1);
-  oled.setTextColor(col);
-  oled.setCursor(x, y);
-  oled.print(txt);
+void drawHdr(const char* title, uint16_t col) {
+  oled.fillRect(0, 0, OLED_W, 15, C_SURF);
+  oled.drawFastHLine(0, 14, OLED_W, col);
+  oled.drawFastHLine(0, 15, OLED_W, col);
+  oled.setTextSize(1); oled.setTextColor(col);
+  oled.setCursor((OLED_W - (int)strlen(title) * 6) / 2, 4);
+  oled.print(title);
+  drawBat(OLED_W - 24, 3);
 }
 
-void drawLabelCentered(int y, const char* txt, uint16_t col, uint8_t sz = 1) {
-  oled.setTextSize(sz);
-  oled.setTextColor(col);
-  int16_t tw = strlen(txt) * 6 * sz;
-  oled.setCursor((OLED_W - tw) / 2, y);
-  oled.print(txt);
+void drawC(int y, const char* s, uint16_t c, uint8_t sz = 1) {
+  oled.setTextSize(sz); oled.setTextColor(c);
+  oled.setCursor((OLED_W - (int)strlen(s) * 6 * sz) / 2, y);
+  oled.print(s);
 }
 
-void drawPill(int x, int y, int w, int h, uint16_t bg, uint16_t fg, const char* txt) {
+void drawPill(int x, int y, int w, int h, uint16_t bg, uint16_t fg, const char* s) {
   oled.fillRoundRect(x, y, w, h, h / 2, bg);
   oled.drawRoundRect(x, y, w, h, h / 2, fg);
-  oled.setTextSize(1);
-  oled.setTextColor(fg);
-  int16_t tw = strlen(txt) * 6;
-  oled.setCursor(x + (w - tw) / 2, y + (h - 8) / 2);
-  oled.print(txt);
+  oled.setTextSize(1); oled.setTextColor(fg);
+  oled.setCursor(x + (w - (int)strlen(s) * 6) / 2, y + (h - 8) / 2);
+  oled.print(s);
 }
 
-void drawBattery(int x, int y) {
-  uint16_t col = batPct > 50 ? C_MINT : batPct > 20 ? C_AMBER : C_CORAL;
-  oled.drawRect(x, y, 20, 10, col);
-  oled.fillRect(x + 20, y + 3, 2, 4, col);   // terminal
-  int fill = (int)(batPct / 100.0f * 18.0f);
-  if (fill > 0) oled.fillRect(x + 1, y + 1, fill, 8, col);
-  oled.setTextSize(1);
-  oled.setTextColor(col);
-  char buf[6]; snprintf(buf, sizeof(buf), "%d%%", batPct);
-  oled.setCursor(x + 24, y + 1);
-  oled.print(buf);
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  DRIVE DIRECTION ARROW
-// ════════════════════════════════════════════════════════════════════
-void drawArrow(int cx, int cy, int dir, uint16_t col) {
-  // dir: 0=stop, 1=up, 2=down, 3=left, 4=right, 5=ul, 6=ur, 7=dl, 8=dr
-  const int R = 14;
-  oled.fillCircle(cx, cy, R + 2, C_SURF);
-  oled.drawCircle(cx, cy, R + 2, col);
-  if (dir == 0) {
-    // Stop square
-    oled.fillRect(cx - 5, cy - 5, 10, 10, col);
-    return;
+void drawMenu(int sel, int count, const char** names, const uint16_t* cols) {
+  for (int i = 0; i < count; i++) {
+    bool act = (i == sel);
+    int  y   = 20 + i * 24;
+    uint16_t bg = act ? cols[i] : C_SURF;
+    uint16_t fg = act ? (uint16_t)C_BG : cols[i];
+    oled.fillRoundRect(6, y, 116, 20, 4, bg);
+    oled.drawRoundRect(6, y, 116, 20, 4, cols[i]);
+    if (act) {
+      oled.drawFastHLine(10, y,      108, C_WHITE);
+      oled.drawFastHLine(10, y + 19, 108, C_WHITE);
+    }
+    oled.setTextSize(1); oled.setTextColor(fg);
+    oled.setCursor((OLED_W - (int)strlen(names[i]) * 6) / 2, y + 6);
+    oled.print(names[i]);
   }
-  // Arrow tip direction
-  int dx = 0, dy = 0;
-  if (dir == 1) dy = -1;
-  else if (dir == 2) dy = 1;
-  else if (dir == 3) dx = -1;
-  else if (dir == 4) dx = 1;
-  else if (dir == 5) { dx = -1; dy = -1; }
-  else if (dir == 6) { dx =  1; dy = -1; }
-  else if (dir == 7) { dx = -1; dy =  1; }
-  else if (dir == 8) { dx =  1; dy =  1; }
-  int tx = cx + dx * R, ty = cy + dy * R;
-  // Arrowhead triangle
-  int px = -dy, py = dx;   // perpendicular
-  oled.fillTriangle(tx, ty,
-                    cx + px * 5, cy + py * 5,
-                    cx - px * 5, cy - py * 5,
-                    col);
-  // Shaft
-  oled.drawLine(cx, cy, tx - dx * 4, ty - dy * 4, col);
+  drawC(119, "FWD/REV=scroll  STOP=ok", C_DGRAY);
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  SCREEN RENDERERS
+//  DRIVE SCREEN
 // ════════════════════════════════════════════════════════════════════
+
+void drawDpadBtn(int cx, int cy, int w, int h, const char* lbl,
+                 bool active, uint16_t col) {
+  uint16_t bg = active ? col : C_SURF;
+  uint16_t fg = active ? (uint16_t)C_BG : col;
+  oled.fillRoundRect(cx - w/2, cy - h/2, w, h, 4, bg);
+  oled.drawRoundRect(cx - w/2, cy - h/2, w, h, 4, col);
+  if (active) oled.drawRoundRect(cx-w/2+1, cy-h/2+1, w-2, h-2, 3, C_WHITE);
+  oled.setTextSize(1); oled.setTextColor(fg);
+  oled.setCursor(cx - (int)strlen(lbl)*3, cy - 4);
+  oled.print(lbl);
+}
 
 void drawDriveScreen() {
-  drawBg();
+  bool f  = btns[B_FWD].held,   r  = btns[B_REV].held;
+  bool l  = btns[B_LEFT].held,  ri = btns[B_RIGHT].held;
+  bool s  = btns[B_STOP].held,  m  = btns[B_MENU].held;
 
-  // Header
-  oled.fillRect(0, 0, OLED_W, 16, C_SURF);
-  oled.drawFastHLine(0, 16, OLED_W, C_CYAN);
-  drawLabelCentered(4, "BUDDYBOT RC", C_CYAN);
-  drawBattery(OLED_W - 48, 3);
+  const int CX=58, CY=72, BW=32, BH=20, GAP=26;
 
-  // Direction arrow (centre)
-  int arrowDir = 0;
-  uint32_t sendCode = RF_STOP;
-  if      (driveDir ==  2) { arrowDir = 1; sendCode = RF_FORWARD;  }
-  else if (driveDir == -2) { arrowDir = 2; sendCode = RF_BACKWARD; }
-  else if (driveDir == -1) { arrowDir = 3; sendCode = RF_LEFT;     }
-  else if (driveDir ==  1) { arrowDir = 4; sendCode = RF_RIGHT;    }
-  else                     { arrowDir = 0; sendCode = RF_STOP;     }
+  drawDpadBtn(CX,      CY-GAP, BW, BH, "FWD",  f,  C_CYAN);
+  drawDpadBtn(CX,      CY+GAP, BW, BH, "REV",  r,  C_CYAN);
+  drawDpadBtn(CX-GAP,  CY,     BW, BH, "LEFT", l,  C_AMBER);
+  drawDpadBtn(CX+GAP,  CY,     BW, BH, "RGHT", ri, C_AMBER);
 
-  uint16_t arrowCol = driveDir == 0 ? C_CORAL :
-                      (abs(driveDir) == 2 ? C_CYAN : C_AMBER);
-  drawArrow(64, 64, arrowDir, arrowCol);
+  // Centre STOP circle
+  uint16_t sc = (eStop || s) ? C_CORAL : C_SURF2;
+  oled.fillCircle(CX, CY, 10, sc);
+  oled.drawCircle(CX, CY, 10, C_CORAL);
+  oled.drawCircle(CX, CY, 11, C_CORAL);
+  oled.setTextSize(1);
+  oled.setTextColor(eStop ? C_WHITE : C_CORAL);
+  oled.setCursor(CX - 9, CY - 4);
+  oled.print(eStop ? "CLR" : "STP");
 
-  // Direction label
-  const char* dirTxt = "STOP";
-  if (driveDir ==  2) dirTxt = "FORWARD";
-  if (driveDir == -2) dirTxt = "REVERSE";
-  if (driveDir == -1) dirTxt = "LEFT";
-  if (driveDir ==  1) dirTxt = "RIGHT";
-  drawLabelCentered(88, dirTxt, arrowCol);
+  // MENU button bottom-right
+  uint16_t mb = m ? C_PURPLE : C_SURF;
+  oled.fillRoundRect(94, 108, 30, 16, 4, mb);
+  oled.drawRoundRect(94, 108, 30, 16, 4, C_PURPLE);
+  oled.setTextSize(1); oled.setTextColor(m ? (uint16_t)C_BG : C_PURPLE);
+  oled.setCursor(97, 112); oled.print("MENU");
 
-  // Speed pill
-  uint16_t spCol = speedLevel == 0 ? C_MINT : speedLevel == 1 ? C_CYAN : C_CORAL;
-  char spBuf[14]; snprintf(spBuf, sizeof(spBuf), "SPD: %s", speedNames[speedLevel]);
-  drawPill(4, 100, 70, 14, C_SURF, spCol, spBuf);
+  // Status pills
+  char spb[8]; snprintf(spb, sizeof(spb), "%s", spdNames[spdIdx]);
+  drawPill(4, 108, 44, 14, C_SURF, spdCols[spdIdx], spb);
+  drawPill(50, 108, 42, 14, C_SURF, modeCols[modeIdx], modeNames[modeIdx]);
 
-  // Mode pill
-  drawPill(78, 100, 46, 14, C_SURF, C_PURPLE, modeNames[modeIdx]);
-
-  // Bottom hint
-  drawLabelCentered(116, "TURN=steer PRESS=menu", C_DGRAY);
-
-  // Send RF if changed
-  if (sendCode != lastCode) {
-    rfSwitch.send(sendCode, 24);
-    lastCode = sendCode;
+  // E-STOP banner
+  if (eStop) {
+    oled.fillRect(0, 17, OLED_W, 12, C_CORAL);
+    drawC(19, "!  E-STOP ACTIVE  !", C_WHITE);
   }
-}
-
-void drawModeScreen() {
-  drawBg();
-  oled.fillRect(0, 0, OLED_W, 16, C_SURF);
-  oled.drawFastHLine(0, 16, OLED_W, C_PURPLE);
-  drawLabelCentered(4, "SELECT MODE", C_PURPLE);
-
-  const uint16_t cols[] = { C_CYAN, C_AMBER, C_MINT, C_CORAL };
-  for (int i = 0; i < 4; i++) {
-    bool sel = (i == modeIdx);
-    int y = 22 + i * 22;
-    uint16_t bg = sel ? cols[i] : C_SURF;
-    uint16_t fg = sel ? C_BG    : cols[i];
-    oled.fillRoundRect(8, y, 112, 18, 4, bg);
-    oled.drawRoundRect(8, y, 112, 18, 4, cols[i]);
-    if (sel) oled.drawFastHLine(12, y, 104, C_WHITE);
-    oled.setTextSize(1); oled.setTextColor(fg);
-    int tw = strlen(modeNames[i]) * 6;
-    oled.setCursor((OLED_W - tw) / 2, y + 5);
-    oled.print(modeNames[i]);
-  }
-
-  drawLabelCentered(116, "TURN=scroll PRESS=set", C_DGRAY);
-}
-
-void drawSpecialScreen() {
-  drawBg();
-  oled.fillRect(0, 0, OLED_W, 16, C_SURF);
-  oled.drawFastHLine(0, 16, OLED_W, C_MINT);
-  drawLabelCentered(4, "SPECIAL", C_MINT);
-
-  struct { const char* name; uint16_t col; uint32_t code; } cmds[] = {
-    { "DANCE",   C_PURPLE, RF_DANCE   },
-    { "DEFENSE", C_AMBER,  RF_DEFENSE },
-    { "E-STOP",  C_CORAL,  RF_ESTOP   },
-    { "< BACK",  C_LGRAY,  0          },
-  };
-  int sel = ((encPos % 4) + 4) % 4;
-  for (int i = 0; i < 4; i++) {
-    bool isSel = (i == sel);
-    int y = 22 + i * 22;
-    uint16_t bg = isSel ? cmds[i].col : C_SURF;
-    uint16_t fg = isSel ? C_BG        : cmds[i].col;
-    oled.fillRoundRect(8, y, 112, 18, 4, bg);
-    oled.drawRoundRect(8, y, 112, 18, 4, cmds[i].col);
-    if (isSel) oled.drawFastHLine(12, y, 104, C_WHITE);
-    oled.setTextSize(1); oled.setTextColor(fg);
-    int tw = strlen(cmds[i].name) * 6;
-    oled.setCursor((OLED_W - tw) / 2, y + 5);
-    oled.print(cmds[i].name);
-  }
-  drawLabelCentered(116, "TURN=scroll PRESS=run", C_DGRAY);
-}
-
-void drawSpeedScreen() {
-  drawBg();
-  oled.fillRect(0, 0, OLED_W, 16, C_SURF);
-  oled.drawFastHLine(0, 16, OLED_W, C_AMBER);
-  drawLabelCentered(4, "SPEED", C_AMBER);
-
-  const uint16_t sCols[] = { C_MINT, C_CYAN, C_CORAL };
-  for (int i = 0; i < 3; i++) {
-    bool sel = (i == speedLevel);
-    int y = 28 + i * 26;
-    uint16_t bg = sel ? sCols[i] : C_SURF;
-    uint16_t fg = sel ? C_BG     : sCols[i];
-    oled.fillRoundRect(12, y, 104, 22, 5, bg);
-    oled.drawRoundRect(12, y, 104, 22, 5, sCols[i]);
-    if (sel) {
-      oled.drawFastHLine(16, y, 96, C_WHITE);
-      oled.drawFastHLine(16, y + 21, 96, C_WHITE);
-    }
-    oled.setTextSize(2); oled.setTextColor(fg);
-    int tw = strlen(speedNames[i]) * 12;
-    oled.setCursor((OLED_W - tw) / 2, y + 7);
-    oled.print(speedNames[i]);
-  }
-  drawLabelCentered(108, "TURN=change PRESS=set", C_DGRAY);
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  BATTERY MONITOR
+//  DRIVE LOGIC
 // ════════════════════════════════════════════════════════════════════
-void updateBattery() {
-  if (millis() - lastBatRead < 10000) return;  // every 10s
-  lastBatRead = millis();
-  // 173040 LiPo: 3.0V (0%) → 4.2V (100%)
-  // ADC via voltage divider (2x100k = half voltage on 3.3V ref)
-  int raw = analogRead(BAT_PIN);
-  float measuredV = (raw / 1023.0f) * 3.3f * 2.0f;  // x2 for divider
-  batVoltage = measuredV;
-  batPct = (uint8_t)(constrain((measuredV - 3.0f) / 1.2f * 100.0f, 0.0f, 100.0f));
+
+void processDrive() {
+  static unsigned long lastRFSend = 0;
+  unsigned long now = millis();
+
+  uint32_t cmd = RF_STOP;
+  if      (btns[B_FWD].held)   cmd = RF_FORWARD;
+  else if (btns[B_REV].held)   cmd = RF_BACKWARD;
+  else if (btns[B_LEFT].held)  cmd = RF_LEFT;
+  else if (btns[B_RIGHT].held) cmd = RF_RIGHT;
+
+  // STOP short press
+  if (btns[B_STOP].pressed) {
+    if (eStop) { eStop = false; redraw = true; }
+    cmd = RF_STOP;
+    rf.send(RF_STOP, 24);
+    lastRFSend = now;
+    lastRFCode = RF_STOP;
+  }
+
+  // STOP long hold → E-STOP toggle
+  if (longHeld(B_STOP) && !eStop) {
+    eStop  = true;
+    redraw = true;
+    rf.send(RF_ESTOP, 24);
+    btns[B_STOP].held = false;
+    return;
+  }
+
+  if (eStop) return;
+
+  // Keep sending RF while driving
+  if (now - lastRFSend >= RF_MS) {
+    rf.send(cmd, 24);
+    lastRFSend = now;
+    if (cmd != lastRFCode) { lastRFCode = cmd; redraw = true; }
+  }
+  if (cmd != lastRFCode) { lastRFCode = cmd; redraw = true; }
+
+  // MENU short press → mode screen
+  if (btns[B_MENU].released && (now - btns[B_MENU].downAt < LONG_MS)) {
+    rf.send(RF_STOP, 24);
+    curScr = SCR_MODE;
+    redraw = true;
+    oled.fillRect(0, 16, OLED_W, OLED_H-16, C_BG);
+    drawGrid(); drawHdr("SELECT MODE", C_PURPLE);
+    return;
+  }
+
+  // MENU long hold → special screen
+  if (longHeld(B_MENU)) {
+    rf.send(RF_STOP, 24);
+    curScr  = SCR_SPECIAL;
+    specIdx = 0;
+    redraw  = true;
+    btns[B_MENU].held = false;
+    oled.fillRect(0, 16, OLED_W, OLED_H-16, C_BG);
+    drawGrid(); drawHdr("SPECIAL CMDS", C_AMBER);
+    return;
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  BUTTON HANDLER
+//  MENU NAV HELPER
 // ════════════════════════════════════════════════════════════════════
-struct BtnResult { bool click; bool longClick; };
 
-BtnResult handleButton() {
-  BtnResult r = { false, false };
-  bool down = (digitalRead(ENC_SW) == LOW);
-
-  if (down && !btnWasDown) {
-    btnDownMs  = millis();
-    btnWasDown = true;
+bool menuNav(uint8_t& idx, uint8_t count) {
+  if (btns[B_FWD].pressed)  { idx = (idx + count - 1) % count; redraw = true; }
+  if (btns[B_REV].pressed)  { idx = (idx + 1) % count;          redraw = true; }
+  if (btns[B_STOP].pressed)  return true;
+  if (btns[B_MENU].pressed) {
+    curScr = SCR_DRIVE; redraw = true;
+    oled.fillRect(0, 16, OLED_W, OLED_H-16, C_BG);
+    drawGrid(); drawHdr("BUDDYBOT RC", C_CYAN);
   }
-
-  if (!down && btnWasDown) {
-    unsigned long held = millis() - btnDownMs;
-    btnWasDown = false;
-    if (held >= LONG_PRESS_MS) r.longClick = true;
-    else                        r.click     = true;
-  }
-  return r;
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  ENCODER READER
-// ════════════════════════════════════════════════════════════════════
-int8_t readEncoder() {
-  noInterrupts();
-  int8_t d = encDelta;
-  encDelta  = 0;
-  interrupts();
-  return d;
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  STATE MACHINE TRANSITIONS
-// ════════════════════════════════════════════════════════════════════
-void handleDriveState(int8_t delta, BtnResult btn) {
-  // Encoder rotation → drive direction
-  // CW: advance forward or right; CCW: backward or left
-  if (delta > 0) {
-    driveDir = constrain(driveDir + 1, -2, 2);
-  } else if (delta < 0) {
-    driveDir = constrain(driveDir - 1, -2, 2);
-  }
-
-  // Short press → cycle to next screen
-  if (btn.click) {
-    state    = ST_MODE;
-    encPos   = modeIdx;
-    driveDir = 0;
-    rfSwitch.send(RF_STOP, 24);
-    lastCode = RF_STOP;
-    oled.fillScreen(C_BG);
-  }
-
-  // Long press → special commands
-  if (btn.longClick) {
-    state   = ST_SPECIAL;
-    encPos  = 0;
-    driveDir = 0;
-    rfSwitch.send(RF_STOP, 24);
-    lastCode = RF_STOP;
-    oled.fillScreen(C_BG);
-  }
-}
-
-void handleModeState(int8_t delta, BtnResult btn) {
-  if (delta != 0) {
-    modeIdx = ((int)modeIdx + delta + 4) % 4;
-  }
-
-  // Short press → set mode + go to speed screen
-  if (btn.click) {
-    rfSwitch.send(modeCodes[modeIdx], 24);
-    state  = ST_SPEED;
-    encPos = speedLevel;
-    oled.fillScreen(C_BG);
-  }
-
-  // Long press → back to drive
-  if (btn.longClick) {
-    state = ST_DRIVE;
-    oled.fillScreen(C_BG);
-  }
-}
-
-void handleSpecialState(int8_t delta, BtnResult btn) {
-  if (delta != 0) {
-    encPos = ((int)encPos + delta + 4) % 4;
-  }
-
-  // Short press → execute
-  if (btn.click) {
-    int sel = ((encPos % 4) + 4) % 4;
-    if (sel == 0)      rfSwitch.send(RF_DANCE,   24);
-    else if (sel == 1) rfSwitch.send(RF_DEFENSE, 24);
-    else if (sel == 2) rfSwitch.send(RF_ESTOP,   24);
-    else {
-      // BACK
-      state = ST_DRIVE;
-      oled.fillScreen(C_BG);
-      return;
-    }
-    delay(200);
-  }
-
-  // Long press → back to drive
-  if (btn.longClick) {
-    state = ST_DRIVE;
-    oled.fillScreen(C_BG);
-  }
-}
-
-void handleSpeedState(int8_t delta, BtnResult btn) {
-  if (delta > 0 && speedLevel < 2) speedLevel++;
-  if (delta < 0 && speedLevel > 0) speedLevel--;
-
-  // Short press → set + go back to drive
-  if (btn.click) {
-    // Send speed command to robot
-    if (speedLevel == 0)      rfSwitch.send(0xA10030UL, 24); // SLOW
-    else if (speedLevel == 1) rfSwitch.send(0xA10031UL, 24); // NORMAL
-    else                      rfSwitch.send(0xA10032UL, 24); // FAST
-    state    = ST_DRIVE;
-    driveDir = 0;
-    oled.fillScreen(C_BG);
-  }
-
-  if (btn.longClick) {
-    state = ST_DRIVE;
-    oled.fillScreen(C_BG);
-  }
+  return false;
 }
 
 // ════════════════════════════════════════════════════════════════════
 //  SETUP
 // ════════════════════════════════════════════════════════════════════
+
 void setup() {
-  // Encoder pins
-  pinMode(ENC_CLK, INPUT_PULLUP);
-  pinMode(ENC_DT,  INPUT_PULLUP);
-  pinMode(ENC_SW,  INPUT_PULLUP);
+  initBtns();
 
-  // Encoder ISR — trigger on any change
-  attachInterrupt(digitalPinToInterrupt(ENC_CLK), encoderISR, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENC_DT),  encoderISR, CHANGE);
+  // RF transmitter — D1 (not D0 which is Serial1 RX on SAMD21)
+  rf.enableTransmit(RF_PIN);
+  rf.setProtocol(1);
+  rf.setPulseLength(189);
+  rf.setRepeatTransmit(5);
 
-  // RF transmitter
-  rfSwitch.enableTransmit(RF_PIN);
-  rfSwitch.setProtocol(1);
-  rfSwitch.setPulseLength(189);
-  rfSwitch.setRepeatTransmit(5);  // 5 repeats for reliability
-
-  // Battery ADC
+  // SAMD21 ADC — 10-bit resolution, 3.3V reference
   analogReadResolution(10);
+  analogReference(AR_DEFAULT);   // 3.3V internal reference on SAMD21
 
-  // OLED
+  // OLED — uses hardware SPI via underside pads of XC3812
   oled.begin();
   oled.setRotation(0);
-
-  // Splash
   oled.fillScreen(C_BG);
-  for (int x = 0; x < OLED_W; x += 8) oled.drawFastVLine(x, 0, OLED_H, 0x0421);
-  for (int y = 0; y < OLED_H; y += 8) oled.drawFastHLine(0, y, OLED_W, 0x0421);
-  oled.drawRect(8, 24, 112, 80, C_CYAN);
-  oled.drawRect(10, 26, 108, 76, C_CYAN);
-  oled.drawFastHLine(12, 26, 104, C_WHITE);
-  drawLabelCentered(38,  "BUDDYBOT",  C_CYAN,  2);
-  drawLabelCentered(60,  "REMOTE",    C_CYAN,  2);
-  drawLabelCentered(80,  "v1.0",      C_LGRAY, 1);
-  drawLabelCentered(112, "Reinsma Innovations", C_MGRAY, 1);
+
+  // ── Boot splash ──────────────────────────────────────────────────
+  drawGrid();
+  oled.drawRect(8, 12, 112, 96, C_CYAN);
+  oled.drawRect(10, 14, 108, 92, C_CYAN);
+  oled.drawFastHLine(14, 14, 100, C_WHITE);
+
+  drawC(22,  "BUDDYBOT", C_CYAN,  2);
+  drawC(42,  "REMOTE",   C_CYAN,  2);
+  drawC(62,  "v2.0",     C_LGRAY, 1);
+
+  // Mini D-pad icon
+  const int ICX=64, ICY=88, IS=7, IG=10;
+  oled.fillRoundRect(ICX-IS/2,   ICY-IG,     IS, IS, 2, C_CYAN);   // fwd
+  oled.fillRoundRect(ICX-IS/2,   ICY+3,      IS, IS, 2, C_CYAN);   // rev
+  oled.fillRoundRect(ICX-IG-IS/2+1, ICY-IS/2+1, IS, IS, 2, C_AMBER); // left
+  oled.fillRoundRect(ICX+IG-IS/2-1, ICY-IS/2+1, IS, IS, 2, C_AMBER); // right
+  oled.fillCircle(ICX, ICY, IS/2, C_CORAL);                         // stop
+
+  // Board info
+  drawC(102, "XC3812  SAMD21", C_DGRAY);
+  drawC(112, "Reinsma Innovations", C_MGRAY);
   delay(1800);
-  oled.fillScreen(C_BG);
 
-  // Initial battery read
-  lastBatRead = 0;
-  updateBattery();
+  // Main header
+  oled.fillScreen(C_BG);
+  drawGrid();
+  drawHdr("BUDDYBOT RC", C_CYAN);
+
+  lastBat = 0;
+  readBat();
+  redraw = true;
 }
 
 // ════════════════════════════════════════════════════════════════════
 //  LOOP
 // ════════════════════════════════════════════════════════════════════
+
 void loop() {
-  // Read encoder delta accumulated since last loop
-  int8_t delta = readEncoder();
+  readBtns();
+  readBat();
 
-  // Clamp large deltas (debounce)
-  if      (delta >  2) delta =  1;
-  else if (delta < -2) delta = -1;
-
-  // Button
-  BtnResult btn = handleButton();
-
-  // State machine
-  switch (state) {
-    case ST_DRIVE:   handleDriveState(delta, btn);   break;
-    case ST_MODE:    handleModeState(delta, btn);     break;
-    case ST_SPECIAL: handleSpecialState(delta, btn);  break;
-    case ST_SPEED:   handleSpeedState(delta, btn);    break;
-  }
-
-  // Battery update (non-blocking)
-  updateBattery();
-
-  // Redraw display at 12.5 fps max
-  if (millis() - lastDraw >= DRAW_INTERVAL_MS) {
-    lastDraw = millis();
-    switch (state) {
-      case ST_DRIVE:   drawDriveScreen();   break;
-      case ST_MODE:    drawModeScreen();    break;
-      case ST_SPECIAL: drawSpecialScreen(); break;
-      case ST_SPEED:   drawSpeedScreen();   break;
+  // Battery indicator refresh every 15s
+  static unsigned long lastHdr = 0;
+  if (millis() - lastHdr > 15000) {
+    lastHdr = millis();
+    switch (curScr) {
+      case SCR_DRIVE:   drawHdr("BUDDYBOT RC",  C_CYAN);   break;
+      case SCR_MODE:    drawHdr("SELECT MODE",  C_PURPLE); break;
+      case SCR_SPECIAL: drawHdr("SPECIAL CMDS", C_AMBER);  break;
+      case SCR_SPEED:   drawHdr("SELECT SPEED", C_AMBER);  break;
     }
   }
 
-  delay(10);
+  switch (curScr) {
+
+    // ── DRIVE ──────────────────────────────────────────────────────
+    case SCR_DRIVE: {
+      processDrive();
+      static bool pF=false,pR=false,pL=false,pRi=false,pS=false;
+      bool f=btns[B_FWD].held, r=btns[B_REV].held;
+      bool l=btns[B_LEFT].held, ri=btns[B_RIGHT].held, s=btns[B_STOP].held;
+      if (redraw || f!=pF || r!=pR || l!=pL || ri!=pRi || s!=pS) {
+        oled.fillRect(0, 16, OLED_W, OLED_H-16, C_BG);
+        drawGrid(); drawDriveScreen();
+        pF=f; pR=r; pL=l; pRi=ri; pS=s;
+        redraw = false;
+      }
+      break;
+    }
+
+    // ── MODE ───────────────────────────────────────────────────────
+    case SCR_MODE:
+      if (menuNav(modeIdx, 4)) {
+        rf.send(modeCodes[modeIdx], 24);
+        curScr = SCR_SPEED; spdIdx = 1; redraw = true;
+        oled.fillRect(0, 16, OLED_W, OLED_H-16, C_BG);
+        drawGrid(); drawHdr("SELECT SPEED", C_AMBER);
+      }
+      if (redraw) {
+        oled.fillRect(0, 16, OLED_W, OLED_H-16, C_BG);
+        drawGrid(); drawMenu(modeIdx, 4, modeNames, modeCols);
+        redraw = false;
+      }
+      break;
+
+    // ── SPECIAL ────────────────────────────────────────────────────
+    case SCR_SPECIAL:
+      if (menuNav(specIdx, 4)) {
+        if (specIdx == 3) {  // BACK
+          curScr = SCR_DRIVE; redraw = true;
+          oled.fillRect(0, 16, OLED_W, OLED_H-16, C_BG);
+          drawGrid(); drawHdr("BUDDYBOT RC", C_CYAN);
+        } else {
+          rf.send(specCodes[specIdx], 24);
+          if (specIdx == 2) eStop = true;
+          delay(150); redraw = true;
+        }
+      }
+      if (redraw) {
+        oled.fillRect(0, 16, OLED_W, OLED_H-16, C_BG);
+        drawGrid(); drawMenu(specIdx, 4, specNames, specCols);
+        redraw = false;
+      }
+      break;
+
+    // ── SPEED ──────────────────────────────────────────────────────
+    case SCR_SPEED:
+      if (menuNav(spdIdx, 3)) {
+        rf.send(spdCodes[spdIdx], 24);
+        curScr = SCR_DRIVE; redraw = true;
+        oled.fillRect(0, 16, OLED_W, OLED_H-16, C_BG);
+        drawGrid(); drawHdr("BUDDYBOT RC", C_CYAN);
+      }
+      if (redraw) {
+        oled.fillRect(0, 16, OLED_W, OLED_H-16, C_BG);
+        drawGrid();
+        for (int i = 0; i < 3; i++) {
+          bool sel = (i == spdIdx);
+          int  y   = 22 + i * 30;
+          oled.fillRoundRect(8, y, 112, 26, 5, sel ? spdCols[i] : C_SURF);
+          oled.drawRoundRect(8, y, 112, 26, 5, spdCols[i]);
+          if (sel) oled.drawFastHLine(12, y, 104, C_WHITE);
+          oled.setTextSize(2);
+          oled.setTextColor(sel ? (uint16_t)C_BG : spdCols[i]);
+          oled.setCursor((OLED_W - (int)strlen(spdNames[i]) * 12) / 2, y + 9);
+          oled.print(spdNames[i]);
+        }
+        drawC(118, "FWD/REV=scroll  STOP=ok", C_DGRAY);
+        redraw = false;
+      }
+      break;
+  }
+
+  delay(8);
 }
