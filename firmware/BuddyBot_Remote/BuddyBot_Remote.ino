@@ -1,37 +1,32 @@
 /*
  * ════════════════════════════════════════════════════════════════════
- *  BUDDYBOT  —  Remote Control  ·  XC3812 SAMD21  ·  V3.0
- *  4-Button  |  Toggle-to-drive  |  Neon Cyberpunk UI
+ *  BUDDYBOT Remote Control — XC3812 SAMD21 — V4.0
+ *  4 buttons: UP DOWN LEFT RIGHT
+ *  Based on working V1 display init (hardware SPI, RST=8, rotation=0)
  * ════════════════════════════════════════════════════════════════════
  *
- *  WIRING
- *  ─────────────────────────────────────────────────────────────────
- *  OLED XC3726 (SPI):
- *    CS   → 10        DC   → 9        RES  → 5
- *    SDA  → MOSI pad  SCL  → SCK pad  (underside of XC3812)
- *    VCC  → 3V        GND  → GND
+ *  WIRING (identical to V1 that worked):
+ *    OLED CS  → 10    DC  → 9    RST → 8
+ *    OLED SDA → MOSI pad (underside)
+ *    OLED SCL → SCK  pad (underside)
+ *    OLED VCC → 3V   GND → GND
  *
- *  Buttons (INPUT_PULLUP — other leg to GND):
- *    UP    → D11      DOWN  → D12
- *    LEFT  → D13      RIGHT → A2
+ *    BTN_UP    → A2   (INPUT_PULLUP to GND)
+ *    BTN_DOWN  → A3
+ *    BTN_LEFT  → A4
+ *    BTN_RIGHT → A5
  *
- *  RF Transmitter 433MHz:
- *    DATA  → D6    VCC → 3.3V    GND → GND
+ *    RF DATA   → D6
+ *    BAT ADC   → A0 (via 2x100k divider)
  *
- *  Battery ADC: LiPo+ → 2×100kΩ divider → A0
- *
- *  CONTROLS
- *  ─────────────────────────────────────────────────────────────────
- *  UP     press        → toggle Forward ON/OFF
- *  DOWN   press        → toggle Reverse ON/OFF
- *  LEFT   hold         → spin Left
- *  RIGHT  hold         → spin Right
- *  LEFT+RIGHT 600ms    → E-STOP toggle
- *  DOWN   hold 800ms   → open Menu
- *
- *  In Menu:
- *    UP/DOWN=scroll   LEFT=confirm   RIGHT=back
- *
+ *  CONTROLS:
+ *    UP press         toggle Forward ON/OFF
+ *    DOWN press       toggle Reverse ON/OFF
+ *    LEFT hold        spin left
+ *    RIGHT hold       spin right
+ *    LEFT+RIGHT 600ms E-STOP toggle
+ *    DOWN hold 800ms  open Menu
+ *    In menu: UP/DOWN scroll, LEFT confirm, RIGHT back
  * ════════════════════════════════════════════════════════════════════
  */
 
@@ -40,468 +35,279 @@
 #include <Adafruit_SSD1351.h>
 #include <RCSwitch.h>
 
-// ── Pins ──────────────────────────────────────────────────────────
+// ── Pins — identical to working V1 ───────────────────────────────
 #define OLED_CS   10
 #define OLED_DC    9
-#define OLED_RST   5
-#define BTN_UP    A3   // moved off D11 (MOSI)
-#define BTN_DOWN  A4   // moved off D12 (was ok but keeping layout tidy)
-#define BTN_LEFT  A5   // moved off D13 (SCK)
-#define BTN_RIGHT A2
-#define RF_PIN     6
+#define OLED_RST   8    // same as V1 that worked
+
+#define BTN_UP    A2
+#define BTN_DOWN  A3
+#define BTN_LEFT  A4
+#define BTN_RIGHT A5
+
+#define RF_PIN     6    // same as V1 that worked
 #define BAT_PIN   A0
 
-#define OLED_W 128
-#define OLED_H 128
+#define OLED_W   128
+#define OLED_H   128
 
 // ── RF codes ─────────────────────────────────────────────────────
-#define RF_FORWARD  0xA10001UL
-#define RF_BACKWARD 0xA10002UL
-#define RF_LEFT     0xA10003UL
-#define RF_RIGHT    0xA10004UL
-#define RF_STOP     0xA10005UL
-#define RF_SPD_SLOW 0xA10030UL
-#define RF_SPD_NORM 0xA10031UL
-#define RF_SPD_FAST 0xA10032UL
-#define RF_MODE_NRM 0xA10010UL
-#define RF_MODE_BOD 0xA10011UL
-#define RF_MODE_DOG 0xA10012UL
-#define RF_MODE_UNH 0xA10013UL
-#define RF_ESTOP    0xA100FFUL
-#define RF_DANCE    0xA10020UL
-#define RF_DEFENSE  0xA10021UL
+#define RF_FWD   0xA10001UL
+#define RF_REV   0xA10002UL
+#define RF_LEFT  0xA10003UL
+#define RF_RIGHT 0xA10004UL
+#define RF_STOP  0xA10005UL
+#define RF_SLOW  0xA10030UL
+#define RF_NORM  0xA10031UL
+#define RF_FAST  0xA10032UL
+#define RF_NRM   0xA10010UL
+#define RF_BOD   0xA10011UL
+#define RF_DOG   0xA10012UL
+#define RF_UNH   0xA10013UL
+#define RF_ESTP  0xA100FFUL
+#define RF_DNC   0xA10020UL
+#define RF_DEF   0xA10021UL
 
-// ── Neon palette (RGB565) ─────────────────────────────────────────
-#define C_BK     0x0000u
-#define C_BG     0x0020u
-#define C_SURF   0x0841u
-#define C_CYAN   0x07FFu
-#define C_DCYAN  0x03EFu
-#define C_XCYAN  0x001Fu
-#define C_MINT   0x07E4u
-#define C_AMBER  0xFD20u
-#define C_CORAL  0xF944u
-#define C_PURPLE 0x781Fu
-#define C_WHITE  0xFFFFu
-#define C_LGRAY  0x8C71u
-#define C_MGRAY  0x4228u
-#define C_DGRAY  0x2104u
+// ── Colours ───────────────────────────────────────────────────────
+#define BK    0x0000
+#define SURF  0x0841
+#define CYN   0x07FF
+#define MNT   0x07E4
+#define AMB   0xFD20
+#define CRL   0xF944
+#define PUR   0x781F
+#define WHT   0xFFFF
+#define DGR   0x2104
+#define MGR   0x4228
+#define LGR   0x8C71
+#define DCY   0x03EF
 
-// ── Objects ───────────────────────────────────────────────────────
-// Hardware SPI — uses board SPI peripheral (MOSI/SCK = underside pads of XC3812)
-Adafruit_SSD1351 oled(OLED_W,OLED_H,&SPI,OLED_CS,OLED_DC,OLED_RST);
+// ── Objects — identical init to V1 ───────────────────────────────
+Adafruit_SSD1351 oled(OLED_W, OLED_H, &SPI, OLED_CS, OLED_DC, OLED_RST);
 RCSwitch rf;
 
-// ── Screens ───────────────────────────────────────────────────────
-enum Screen { SCR_DRIVE, SCR_MODE, SCR_SPECIAL, SCR_SPEED };
-Screen curScr = SCR_DRIVE;
-bool   redraw = true;
+// ── State ─────────────────────────────────────────────────────────
+enum Scr { DRIVE, MMODE, MSPEC, MSPD };
+Scr scr = DRIVE;
+bool redraw = true;
+uint8_t modeIdx=0, specIdx=0, spdIdx=1;
+bool eStopped=false, goFwd=false, goRev=false, menuUsed=false;
+uint32_t lastCode=RF_STOP;
+uint8_t batPct=100;
+unsigned long lastBat=0;
 
-// ── Selections ───────────────────────────────────────────────────
-uint8_t modeIdx = 0, specIdx = 0, spdIdx = 1;
-
-const char*    modeNames[] = { "NORMAL","BODYGUARD","DOG GUARD","UNHINGED" };
-const uint16_t modeCols[]  = { C_CYAN,C_AMBER,C_MINT,C_CORAL };
-const uint32_t modeCodes[] = { RF_MODE_NRM,RF_MODE_BOD,RF_MODE_DOG,RF_MODE_UNH };
-
-const char*    specNames[] = { "DANCE","DEFENSE","E-STOP","< BACK" };
-const uint16_t specCols[]  = { C_PURPLE,C_AMBER,C_CORAL,C_LGRAY };
-const uint32_t specCodes[] = { RF_DANCE,RF_DEFENSE,RF_ESTOP,0 };
-
-const char*    spdNames[]  = { "SLOW","NORMAL","FAST" };
-const uint16_t spdCols[]   = { C_MINT,C_CYAN,C_CORAL };
-const uint32_t spdCodes[]  = { RF_SPD_SLOW,RF_SPD_NORM,RF_SPD_FAST };
-
-// ── Drive state ───────────────────────────────────────────────────
-bool     eStop    = false;
-bool     driveFwd = false;
-bool     driveRev = false;
-uint32_t lastRFCode = RF_STOP;
-bool     menuConsumed = false;
+const char* mN[]={"NORMAL","BODYGUARD","DOG GUARD","UNHINGED"};
+const uint16_t mC[]={CYN,AMB,MNT,CRL};
+const uint32_t mRF[]={RF_NRM,RF_BOD,RF_DOG,RF_UNH};
+const char* sN[]={"DANCE","DEFENSE","E-STOP","< BACK"};
+const uint16_t sC[]={PUR,AMB,CRL,LGR};
+const uint32_t sRF[]={RF_DNC,RF_DEF,RF_ESTP,0};
+const char* spN[]={"SLOW","NORMAL","FAST"};
+const uint16_t spC[]={MNT,CYN,CRL};
+const uint32_t spRF[]={RF_SLOW,RF_NORM,RF_FAST};
 
 // ── Buttons ───────────────────────────────────────────────────────
-#define NUM_BTNS 4
-#define DEB_MS   22
-#define LONG_MS  600
-#define MENU_MS  800
-#define RF_MS     90
+struct Btn { uint8_t pin; bool st,pr,rl,hd; unsigned long dn; };
+Btn B[4]; // 0=UP 1=DN 2=LT 3=RT
 
-struct Btn {
-  uint8_t pin;
-  bool state, rawPrev, pressed, released, held;
-  unsigned long downAt;
-};
-
-Btn btns[NUM_BTNS];
-#define B_UP    0
-#define B_DOWN  1
-#define B_LEFT  2
-#define B_RIGHT 3
-
-void initBtns() {
-  const uint8_t pins[NUM_BTNS] = { BTN_UP,BTN_DOWN,BTN_LEFT,BTN_RIGHT };
-  for (int i=0;i<NUM_BTNS;i++) {
-    btns[i]={pins[i],HIGH,HIGH,false,false,false,0};
-    pinMode(pins[i],INPUT_PULLUP);
-  }
+void initB() {
+  uint8_t p[]={BTN_UP,BTN_DOWN,BTN_LEFT,BTN_RIGHT};
+  for(int i=0;i<4;i++){B[i]={p[i],HIGH,false,false,false,0};pinMode(p[i],INPUT_PULLUP);}
 }
 
-void readBtns() {
-  for (int i=0;i<NUM_BTNS;i++) {
-    btns[i].pressed=btns[i].released=false;
-    bool raw=digitalRead(btns[i].pin);
-    if (raw!=btns[i].state) {
-      btns[i].state=raw;
-      if (raw==LOW) { btns[i].pressed=true; btns[i].held=true; btns[i].downAt=millis(); }
-      else          { btns[i].released=true; btns[i].held=false; }
+void readB() {
+  for(int i=0;i<4;i++){
+    B[i].pr=B[i].rl=false;
+    bool r=digitalRead(B[i].pin);
+    if(r!=B[i].st){
+      B[i].st=r;
+      if(r==LOW){B[i].pr=true;B[i].hd=true;B[i].dn=millis();}
+      else{B[i].rl=true;B[i].hd=false;}
     }
   }
 }
 
-bool longHeld(int i,unsigned long ms=LONG_MS) {
-  return btns[i].held&&(millis()-btns[i].downAt>=ms);
-}
+bool lh(int i,unsigned long ms=600){return B[i].hd&&(millis()-B[i].dn>=ms);}
 
-// ── Battery ───────────────────────────────────────────────────────
-uint8_t batPct=100;
-unsigned long lastBat=0;
-
-void readBat() {
-  if (millis()-lastBat<12000) return;
-  lastBat=millis();
+void readBat(){
+  if(millis()-lastBat<15000)return; lastBat=millis();
   float v=(analogRead(BAT_PIN)/1023.0f)*3.3f*2.0f;
   batPct=(uint8_t)constrain((v-3.0f)/1.2f*100.0f,0.0f,100.0f);
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  DRAW HELPERS
-// ════════════════════════════════════════════════════════════════════
-
-void drawGrid() {
-  for (int x=0;x<OLED_W;x+=16) oled.drawFastVLine(x,0,OLED_H,0x0421u);
-  for (int y=0;y<OLED_H;y+=16) oled.drawFastHLine(0,y,OLED_W,0x0421u);
+// ── Draw helpers ──────────────────────────────────────────────────
+void ctr(int y,const char*s,uint16_t c,uint8_t sz=1){
+  oled.setTextSize(sz);oled.setTextColor(c);
+  oled.setCursor((128-(int)strlen(s)*6*sz)/2,y);oled.print(s);
 }
 
-void hexCorners(int x,int y,int w,int h,uint16_t col,int sz=8) {
-  oled.drawFastHLine(x,y,sz,col);    oled.drawFastVLine(x,y,sz,col);
-  oled.drawFastHLine(x+w-sz,y,sz,col); oled.drawFastVLine(x+w-1,y,sz,col);
-  oled.drawFastHLine(x,y+h-1,sz,col); oled.drawFastVLine(x,y+h-sz,sz,col);
-  oled.drawFastHLine(x+w-sz,y+h-1,sz,col); oled.drawFastVLine(x+w-1,y+h-sz,sz,col);
+void hdr(const char*t,uint16_t c){
+  oled.fillRect(0,0,128,16,BK);
+  oled.drawFastHLine(0,15,128,c);
+  oled.setTextSize(1);oled.setTextColor(c);
+  oled.setCursor((128-(int)strlen(t)*6)/2,4);oled.print(t);
+  // battery
+  uint16_t bc=batPct>50?MNT:batPct>20?AMB:CRL;
+  oled.drawRect(100,3,18,9,bc);oled.fillRect(118,5,2,4,bc);
+  int f=(int)(batPct/100.0f*16);if(f>0)oled.fillRect(101,4,f,7,bc);
 }
 
-void drawC(int y,const char* s,uint16_t c,uint8_t sz=1) {
-  oled.setTextSize(sz); oled.setTextColor(c);
-  oled.setCursor((OLED_W-(int)strlen(s)*6*sz)/2,y);
-  oled.print(s);
+void box(int x,int y,int w,int h,uint16_t c,bool active){
+  oled.fillRect(x,y,w,h,active?c:BK);
+  oled.drawRect(x,y,w,h,c);
+  if(active)oled.drawFastHLine(x+2,y,w-4,WHT);
 }
 
-void glowBar(int x,int y,int w,int h,float frac,uint16_t col) {
-  oled.fillRoundRect(x,y,w,h,2,C_SURF);
-  oled.drawRoundRect(x,y,w,h,2,col);
-  int fill=(int)(frac*(w-2));
-  if (fill>0) {
-    oled.fillRect(x+1,y+1,fill,h-2,col);
-    oled.drawFastHLine(x+1,y+1,fill,C_WHITE);
+void menu(int sel,int n,const char**nm,const uint16_t*cl){
+  for(int i=0;i<n;i++){
+    bool a=(i==sel);int y=20+i*24;
+    box(4,y,120,20,cl[i],a);
+    oled.setTextSize(1);oled.setTextColor(a?BK:cl[i]);
+    oled.setCursor((128-(int)strlen(nm[i])*6)/2,y+6);oled.print(nm[i]);
   }
+  ctr(118,"UP/DN  LEFT=ok  RIGHT=bk",DGR);
 }
 
-void drawBat(int x,int y) {
-  uint16_t c=batPct>50?C_MINT:batPct>20?C_AMBER:C_CORAL;
-  oled.drawRoundRect(x,y,20,10,2,c);
-  oled.fillRect(x+20,y+3,2,4,c);
-  int f=(int)(batPct/100.0f*17.0f);
-  if(f>0) oled.fillRect(x+2,y+2,f,6,c);
-  oled.setTextSize(1); oled.setTextColor(c);
-  char b[5]; snprintf(b,5,"%d%%",batPct);
-  oled.setCursor(x+24,y+1); oled.print(b);
+// ── Drive screen ──────────────────────────────────────────────────
+void drvBtn(int cx,int cy,int w,int h,const char*l,bool a,uint16_t c){
+  box(cx-w/2,cy-h/2,w,h,c,a);
+  oled.setTextSize(1);oled.setTextColor(a?BK:c);
+  oled.setCursor(cx-(int)strlen(l)*3,cy-4);oled.print(l);
 }
 
-void drawHdr(const char* title,uint16_t col) {
-  oled.fillRect(0,0,OLED_W,16,C_BK);
-  oled.drawFastHLine(0,15,OLED_W,col);
-  oled.drawFastHLine(0,14,OLED_W,C_SURF);
-  oled.drawFastHLine(0,13,OLED_W,C_XCYAN);
-  oled.setTextSize(1); oled.setTextColor(col);
-  oled.setCursor((OLED_W-(int)strlen(title)*6)/2,4);
-  oled.print(title);
-  drawBat(OLED_W-52,3);
+void drawDrive(){
+  bool u=goFwd,d=goRev,l=B[2].hd,r=B[3].hd;
+  drvBtn(64,46,36,20,"FWD",u,CYN);
+  drvBtn(64,98,36,20,"REV",d,CYN);
+  drvBtn(36,72,36,20,"LFT",l,AMB);
+  drvBtn(92,72,36,20,"RGT",r,AMB);
+  // centre dot
+  uint16_t cc=eStopped?CRL:(u||d||l||r)?MNT:MGR;
+  oled.fillCircle(64,72,8,cc);oled.drawCircle(64,72,8,WHT);
+  if(eStopped){oled.setTextSize(1);oled.setTextColor(WHT);oled.setCursor(57,68);oled.print("E!");}
+  if(eStopped){oled.fillRect(0,17,128,11,CRL);ctr(19,"! E-STOP !",WHT);}
+  // status
+  oled.fillRect(0,108,128,20,BK);
+  oled.drawRect(0,108,62,20,spC[spdIdx]);
+  oled.setTextSize(1);oled.setTextColor(spC[spdIdx]);
+  oled.setCursor(3,114);oled.print("SPD:");oled.print(spN[spdIdx]);
+  oled.drawRect(64,108,64,20,mC[modeIdx]);
+  oled.setTextSize(1);oled.setTextColor(mC[modeIdx]);
+  oled.setCursor(67,114);oled.print(mN[modeIdx]);
+  ctr(124,"HLD-DN=menu",DGR);
 }
 
-void drawMenu(int sel,int count,const char** names,const uint16_t* cols) {
-  for (int i=0;i<count;i++) {
-    bool act=(i==sel);
-    int y=20+i*24;
-    uint16_t bg=act?cols[i]:C_BK;
-    uint16_t fg=act?C_BK:cols[i];
-    oled.fillRect(4,y,120,20,bg);
-    oled.drawRect(4,y,120,20,cols[i]);
-    oled.drawRect(5,y+1,118,18,cols[i]);
-    if (act) {
-      oled.drawFastHLine(8,y,112,C_WHITE);
-      oled.drawFastHLine(8,y+19,112,C_WHITE);
-    }
-    oled.setTextSize(1); oled.setTextColor(fg);
-    oled.setCursor((OLED_W-(int)strlen(names[i])*6)/2,y+6);
-    oled.print(names[i]);
+// ── Logic ─────────────────────────────────────────────────────────
+void doDrive(){
+  static unsigned long ls=0; unsigned long n=millis();
+  // E-STOP
+  if(B[2].hd&&B[3].hd&&lh(2)&&lh(3)){
+    eStopped=!eStopped;rf.send(eStopped?RF_ESTP:RF_STOP,24);
+    if(eStopped)goFwd=goRev=false;
+    B[2].hd=B[3].hd=false;redraw=true;delay(300);return;
   }
-  drawC(118,"UP/DN=scroll  LEFT=ok",C_DGRAY);
-}
-
-// ── Drive direction block ─────────────────────────────────────────
-void driveBlock(int cx,int cy,int w,int h,
-                const char* lbl,bool active,uint16_t col) {
-  uint16_t bg=active?col:C_BK;
-  uint16_t fg=active?C_BK:col;
-  oled.fillRect(cx-w/2,cy-h/2,w,h,bg);
-  oled.drawRect(cx-w/2,cy-h/2,w,h,col);
-  oled.drawRect(cx-w/2+1,cy-h/2+1,w-2,h-2,col);
-  if (active) {
-    oled.drawFastHLine(cx-w/2+2,cy-h/2,w-4,C_WHITE);
-    oled.drawFastHLine(cx-w/2+2,cy+h/2-1,w-4,C_WHITE);
+  if(eStopped)return;
+  // Menu
+  if(lh(1,800)&&!menuUsed){
+    menuUsed=true;goFwd=goRev=false;rf.send(RF_STOP,24);
+    scr=MMODE;redraw=true;oled.fillRect(0,16,128,112,BK);return;
   }
-  oled.setTextSize(1); oled.setTextColor(fg);
-  oled.setCursor(cx-(int)strlen(lbl)*3,cy-4);
-  oled.print(lbl);
-}
-
-void drawDriveScreen() {
-  bool up=driveFwd, dn=driveRev;
-  bool l=btns[B_LEFT].held, r=btns[B_RIGHT].held;
-  const int CX=64,CY=72,BW=34,BH=22,GAP=28;
-
-  driveBlock(CX,CY-GAP,BW,BH,"FWD",up,C_CYAN);
-  driveBlock(CX,CY+GAP,BW,BH,"REV",dn,C_CYAN);
-  driveBlock(CX-GAP,CY,BW,BH,"LEFT",l,C_AMBER);
-  driveBlock(CX+GAP,CY,BW,BH,"RGHT",r,C_AMBER);
-
-  uint16_t cc=eStop?C_CORAL:(up||dn||l||r)?C_MINT:C_MGRAY;
-  oled.fillCircle(CX,CY,9,cc);
-  oled.drawCircle(CX,CY,9,C_WHITE);
-  oled.drawCircle(CX,CY,10,cc);
-  if (eStop) {
-    oled.setTextSize(1); oled.setTextColor(C_WHITE);
-    oled.setCursor(CX-6,CY-4); oled.print("E!");
-  }
-  if (eStop) {
-    oled.fillRect(0,17,OLED_W,11,C_CORAL);
-    drawC(19,"!! E-STOP ACTIVE !!",C_WHITE);
-  }
-
-  // Status row
-  char spb[8]; snprintf(spb,sizeof(spb),"%s",spdNames[spdIdx]);
-  oled.fillRoundRect(2,108,56,14,3,C_BK);
-  oled.drawRoundRect(2,108,56,14,3,spdCols[spdIdx]);
-  oled.setTextSize(1); oled.setTextColor(spdCols[spdIdx]);
-  oled.setCursor(5,111); oled.print("SPD:"); oled.print(spb);
-
-  oled.fillRoundRect(62,108,64,14,3,C_BK);
-  oled.drawRoundRect(62,108,64,14,3,modeCols[modeIdx]);
-  oled.setTextSize(1); oled.setTextColor(modeCols[modeIdx]);
-  oled.setCursor(65,111); oled.print(modeNames[modeIdx]);
-
-  drawC(124,"HOLD-DN=menu",C_DGRAY);
-}
-
-// ── Boot splash ───────────────────────────────────────────────────
-void bootSplash() {
-  oled.fillScreen(C_BK);
-  randomSeed(42);
-  for (int i=0;i<40;i++) {
-    uint16_t sc=random(3)==0?C_DGRAY:random(2)?C_MGRAY:C_LGRAY;
-    oled.drawPixel(random(OLED_W),random(OLED_H),sc);
-  }
-  // Animated frame
-  for (int i=0;i<=OLED_W;i+=4) {
-    oled.drawPixel(i,0,C_CYAN);
-    oled.drawPixel(OLED_W-1-i,OLED_H-1,C_CYAN);
-    delay(3);
-  }
-  for (int i=0;i<=OLED_H;i+=4) {
-    oled.drawPixel(0,i,C_PURPLE);
-    oled.drawPixel(OLED_W-1,OLED_H-1-i,C_PURPLE);
-    delay(3);
-  }
-  hexCorners(4,4,OLED_W-8,OLED_H-8,C_CYAN,10);
-  hexCorners(6,6,OLED_W-12,OLED_H-12,C_DCYAN,6);
-
-  drawC(22,"BUDDYBOT",C_CYAN,2);
-  drawC(40,"REMOTE",C_CYAN,2);
-  oled.drawFastHLine(20,58,OLED_W-40,C_PURPLE);
-  drawC(62,"v3.0",C_PURPLE,1);
-  drawC(72,"XC3812  SAMD21",C_DGRAY,1);
-  oled.drawFastHLine(20,82,OLED_W-40,C_DCYAN);
-  drawC(88,"Reinsma Innovations",C_DCYAN,1);
-  drawC(98,"GENERATIVE AI",C_MGRAY,1);
-  drawC(110,"STARTING...",C_MGRAY,1);
-  for (int p=0;p<=100;p+=5) {
-    glowBar(16,120,OLED_W-32,6,p/100.0f,C_CYAN);
-    delay(28);
-  }
-  delay(300);
-  for (int b=0;b<3;b++) {
-    oled.fillScreen(C_CYAN); delay(35);
-    oled.fillScreen(C_BK);   delay(55);
-  }
-}
-
-// ── Drive logic ───────────────────────────────────────────────────
-void processDrive() {
-  static unsigned long lastRFSend=0;
-  unsigned long now=millis();
-
-  // E-STOP: both LEFT+RIGHT held
-  if (btns[B_LEFT].held&&btns[B_RIGHT].held&&
-      longHeld(B_LEFT,LONG_MS)&&longHeld(B_RIGHT,LONG_MS)) {
-    eStop=!eStop;
-    rf.send(eStop?RF_ESTOP:RF_STOP,24);
-    if(eStop) driveFwd=driveRev=false;
-    btns[B_LEFT].held=btns[B_RIGHT].held=false;
-    redraw=true; delay(300); return;
-  }
-
-  if(eStop) return;
-
-  // Menu: hold DOWN
-  if(longHeld(B_DOWN,MENU_MS)&&!menuConsumed) {
-    menuConsumed=true;
-    driveFwd=driveRev=false;
-    rf.send(RF_STOP,24);
-    curScr=SCR_MODE; redraw=true;
-    oled.fillRect(0,16,OLED_W,OLED_H-16,C_BK);
-    drawGrid(); return;
-  }
-  if(!btns[B_DOWN].held) menuConsumed=false;
-
-  // UP: toggle forward
-  if(btns[B_UP].pressed) {
-    driveRev=false; driveFwd=!driveFwd; redraw=true;
-  }
-  // DOWN: toggle reverse
-  if(btns[B_DOWN].pressed&&!menuConsumed) {
-    driveFwd=false; driveRev=!driveRev; redraw=true;
-  }
-  // LEFT/RIGHT: cancel toggles
-  if(btns[B_LEFT].pressed||btns[B_RIGHT].pressed) {
-    driveFwd=driveRev=false; redraw=true;
-  }
-
+  if(!B[1].hd)menuUsed=false;
+  // Toggle fwd/rev
+  if(B[0].pr){goRev=false;goFwd=!goFwd;redraw=true;}
+  if(B[1].pr&&!menuUsed){goFwd=false;goRev=!goRev;redraw=true;}
+  if(B[2].pr||B[3].pr){goFwd=goRev=false;redraw=true;}
+  // Send
   uint32_t cmd=RF_STOP;
-  if     (driveFwd)           cmd=RF_FORWARD;
-  else if(driveRev)           cmd=RF_BACKWARD;
-  else if(btns[B_LEFT].held)  cmd=RF_LEFT;
-  else if(btns[B_RIGHT].held) cmd=RF_RIGHT;
-
-  if(now-lastRFSend>=RF_MS) {
-    rf.send(cmd,24);
-    lastRFSend=now;
-    if(cmd!=lastRFCode){lastRFCode=cmd;redraw=true;}
-  }
+  if(goFwd)cmd=RF_FWD;
+  else if(goRev)cmd=RF_REV;
+  else if(B[2].hd)cmd=RF_LEFT;
+  else if(B[3].hd)cmd=RF_RIGHT;
+  if(n-ls>=90){rf.send(cmd,24);ls=n;if(cmd!=lastCode){lastCode=cmd;redraw=true;}}
 }
 
-// ── Menu nav ─────────────────────────────────────────────────────
-bool menuNav(uint8_t& idx,uint8_t count) {
-  if(btns[B_UP].pressed)   {idx=(idx+count-1)%count;redraw=true;}
-  if(btns[B_DOWN].pressed) {idx=(idx+1)%count;redraw=true;}
-  if(btns[B_LEFT].pressed)  return true;
-  if(btns[B_RIGHT].pressed) {
-    curScr=SCR_DRIVE; driveFwd=driveRev=false; redraw=true;
-    oled.fillRect(0,16,OLED_W,OLED_H-16,C_BK);
-    drawGrid(); drawHdr("BUDDYBOT RC",C_CYAN);
-  }
+bool nav(uint8_t&idx,uint8_t n){
+  if(B[0].pr){idx=(idx+n-1)%n;redraw=true;}
+  if(B[1].pr){idx=(idx+1)%n;redraw=true;}
+  if(B[2].pr)return true;
+  if(B[3].pr){scr=DRIVE;goFwd=goRev=false;redraw=true;oled.fillRect(0,16,128,112,BK);}
   return false;
 }
 
-// ── Setup ─────────────────────────────────────────────────────────
-void setup() {
-  initBtns();
+// ── Setup/Loop ────────────────────────────────────────────────────
+void setup(){
+  initB();
   rf.enableTransmit(RF_PIN);
-  rf.setProtocol(1);
-  rf.setPulseLength(189);
-  rf.setRepeatTransmit(5);
+  rf.setProtocol(1);rf.setPulseLength(189);rf.setRepeatTransmit(5);
   analogReadResolution(10);
-  analogReference(AR_DEFAULT);
+
+  // Exactly as V1 that worked
   oled.begin();
-  oled.setRotation(0);   // rotation 0 — upside-down fixed via flipped Y coords in draw functions
-  bootSplash();
-  oled.fillScreen(C_BK);
-  drawGrid();
-  drawHdr("BUDDYBOT RC",C_CYAN);
-  lastBat=0; readBat(); redraw=true;
+  oled.setRotation(0);
+  oled.fillScreen(BK);
+
+  // Simple splash — no animation, just text to confirm display alive
+  oled.drawRect(8,20,112,88,CYN);oled.drawRect(9,21,110,86,DCY);
+  ctr(32,"BUDDYBOT",CYN,2);ctr(50,"REMOTE",CYN,2);
+  ctr(68,"v4.0",PUR,1);
+  oled.drawFastHLine(20,80,88,DCY);
+  ctr(84,"Reinsma Innovations",LGR,1);
+  ctr(98,"GENERATIVE AI",DGR,1);
+  delay(2000);
+  oled.fillScreen(BK);
+
+  lastBat=0;readBat();redraw=true;
 }
 
-// ── Loop ─────────────────────────────────────────────────────────
-void loop() {
-  readBtns();
-  readBat();
+void loop(){
+  readB();readBat();
 
-  static unsigned long lastHdr=0;
-  if(millis()-lastHdr>15000) {
-    lastHdr=millis();
-    switch(curScr) {
-      case SCR_DRIVE:   drawHdr("BUDDYBOT RC",C_CYAN);   break;
-      case SCR_MODE:    drawHdr("SELECT MODE",C_PURPLE);  break;
-      case SCR_SPECIAL: drawHdr("SPECIAL CMDS",C_AMBER);  break;
-      case SCR_SPEED:   drawHdr("SELECT SPEED",C_AMBER);  break;
+  // Refresh header battery every 15s
+  static unsigned long lh2=0;
+  if(millis()-lh2>15000){lh2=millis();
+    switch(scr){
+      case DRIVE: hdr("BUDDYBOT RC",CYN);break;
+      case MMODE: hdr("MODE",PUR);break;
+      case MSPEC: hdr("SPECIAL",AMB);break;
+      case MSPD:  hdr("SPEED",AMB);break;
     }
   }
 
-  switch(curScr) {
-
-    case SCR_DRIVE: {
-      processDrive();
-      static bool pF=false,pR=false,pL=false,pRi=false,pE=false;
-      bool f=driveFwd,r=driveRev,l=btns[B_LEFT].held,ri=btns[B_RIGHT].held;
-      if(redraw||f!=pF||r!=pR||l!=pL||ri!=pRi||eStop!=pE) {
-        oled.fillRect(0,16,OLED_W,OLED_H-16,C_BK);
-        drawGrid(); drawDriveScreen();
-        pF=f;pR=r;pL=l;pRi=ri;pE=eStop; redraw=false;
+  switch(scr){
+    case DRIVE:{
+      doDrive();
+      static bool pU=false,pD=false,pL=false,pR=false,pE=false;
+      bool u=goFwd,d=goRev,l=B[2].hd,r=B[3].hd;
+      if(redraw||u!=pU||d!=pD||l!=pL||r!=pR||eStopped!=pE){
+        oled.fillRect(0,16,128,92,BK);
+        hdr("BUDDYBOT RC",CYN);
+        drawDrive();
+        pU=u;pD=d;pL=l;pR=r;pE=eStopped;redraw=false;
       }
       break;
     }
-
-    case SCR_MODE:
-      drawHdr("SELECT MODE",C_PURPLE);
-      if(menuNav(modeIdx,4)) {
-        rf.send(modeCodes[modeIdx],24);
-        curScr=SCR_SPEED; spdIdx=1; redraw=true;
-        oled.fillRect(0,16,OLED_W,OLED_H-16,C_BK);
-        drawGrid(); drawHdr("SELECT SPEED",C_AMBER);
-      }
-      if(redraw){oled.fillRect(0,16,OLED_W,OLED_H-16,C_BK);drawGrid();drawMenu(modeIdx,4,modeNames,modeCols);redraw=false;}
+    case MMODE:
+      if(nav(modeIdx,4)){rf.send(mRF[modeIdx],24);scr=MSPD;spdIdx=1;redraw=true;oled.fillRect(0,16,128,112,BK);}
+      if(redraw){hdr("MODE",PUR);oled.fillRect(0,16,128,102,BK);menu(modeIdx,4,mN,mC);redraw=false;}
       break;
-
-    case SCR_SPECIAL:
-      drawHdr("SPECIAL CMDS",C_AMBER);
-      if(menuNav(specIdx,4)) {
-        if(specIdx==3){curScr=SCR_DRIVE;redraw=true;oled.fillRect(0,16,OLED_W,OLED_H-16,C_BK);drawGrid();drawHdr("BUDDYBOT RC",C_CYAN);}
-        else{rf.send(specCodes[specIdx],24);if(specIdx==2){eStop=true;driveFwd=driveRev=false;}delay(150);redraw=true;}
+    case MSPEC:
+      if(nav(specIdx,4)){
+        if(specIdx==3){scr=DRIVE;redraw=true;oled.fillRect(0,16,128,112,BK);}
+        else{rf.send(sRF[specIdx],24);if(specIdx==2){eStopped=true;goFwd=goRev=false;}delay(150);redraw=true;}
       }
-      if(redraw){oled.fillRect(0,16,OLED_W,OLED_H-16,C_BK);drawGrid();drawMenu(specIdx,4,specNames,specCols);redraw=false;}
+      if(redraw){hdr("SPECIAL",AMB);oled.fillRect(0,16,128,102,BK);menu(specIdx,4,sN,sC);redraw=false;}
       break;
-
-    case SCR_SPEED:
-      drawHdr("SELECT SPEED",C_AMBER);
-      if(menuNav(spdIdx,3)) {
-        rf.send(spdCodes[spdIdx],24);
-        curScr=SCR_DRIVE; redraw=true;
-        oled.fillRect(0,16,OLED_W,OLED_H-16,C_BK);
-        drawGrid(); drawHdr("BUDDYBOT RC",C_CYAN);
-      }
-      if(redraw) {
-        oled.fillRect(0,16,OLED_W,OLED_H-16,C_BK); drawGrid();
+    case MSPD:
+      if(nav(spdIdx,3)){rf.send(spRF[spdIdx],24);scr=DRIVE;redraw=true;oled.fillRect(0,16,128,112,BK);}
+      if(redraw){
+        hdr("SPEED",AMB);oled.fillRect(0,16,128,102,BK);
         for(int i=0;i<3;i++){
-          bool sel=(i==spdIdx); int y=22+i*30;
-          oled.fillRect(8,y,112,26,sel?spdCols[i]:C_BK);
-          oled.drawRect(8,y,112,26,spdCols[i]);
-          oled.drawRect(9,y+1,110,24,spdCols[i]);
-          if(sel){oled.drawFastHLine(12,y,104,C_WHITE);oled.drawFastHLine(12,y+25,104,C_WHITE);}
-          oled.setTextSize(2);
-          oled.setTextColor(sel?C_BK:spdCols[i]);
-          oled.setCursor((OLED_W-(int)strlen(spdNames[i])*12)/2,y+9);
-          oled.print(spdNames[i]);
+          bool a=(i==spdIdx);int y=22+i*30;
+          box(8,y,112,26,spC[i],a);
+          oled.setTextSize(2);oled.setTextColor(a?BK:spC[i]);
+          oled.setCursor((128-(int)strlen(spN[i])*12)/2,y+9);oled.print(spN[i]);
         }
-        drawC(118,"UP/DN=scroll  LEFT=ok",C_DGRAY);
-        redraw=false;
+        ctr(118,"UP/DN  LEFT=ok",DGR);redraw=false;
       }
       break;
   }
