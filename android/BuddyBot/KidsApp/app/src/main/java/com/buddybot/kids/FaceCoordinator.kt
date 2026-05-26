@@ -65,8 +65,12 @@ class FaceCoordinator(
     init {
         setupWebView()
         setupPlayerListeners()
-        // Start in WebView mode (show face immediately)
-        showWebViewFace()
+        // Start PlayerView visible playing normal_idle immediately.
+        // WebView stays GONE — it is only used as an invisible audio player
+        // for ElevenLabs amplitude analysis, never as the primary face.
+        playerView.visibility = android.view.View.VISIBLE
+        playerView.alpha = 1f
+        startIdleLoop("normal_idle")
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -190,37 +194,33 @@ class FaceCoordinator(
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────
     //  DISPLAY SWITCHING
+    //
+    //  PlayerView is ALWAYS the visible face — videos loop full-screen.
+    //  WebView is ALWAYS GONE — it exists only as an invisible audio host
+    //  for ElevenLabs amplitude analysis. Never shown as a face.
     // ────────────────────────────────────────────────────────────────────────
     private fun showWebViewFace() {
-        scope.launch(Dispatchers.Main) {
-            if (faceWebView != null && webViewReady) {
-                playerView.visibility = View.GONE
-                faceWebView.visibility = View.VISIBLE
-                Log.d(TAG, "Showing WebView face")
-            } else if (faceWebView == null) {
-                // No WebView provided — keep ExoPlayer visible with idle loop
-                playerView.visibility = View.VISIBLE
-                playVideo("${currentMode.name.lowercase()}_idle", loop = true)
-            } else {
-                // WebView not ready yet — briefly wait
-                scope.launch(Dispatchers.Main) {
-                    kotlinx.coroutines.delay(500)
-                    if (webViewReady) {
-                        playerView.visibility = View.GONE
-                        faceWebView.visibility = View.VISIBLE
-                    }
-                }
-            }
+        // Route to idle video — WebView is never the visible face
+        Log.d(TAG, "showWebViewFace() -> routing to idle video")
+        val idleName = when (currentMode) {
+            RobotMode.NORMAL    -> "normal_idle"
+            RobotMode.DOG       -> "dog_idle"
+            RobotMode.BODYGUARD -> "bodyguard_looking"
+            RobotMode.UNHINGED  -> "unhinged_idle"
+            RobotMode.PARTY     -> "party_transition"
         }
+        val resId = context.resources.getIdentifier(idleName, "raw", context.packageName)
+        if (resId != 0) playVideo(idleName, loop = true)
+        // else: stay on whatever is currently showing
     }
 
     private fun showVideoFace() {
         scope.launch(Dispatchers.Main) {
             playerView.visibility = View.VISIBLE
-            playerView.alpha = 0f // will snap visible on onRenderedFirstFrame
             faceWebView?.visibility = View.GONE
-            Log.d(TAG, "Showing ExoPlayer face")
+            Log.d(TAG, "showVideoFace: PlayerView visible")
         }
     }
 
@@ -431,8 +431,7 @@ class FaceCoordinator(
     private fun playVideoFromAsset(fileName: String, withAudio: Boolean = false) {
         scope.launch(Dispatchers.Main) {
             try {
-                playerView.alpha = 0f
-                val mediaItem = MediaItem.fromUri("asset:///$fileName")
+                                val mediaItem = MediaItem.fromUri("asset:///$fileName")
                 player.setMediaItem(mediaItem)
                 player.volume = if (withAudio) 1f else 0f
                 player.repeatMode = Player.REPEAT_MODE_OFF
@@ -454,10 +453,15 @@ class FaceCoordinator(
                 assetName, "raw", context.packageName)
             if (resId != 0) {
                 try {
-                    playerView.alpha = 0f
-                    val uri = Uri.parse(
+                                        val uri = Uri.parse(
                         "android.resource://${context.packageName}/$resId")
-                    player.setMediaItem(MediaItem.fromUri(uri))
+                    // Explicitly set MIME type — ExoPlayer cannot sniff format
+                    // from android.resource:// URIs with no file extension
+                    val mediaItem = MediaItem.Builder()
+                        .setUri(uri)
+                        .setMimeType("video/mp4")
+                        .build()
+                    player.setMediaItem(mediaItem)
                     player.volume = 0f   // all in-app face videos are muted
                     player.repeatMode =
                         if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
