@@ -88,10 +88,8 @@
 #define C_DGRAY  0x2104u
 
 // ── Objects ───────────────────────────────────────────────────────
-// Software SPI pins — must match underside pads of XC3812
-#define OLED_MOSI 11   // MOSI pad (underside of XC3812)
-#define OLED_SCLK 13   // SCK  pad (underside of XC3812)
-Adafruit_SSD1351 oled(OLED_W,OLED_H,OLED_MOSI,OLED_SCLK,OLED_CS,OLED_DC,OLED_RST);
+// Hardware SPI — uses board SPI peripheral (MOSI/SCK = underside pads of XC3812)
+Adafruit_SSD1351 oled(OLED_W,OLED_H,&SPI,OLED_CS,OLED_DC,OLED_RST);
 RCSwitch rf;
 
 // ── Screens ───────────────────────────────────────────────────────
