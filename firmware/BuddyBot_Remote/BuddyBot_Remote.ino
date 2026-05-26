@@ -421,7 +421,7 @@ void setup() {
   analogReadResolution(10);
   analogReference(AR_DEFAULT);
   oled.begin();
-  oled.setRotation(2);   // flip 180 degrees — fixes upside-down display
+  oled.setRotation(0);   // rotation 0 — upside-down fixed via flipped Y coords in draw functions
   bootSplash();
   oled.fillScreen(C_BK);
   drawGrid();
