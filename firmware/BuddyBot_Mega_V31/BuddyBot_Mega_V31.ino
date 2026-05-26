@@ -129,8 +129,8 @@ void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorCo
 #define GESTURE_INT       -1   // PAJ7620 gesture sensor interrupt
 
 // ── Digital outputs ──────────────────────────────────────────────────────────
-#define FAN_BODY_PIN      12    // Body extract fan     (battery / ambient temp)
-#define FAN_HEAD_BLOW_PIN 9    // Head blower fan      (head temp ≥ HEAD_FAN_TEMP)
+#define FAN_BODY_PIN      9    // Body extract fan     (battery / ambient temp)
+#define FAN_HEAD_BLOW_PIN 7    // Head blower fan      (head temp ≥ HEAD_FAN_TEMP)
 #define FAN_HEAD_EXT_PIN  8    // Head extract fan     (head temp ≥ HEAD_FAN_TEMP)
 #define UV_LIGHT_PIN      4    // UV light strip       (manual / auto, PIR interlock) — moved from 40 (was RIGHT_ECHO conflict)
 #define BUZZER_PIN        23   // Piezo buzzer — moved from 2 (INT4 now used by RF)
@@ -139,7 +139,7 @@ void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorCo
 #define MOMENTARY_BTN     24   // Push button — toggle autonomous mode
 #define LDR_DO            5     // LDR threshold output
 #define UNHINGED_SW       A1    // Physical switch — unhinged mode
-#define TILT_SENSOR       52    // Tilt / vibration sensor (HIGH = tilt)
+#define TILT_SENSOR       24    // Tilt / vibration sensor (HIGH = tilt)
 #define PIR_PIN           -1    // PIR motion sensor — set real pin when fitted
 #define DHT_PIN           33    // DHT11 data
 #define GAS_DO            -1    // Gas sensor digital output (HIGH = gas)
@@ -149,19 +149,19 @@ void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorCo
 
 // ── IR obstacle sensors (LOW = obstacle detected) ────────────────────────────
 #define REAR_IR   25
-#define FRONT_IR  A8
+#define FRONT_IR  A5
 #define LEFT_IR   -1
 #define RIGHT_IR  -1
 
 // ── Ultrasonic sensors (4× HC-SR04) ─────────────────────────────────────────
-#define FRONT_TRIG  49
-#define FRONT_ECHO  4
-#define LEFT_TRIG   28
-#define LEFT_ECHO   29
+#define FRONT_TRIG  46
+#define FRONT_ECHO  49
+#define LEFT_TRIG   29
+#define LEFT_ECHO   28
 #define RIGHT_TRIG  38
 #define RIGHT_ECHO  40
 #define REAR_TRIG   51
-#define REAR_ECHO   50
+#define REAR_ECHO   47
 
 // ════════════════════════════════════════════════════════════════════
 //  OBJECTS
