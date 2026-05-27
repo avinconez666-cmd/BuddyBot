@@ -1478,7 +1478,7 @@ void setup() {
   // ST7796S portrait mode fix: without invertDisplay(true) alternate
   // pixel rows are black, showing as 1px horizontal lines across screen.
   // This is a known ST7796S behaviour in portrait (rotation 0/2).
-  tft.invertDisplay(true);
+  tft.invertDisplay(false);
   tft.fillScreen(C_BG);
   pinMode(22,OUTPUT); digitalWrite(22,HIGH); // backlight on
 
