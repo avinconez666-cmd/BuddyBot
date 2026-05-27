@@ -51,5 +51,5 @@
 
 // ── SPI speed ─────────────────────────────────────────────────────────
 // 40MHz is the ST7796S rated maximum. Drop to 27MHz if you see artefacts.
-#define SPI_FREQUENCY        20000000  // Reduced from 40MHz — increase once display confirmed working
+#define SPI_FREQUENCY        10000000  // 10MHz — safe for ST7796S portrait, raise to 20MHz once confirmed clean  // Reduced from 40MHz — increase once display confirmed working
 #define SPI_READ_FREQUENCY   10000000

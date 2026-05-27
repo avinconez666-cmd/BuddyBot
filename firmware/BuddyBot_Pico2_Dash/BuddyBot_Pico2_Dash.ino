@@ -114,12 +114,12 @@ unsigned long lastTouchMs=0;
 
 Touch readTouch(){
   Touch t={0,0,false};
-  Wire.beginTransmission(CTP_ADDR); Wire.write(0x02);
-  if(Wire.endTransmission(false)!=0)return t;
-  Wire.requestFrom(CTP_ADDR,6);
-  if(Wire.available()<6)return t;
-  uint8_t n=Wire.read()&0x0F,xH=Wire.read(),xL=Wire.read(),yH=Wire.read(),yL=Wire.read();
-  Wire.read();
+  Wire1.beginTransmission(CTP_ADDR); Wire1.write(0x02);
+  if(Wire1.endTransmission(false)!=0)return t;
+  Wire1.requestFrom(CTP_ADDR,6);
+  if(Wire1.available()<6)return t;
+  uint8_t n=Wire1.read()&0x0F,xH=Wire1.read(),xL=Wire1.read(),yH=Wire1.read(),yL=Wire1.read();
+  Wire1.read();
   if(n==0||n>2)return t;
   int16_t rx=((xH&0x0F)<<8)|xL, ry=((yH&0x0F)<<8)|yL;
   t.x=TOUCH_FLIP_X?constrain(319-rx,0,319):constrain(rx,0,319);
@@ -1475,6 +1475,10 @@ void setup() {
   // TFT init
   tft.init();
   tft.setRotation(ROTATION);
+  // ST7796S portrait mode fix: without invertDisplay(true) alternate
+  // pixel rows are black, showing as 1px horizontal lines across screen.
+  // This is a known ST7796S behaviour in portrait (rotation 0/2).
+  tft.invertDisplay(true);
   tft.fillScreen(C_BG);
   pinMode(22,OUTPUT); digitalWrite(22,HIGH); // backlight on
 
@@ -1491,10 +1495,10 @@ void setup() {
   digitalWrite(AUDIO_PIN, LOW);
 
   // Touch init
-  Wire.setSDA(PIN_CTP_SDA);
-  Wire.setSCL(PIN_CTP_SCL);
-  Wire.begin();
-  Wire.setClock(400000);
+  Wire1.setSDA(PIN_CTP_SDA);
+  Wire1.setSCL(PIN_CTP_SCL);
+  Wire1.begin();
+  Wire1.setClock(400000);
   pinMode(PIN_CTP_RST,OUTPUT);
   digitalWrite(PIN_CTP_RST,LOW); delay(20);
   digitalWrite(PIN_CTP_RST,HIGH); delay(200);
