@@ -1133,30 +1133,30 @@ struct StarShip {
   bool gameOver;
   unsigned long lastFrame, lastShot;
   int  bugsAlive;
-} SS;
+} ship;
 
 void ssReset(){
-  SS.sx=SCR_W/2; SS.score=0; SS.lives=3; SS.wave=1; SS.gameOver=false; SS.bugsAlive=0;
-  for(auto& b:SS.bullets) b.alive=false;
+  ship.sx=SCR_W/2; ship.score=0; ship.lives=3; ship.wave=1; ship.gameOver=false; ship.bugsAlive=0;
+  for(auto& b:ship.bullets) b.alive=false;
   for(int i=0;i<SS_MAX_BUGS;i++){
-    SS.bugs[i]={(float)(20+i*18),(float)(40+(i/8)*32),(float)(random(3)-1)*0.8f,0.3f,true,(uint16_t)(i%2?C_RED:C_GREEN)};
-    SS.bugsAlive++;
+    ship.bugs[i]={(float)(20+i*18),(float)(40+(i/8)*32),(float)(random(3)-1)*0.8f,0.3f,true,(uint16_t)(i%2?C_RED:C_GREEN)};
+    ship.bugsAlive++;
   }
 }
 
 void drawStarship(){
   tft.fillScreen(C_BG);
-  if(SS.gameOver){
+  if(ship.gameOver){
     glowText(SCR_W/2-48,180,"GAME OVER",C_RED,3);
-    char buf[24]; snprintf(buf,24,"SCORE: %d",SS.score);
+    char buf[24]; snprintf(buf,24,"SCORE: %d",ship.score);
     centreText(SCR_W/2,230,buf,C_WHITE,2,C_BG);
     centreText(SCR_W/2,270,"Tap to play again",C_CYAN,1,C_BG); return;
   }
   int shipY=SCR_H-40;
-  tft.fillTriangle((int)SS.sx,shipY-20,(int)SS.sx-14,shipY+10,(int)SS.sx+14,shipY+10,C_CYAN);
-  tft.fillRect((int)SS.sx-3,shipY+8,6,8,C_ORANGE);
-  for(auto& b:SS.bullets){ if(!b.alive)continue; tft.fillRect((int)b.x-1,(int)b.y-6,3,10,C_YELLOW); }
-  for(auto& b:SS.bugs){
+  tft.fillTriangle((int)ship.sx,shipY-20,(int)ship.sx-14,shipY+10,(int)ship.sx+14,shipY+10,C_CYAN);
+  tft.fillRect((int)ship.sx-3,shipY+8,6,8,C_ORANGE);
+  for(auto& b:ship.bullets){ if(!b.alive)continue; tft.fillRect((int)b.x-1,(int)b.y-6,3,10,C_YELLOW); }
+  for(auto& b:ship.bugs){
     if(!b.alive)continue;
     tft.fillCircle((int)b.x,(int)b.y,8,b.col);
     tft.drawLine((int)b.x-8,(int)b.y-4,(int)b.x-14,(int)b.y-8,b.col);
@@ -1164,33 +1164,33 @@ void drawStarship(){
   }
   tft.fillRect(0,0,SCR_W,24,C_BLACK);
   tft.setTextSize(1); tft.setTextColor(C_CYAN,C_BLACK);
-  char buf[32]; snprintf(buf,32,"SC:%05d LV:%d W:%d",SS.score,SS.lives,SS.wave);
+  char buf[32]; snprintf(buf,32,"SC:%05d LV:%d W:%d",ship.score,ship.lives,ship.wave);
   tft.setCursor(4,8); tft.print(buf);
 }
 
 void updateStarship(){
   unsigned long now=millis();
-  if(now-SS.lastFrame<40)return; SS.lastFrame=now;
-  if(SS.gameOver){if(touchReady()){readTouch();lastTouchMs=millis();ssReset();drawStarship();}return;}
-  if(touchReady()){Touch t=readTouch();lastTouchMs=millis();if(t.y>24)SS.sx=t.x;}
-  SS.sx=constrain(SS.sx,16,SCR_W-16);
-  if(now-SS.lastShot>250){
-    SS.lastShot=now;
-    for(auto& b:SS.bullets){if(!b.alive){b={SS.sx,SCR_H-50,true};break;}}
+  if(now-ship.lastFrame<40)return; ship.lastFrame=now;
+  if(ship.gameOver){if(touchReady()){readTouch();lastTouchMs=millis();ssReset();drawStarship();}return;}
+  if(touchReady()){Touch t=readTouch();lastTouchMs=millis();if(t.y>24)ship.sx=t.x;}
+  ship.sx=constrain(ship.sx,16,SCR_W-16);
+  if(now-ship.lastShot>250){
+    ship.lastShot=now;
+    for(auto& b:ship.bullets){if(!b.alive){b={ship.sx,SCR_H-50,true};break;}}
   }
-  for(auto& b:SS.bullets){if(b.alive){b.y-=8;if(b.y<24)b.alive=false;}}
-  for(auto& b:SS.bugs){
+  for(auto& b:ship.bullets){if(b.alive){b.y-=8;if(b.y<24)b.alive=false;}}
+  for(auto& b:ship.bugs){
     if(!b.alive)continue;
     b.x+=b.vx; b.y+=b.vy;
     if(b.x<8||b.x>SCR_W-8)b.vx*=-1;
-    if(b.y>SCR_H-50){SS.lives--;b.alive=false;SS.bugsAlive--;sndDeath();if(SS.lives<=0){SS.gameOver=true;sndGameOver();}}
-    for(auto& blt:SS.bullets){if(!blt.alive)continue;if(abs(blt.x-b.x)<12&&abs(blt.y-b.y)<12){blt.alive=false;b.alive=false;SS.bugsAlive--;SS.score+=100; sndHit();}}
+    if(b.y>SCR_H-50){ship.lives--;b.alive=false;ship.bugsAlive--;sndDeath();if(ship.lives<=0){ship.gameOver=true;sndGameOver();}}
+    for(auto& blt:ship.bullets){if(!blt.alive)continue;if(abs(blt.x-b.x)<12&&abs(blt.y-b.y)<12){blt.alive=false;b.alive=false;ship.bugsAlive--;ship.score+=100; sndHit();}}
   }
-  if(SS.bugsAlive<=0){
-    SS.wave++; SS.bugsAlive=0;
-    for(int i=0;i<min(SS_MAX_BUGS,8+SS.wave*2);i++){
-      SS.bugs[i]={(float)(16+i*20),(float)(30+(i/8)*28),(float)(random(3)-1)*(0.8f+SS.wave*0.2f),0.25f+SS.wave*0.05f,true,(uint16_t)(i%3==0?C_RED:i%3==1?C_PURPLE:C_ORANGE)};
-      SS.bugsAlive++;
+  if(ship.bugsAlive<=0){
+    ship.wave++; ship.bugsAlive=0;
+    for(int i=0;i<min(SS_MAX_BUGS,8+ship.wave*2);i++){
+      ship.bugs[i]={(float)(16+i*20),(float)(30+(i/8)*28),(float)(random(3)-1)*(0.8f+ship.wave*0.2f),0.25f+ship.wave*0.05f,true,(uint16_t)(i%3==0?C_RED:i%3==1?C_PURPLE:C_ORANGE)};
+      ship.bugsAlive++;
     }
   }
   drawStarship();
@@ -1458,7 +1458,7 @@ void handleTouch(Touch& t) {
       if(t.y<40&&t.x<70){curScreen=SCR_GAMES;screenDirty=true;}
       break;
     case GAME_STARSHIP:
-      if(t.y<26&&t.x<80&&!SS.gameOver){curScreen=SCR_GAMES;screenDirty=true;}
+      if(t.y<26&&t.x<80&&!ship.gameOver){curScreen=SCR_GAMES;screenDirty=true;}
       break;
     default: break;
   }
@@ -1563,4 +1563,5 @@ void loop() {
     }
   }
 }
+
 
