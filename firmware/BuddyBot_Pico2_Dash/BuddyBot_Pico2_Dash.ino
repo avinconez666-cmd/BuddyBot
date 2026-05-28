@@ -1650,434 +1650,104 @@ void handleTouch(Touch& t) {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  SETUP
-// ════════════════════════════════════════════════════════════════════
+
 void setup() {
   Serial.begin(115200);
-  delay(300);
-  Serial.println("[PICO] BuddyBot Dash v6.0 booting...");
+  delay(200);
+  Serial.println("[PICO] BuddyBot Dash v6.1 booting...");
 
-  // TFT init
+  // ── TFT ──────────────────────────────────────────────────────────
   tft.init();
   tft.setRotation(ROTATION);
-  // ST7796S portrait mode fix: without invertDisplay(true) alternate
-  // pixel rows are black, showing as 1px horizontal lines across screen.
-  // This is a known ST7796S behaviour in portrait (rotation 0/2).
   tft.invertDisplay(false);
   tft.fillScreen(C_BG);
-  pinMode(22,OUTPUT); digitalWrite(22,HIGH); // backlight on
+  pinMode(22, OUTPUT); digitalWrite(22, HIGH);   // backlight ON
 
-  // Boot splash
-  tft.setTextSize(2); tft.setTextColor(C_CYAN,C_BG);
-  centreText(SCR_W/2,SCR_H/2-30,"AJ2BUDDYCOMMS",C_CYAN,2,C_BG);
-  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG);
-  centreText(SCR_W/2,SCR_H/2+10,"BuddyBot Dash v6.0",C_LGRAY,1,C_BG);
-  centreText(SCR_W/2,SCR_H/2+28,"Pico 2 | ST7796S | FT6336U",C_DGRAY,1,C_BG);
-  delay(1500);
+  // ── Boot splash ───────────────────────────────────────────────────
+  centreText(SCR_W/2, SCR_H/2-24, "AJ2BUDDYCOMMS", C_CYAN, 2, C_BG);
+  centreText(SCR_W/2, SCR_H/2+8,  "BuddyBot v6.1",  C_LGRAY,1, C_BG);
+  delay(1200);
+  sndBoot();
 
-  // Audio — SC8002B on GP14
+  // ── Audio (SC8002B on GP14) ───────────────────────────────────────
   pinMode(AUDIO_PIN, OUTPUT);
   digitalWrite(AUDIO_PIN, LOW);
 
-  // ═══════════════════════════════════════════════════════════════════
-  //  MAXIMUM TOUCH BRING-UP INITIALIZATION
-  // ═══════════════════════════════════════════════════════════════════
-  Serial.println("\n[TOUCH] ========== TOUCH DEBUG SESSION START ==========");
+  // ── Touch (FT6336U on Wire1 / I2C1 / GP26+GP27) ──────────────────
+  // Hard-reset the FT6336U
+  pinMode(PIN_CTP_RST, OUTPUT);
+  digitalWrite(PIN_CTP_RST, LOW);  delay(50);
+  digitalWrite(PIN_CTP_RST, HIGH); delay(300);
 
-#if DEBUG_TOUCH
-  Serial.println("[TOUCH] Compile-time debug flags:");
-  Serial.print("  DEBUG_TOUCH="); Serial.print(DEBUG_TOUCH);
-  Serial.print("  SCANNER="); Serial.print(DEBUG_TOUCH_SCANNER);
-  Serial.print("  RESET="); Serial.print(DEBUG_TOUCH_RESET);
-  Serial.print("  CONFIG="); Serial.print(DEBUG_TOUCH_CONFIG);
-  Serial.print("  READS="); Serial.print(DEBUG_TOUCH_READS);
-  Serial.print("  INT="); Serial.print(DEBUG_TOUCH_INT);
-  Serial.print("  BYTES="); Serial.println(DEBUG_TOUCH_BYTES);
-
-  Serial.print("[TOUCH] Runtime knobs: I2C="); Serial.print(TOUCH_I2C_KHZ);
-  Serial.print("kHz  debounce="); Serial.print(TOUCH_DEBOUNCE_MS);
-  Serial.print("ms  flipX="); Serial.print(g_touchFlipX);
-  Serial.print("  flipY="); Serial.println(g_touchFlipY);
-#endif
-
-  // Configure I2C1 (correct peripheral for GP26/GP27 on RP2350)
-  // Wire1.begin(sda, scl) bypasses board variant pin mapping — uses GP26/GP27 directly
-  Wire1.begin(PIN_CTP_SDA, PIN_CTP_SCL);
+  // Wire1 = I2C1 — GP26(SDA) / GP27(SCL) on RP2040
+  Wire1.setSDA(PIN_CTP_SDA);
+  Wire1.setSCL(PIN_CTP_SCL);
+  Wire1.begin();
   Wire1.setClock(400000);
+  delay(50);
 
-  // Aggressive bus recovery right at the start (repeated because err=4 is stubborn)
-  Serial.println("[TOUCH] Early bus recovery passes...");
-  for (int pass = 0; pass < 3; pass++) {
-    i2cBusRecovery();
-    delay(8);
-  }
-
+  // Interrupt pin (open-drain — needs pullup)
   pinMode(PIN_CTP_INT, INPUT_PULLUP);
 
-  // Multiple reset variants (some panels are extremely picky)
-#if DEBUG_TOUCH && DEBUG_TOUCH_RESET
-  Serial.println("[TOUCH] Performing reset sequence variants...");
-#endif
+  // Quick I2C probe to confirm FT6336U is responding
+  Wire1.beginTransmission(CTP_ADDR);
+  int err = Wire1.endTransmission();
+  Serial.print("[TOUCH] FT6336U probe at 0x38: ");
+  Serial.println(err == 0 ? "OK" : "FAIL (check wiring)");
 
-  // Variant 0 – long assertive reset (most common working pattern)
-  pinMode(PIN_CTP_RST, OUTPUT);
-  digitalWrite(PIN_CTP_RST, LOW);   delay(120);
-  digitalWrite(PIN_CTP_RST, HIGH);  delay(350);
-#if DEBUG_TOUCH && DEBUG_TOUCH_RESET
-  Serial.println("[TOUCH]   Reset variant 0: 120ms low / 350ms high");
-#endif
-
-  // Variant 1 – double pulse (helps some clones)
-  digitalWrite(PIN_CTP_RST, LOW);   delay(80);
-  digitalWrite(PIN_CTP_RST, HIGH);  delay(80);
-  digitalWrite(PIN_CTP_RST, LOW);   delay(80);
-  digitalWrite(PIN_CTP_RST, HIGH);  delay(250);
-#if DEBUG_TOUCH && DEBUG_TOUCH_RESET
-  Serial.println("[TOUCH]   Reset variant 1: double-pulse done");
-#endif
-
-  delay(50);   // let the controller wake
-
-#if DEBUG_TOUCH && DEBUG_TOUCH_SELFTEST
-  // Full address scanner
-  if (DEBUG_TOUCH_SCANNER) {
-    Serial.println("[TOUCH] === I2C Address Scanner (0x08-0x77) ===");
-    uint8_t found = 0;
-    for (uint8_t a=0x08; a<=0x77; a++) {
-      Wire1.beginTransmission(a);
-      if (Wire1.endTransmission() == 0) {
-        Serial.print("  FOUND: 0x"); if (a<16) Serial.print("0"); Serial.println(a, HEX);
-        found++;
-      }
-    }
-    if (!found) Serial.println("  *** NO DEVICES RESPONDED ON I2C1 ***");
-    Serial.println("[TOUCH] Scanner complete.");
-  }
-#endif
-
-  // Probe every candidate address (including runtime one)
-#if DEBUG_TOUCH && DEBUG_TOUCH_PROBE
-  Serial.println("[TOUCH] Probing candidate addresses...");
-  for (uint8_t i=0; i<TOUCH_ADDR_COUNT; i++) {
-    uint8_t addr = TOUCH_ADDR_LIST[i];
-    Wire1.beginTransmission(addr);
-    int e = Wire1.endTransmission();
-    Serial.print("  0x"); if (addr<16) Serial.print("0"); Serial.print(addr,HEX);
-    Serial.print(" -> ");
-    if (e==0) Serial.println("ACK");
-    else { Serial.print("NACK err="); Serial.println(e); }
-    if (e==0 && CTP_ADDR_RUNTIME == CTP_ADDR) {
-      CTP_ADDR_RUNTIME = addr;   // auto-adopt first responder
-    }
-  }
-  Serial.print("[TOUCH] Using runtime address 0x"); Serial.println(CTP_ADDR_RUNTIME, HEX);
-#endif
-
-  // Try common configuration / wake-up writes for FT6x36 and GT911 family
-#if DEBUG_TOUCH && DEBUG_TOUCH_CONFIG
-  Serial.println("[TOUCH] Attempting common config/wake writes...");
-  // FT6x36 family
-  for (uint8_t i=0; i<2; i++) {
-    uint8_t a = (i==0) ? CTP_ADDR_RUNTIME : 0x38;
-    Wire1.beginTransmission(a); Wire1.write(0x00); Wire1.write(0x00); Wire1.endTransmission();
-    Wire1.beginTransmission(a); Wire1.write(0xA4); Wire1.write(0x00); Wire1.endTransmission(); // interrupt mode
-    Wire1.beginTransmission(a); Wire1.write(0x80); Wire1.write(0x01); Wire1.endTransmission(); // some need this
-  }
-  // GT911 style (different protocol but sometimes present at 0x5D/0x14)
-  Wire1.beginTransmission(0x5D); Wire1.write(0x81); Wire1.write(0x4D); Wire1.endTransmission();
-  Wire1.beginTransmission(0x14); Wire1.write(0x81); Wire1.write(0x4D); Wire1.endTransmission();
-  Serial.println("[TOUCH] Config write attempts done.");
-#endif
-
-  // Final probe + auto-discovery of working address
-  CTP_ADDR_RUNTIME = findWorkingTouchAddress();
-
-#if DEBUG_TOUCH && DEBUG_TOUCH_PROBE
-  Serial.print("[TOUCH] Final probe of runtime addr 0x"); Serial.print(CTP_ADDR_RUNTIME, HEX);
-  Serial.print(" ... ");
-  Wire1.beginTransmission(CTP_ADDR_RUNTIME);
-  int finalErr = Wire1.endTransmission();
-  Serial.println(finalErr==0 ? "ACK OK" : "STILL NO ACK");
-  if (finalErr != 0) g_i2cErrors++;
-#endif
-
-  Serial.println("[TOUCH] Touch initialization sequence complete.\n");
-
-  // Mega UART
+  // ── Mega UART ─────────────────────────────────────────────────────
   Serial1.setTX(0); Serial1.setRX(1);
   MEGA_SERIAL.begin(115200);
   delay(100);
   MEGA_SERIAL.println("PONG");
-  MEGA_SERIAL.println("SENSOR_STATUS");
 
-  // Draw main screen
+  // ── Main screen ───────────────────────────────────────────────────
   initScreen(SCR_MAIN);
-  screenDirty=false;
-
+  screenDirty = false;
   Serial.println("[PICO] Ready.");
 }
 
-// Safety-net prototypes (guarantees loop() sees the three debug helpers no matter what)
-void handleTouchSerialCommands();
-void touchWatchInt();
-void drawTouchSelfTestOverlay(int x, int y);
-
-// === Actual bodies for the three helpers (these were missing) ===
-
-void i2cBusRecovery() {
-  // Standard I2C bus recovery: clock 9 pulses on SCL while SDA is released (high)
-  // This can unstick a hung slave that is holding SDA low.
-  pinMode(PIN_CTP_SDA, INPUT_PULLUP);
-  pinMode(PIN_CTP_SCL, OUTPUT);
-
-  digitalWrite(PIN_CTP_SCL, HIGH);
-  delayMicroseconds(5);
-
-  for (int i = 0; i < 9; i++) {
-    digitalWrite(PIN_CTP_SCL, LOW);
-    delayMicroseconds(5);
-    digitalWrite(PIN_CTP_SCL, HIGH);
-    delayMicroseconds(5);
-  }
-
-  // Reconfigure for normal I2C use
-  Wire1.begin(PIN_CTP_SDA, PIN_CTP_SCL);
-  Wire1.begin(PIN_CTP_SDA, PIN_CTP_SCL);
-  // Wire1 reinitialised with explicit pins after bus recovery
-
-uint8_t findWorkingTouchAddress() {
-  const uint8_t candidates[] = {CTP_ADDR_RUNTIME, 0x38, 0x48, 0x5D, 0x14, 0x15};
-  for (uint8_t i = 0; i < sizeof(candidates); i++) {
-    uint8_t a = candidates[i];
-    if (a == 0) continue;
-    Wire1.beginTransmission(a);
-    if (Wire1.endTransmission() == 0) {
-      Serial.print("[TOUCH] Found responding device at 0x"); Serial.println(a, HEX);
-      // Try to identify the chip by reading common ID registers
-      probeChipID(a);
-      return a;
-    }
-  }
-  Serial.println("[TOUCH] WARNING: No touch controller responded on any common address!");
-  return CTP_ADDR_RUNTIME; // fall back
-}
-
-// Try to read chip ID / version registers for common controllers
-void probeChipID(uint8_t addr) {
-  Serial.print("[TOUCH-ID] Probing chip ID on 0x"); Serial.print(addr, HEX); Serial.print(" ... ");
-
-  // FT6336 / FT6236 family often has chip ID at 0xA3
-  Wire1.beginTransmission(addr);
-  Wire1.write(0xA3);
-  if (Wire1.endTransmission(false) == 0) {
-    if (Wire1.requestFrom(addr, (uint8_t)1) == 1) {
-      uint8_t id = Wire1.read();
-      if (id != 0 && id != 0xFF) {
-        Serial.print("FT6x36 family? ID=0x"); Serial.print(id, HEX);
-      }
-    }
-  }
-
-  // GT911 common version register (high byte)
-  Wire1.beginTransmission(addr);
-  Wire1.write(0x81);
-  Wire1.write(0x40);
-  if (Wire1.endTransmission(false) == 0) {
-    if (Wire1.requestFrom(addr, (uint8_t)2) == 2) {
-      uint8_t b1 = Wire1.read();
-      uint8_t b2 = Wire1.read();
-      if (b1 != 0 && b1 != 0xFF) {
-        Serial.print(" GT911? ver=0x"); Serial.print(b1, HEX); Serial.print(b2, HEX);
-      }
-    }
-  }
-
-  Serial.println(" (no clear ID match)");
-}
-
-void touchPrintStats() {
-  Serial.println("\n[TOUCH-STATS] ========================");
-  Serial.print("  Reads attempted : "); Serial.println(g_touchReadAttempts);
-  Serial.print("  Valid presses   : "); Serial.println(g_touchValidPresses);
-  Serial.print("  I2C errors      : "); Serial.println(g_i2cErrors);
-  Serial.print("  INT toggles     : "); Serial.println(g_intToggleCount);
-  Serial.print("  Last raw        : ("); Serial.print(g_lastTouchRawX);
-  Serial.print(","); Serial.print(g_lastTouchRawY); Serial.println(")");
-  Serial.print("  Last flipped    : ("); Serial.print(g_lastTouchFlippedX);
-  Serial.print(","); Serial.print(g_lastTouchFlippedY); Serial.println(")");
-  Serial.print("  Current addr    : 0x"); Serial.println(CTP_ADDR_RUNTIME, HEX);
-  Serial.print("  Current I2C kHz : "); Serial.println(TOUCH_I2C_KHZ);
-  Serial.print("  Debounce ms     : "); Serial.println(TOUCH_DEBOUNCE_MS);
-  Serial.print("  Flip X/Y        : "); Serial.print(g_touchFlipX); Serial.print(" / ");
-  Serial.println(g_touchFlipY);
-  Serial.println("====================================\n");
-}
-
-void touchWatchInt() {
-#if DEBUG_TOUCH && DEBUG_TOUCH_INT
-  if (!g_debugInt) return;
-  uint8_t cur = digitalRead(PIN_CTP_INT);
-  if (cur != g_prevInt) {
-    g_intToggleCount++;
-    unsigned long now = millis();
-    Serial.print("[TOUCH-INT] state="); Serial.print(cur ? "HIGH" : "LOW");
-    Serial.print("  delta="); Serial.print(now - g_lastIntMillis);
-    Serial.print("  toggles="); Serial.println(g_intToggleCount);
-    g_lastIntMillis = now;
-    g_prevInt = cur;
-  }
-#endif
-}
-
-void handleTouchSerialCommands() {
-#if DEBUG_TOUCH && DEBUG_TOUCH_SERIAL_CMD
-  if (!Serial.available()) return;
-  char c = Serial.read();
-  if (c == '\n' || c == '\r') return;
-
-  switch (c) {
-    case 'p': {
-      Wire1.beginTransmission(CTP_ADDR_RUNTIME);
-      int e = Wire1.endTransmission();
-      Serial.print("[TOUCH-CMD] Probe 0x"); Serial.print(CTP_ADDR_RUNTIME, HEX);
-      Serial.println(e == 0 ? " ACK" : " NACK");
-      break;
-    }
-    case 's': {
-      Serial.println("[TOUCH-CMD] Full verbose scanner 0x08-0x77 (this can take a few seconds):");
-      uint8_t found = 0;
-      String responders = "";
-      for (uint8_t a = 0x08; a <= 0x77; a++) {
-        Wire1.beginTransmission(a);
-        int e = Wire1.endTransmission();
-        if (e == 0) {
-          found++;
-          String addrStr = "0x";
-          if (a < 16) addrStr += "0";
-          addrStr += String(a, HEX);
-          responders += addrStr + " ";
-          Serial.print("  FOUND: "); Serial.println(addrStr);
-        }
-        // Small delay to not hammer the bus too hard during manual scan
-        if ((a & 0x0F) == 0) delay(1);
-      }
-      Serial.print("[TOUCH-CMD] Scan complete. ");
-      Serial.print(found);
-      Serial.print(" device(s) responded.");
-      if (found > 0) {
-        Serial.print(" Responders: "); Serial.println(responders);
-      } else {
-        Serial.println("");
-        Serial.println("  *** NO DEVICES FOUND ON I2C1 ***");
-        Serial.println("  Common causes: missing 4.7k pull-ups on SDA+SCL, touch controller not powered,");
-        Serial.println("  RST pin held low / wrong polarity, FPC not seated, or wrong chip entirely.");
-      }
-      break;
-    }
-    case 'r': {
-      Touch t = readTouch();
-      Serial.print("[TOUCH-CMD] Force read: pressed="); Serial.print(t.pressed);
-      Serial.print(" x="); Serial.print(t.x); Serial.print(" y="); Serial.println(t.y);
-      break;
-    }
-    case 'i':
-      Serial.print("[TOUCH-CMD] INT pin = "); Serial.println(digitalRead(PIN_CTP_INT) ? "HIGH" : "LOW");
-      break;
-    case 'R':
-      digitalWrite(PIN_CTP_RST, LOW); delay(100); digitalWrite(PIN_CTP_RST, HIGH); delay(300);
-      Serial.println("[TOUCH-CMD] Reset pulse done");
-      break;
-    case 'c':
-      Wire1.beginTransmission(CTP_ADDR_RUNTIME); Wire1.write(0xA4); Wire1.write(0x00); Wire1.endTransmission();
-      Serial.println("[TOUCH-CMD] Config write attempted");
-      break;
-    case 'f': g_touchFlipX = !g_touchFlipX; Serial.print("[TOUCH-CMD] FlipX="); Serial.println(g_touchFlipX); break;
-    case 'F': g_touchFlipY = !g_touchFlipY; Serial.print("[TOUCH-CMD] FlipY="); Serial.println(g_touchFlipY); break;
-    case 'd': g_debugReads = !g_debugReads; Serial.print("[TOUCH-CMD] Verbose reads="); Serial.println(g_debugReads); break;
-    case 'b': g_debugBytes = !g_debugBytes; Serial.print("[TOUCH-CMD] Byte dumps="); Serial.println(g_debugBytes); break;
-    case 'm': g_debugTiming = !g_debugTiming; Serial.print("[TOUCH-CMD] Timing debug messages="); Serial.println(g_debugTiming); Serial.print(" (every "); Serial.print(TOUCH_TIMING_PRINT_INTERVAL); Serial.println("ms)"); break;
-    case 'B':
-      Serial.println("[TOUCH-CMD] Manual bus recovery + full scan...");
-      i2cBusRecovery();
-      delay(10);
-      findWorkingTouchAddress();
-      Wire1.setClock(TOUCH_I2C_KHZ * 1000UL);
-      break;
-    case 't': touchPrintStats(); break;
-    case '?':
-      Serial.println("[TOUCH-CMD] p=probe s=scan r=force i=INT R=reset c=config f/F=flip d=reads b=bytes m=timing spam (now every 4s) B=bus-recovery+scan t=stats");
-      break;
-    default:
-      Serial.print("[TOUCH-CMD] Unknown '"); Serial.print(c); Serial.println("'. Type ? for help.");
-      break;
-  }
-#endif
-}
-
-void drawTouchSelfTestOverlay(int x, int y) {
-#if DEBUG_TOUCH && DEBUG_TOUCH_SELFTEST
-  // Small live raw coord box so you can see what the controller actually reports
-  tft.fillRect(x, y-32, 132, 30, C_SURF);
-  tft.drawRect(x, y-32, 132, 30, C_CYAN);
-  tft.setTextSize(1); tft.setTextColor(C_WHITE, C_SURF);
-  tft.setCursor(x+4, y-28); tft.print("RAW x="); tft.print(g_lastTouchRawX);
-  tft.setCursor(x+4, y-16); tft.print("RAW y="); tft.print(g_lastTouchRawY);
-#endif
-}
-
 // ════════════════════════════════════════════════════════════════════
-//  LOOP  — now includes INT watcher, serial debug commands, and self-test overlay
+//  LOOP
 // ════════════════════════════════════════════════════════════════════
 void loop() {
+  sndUpdate();
   handleMegaSerial();
-  handleTouchSerialCommands();   // type 'p','s','r','i','R','c','f','F','d','t','?' in Serial Monitor
-  touchWatchInt();               // continuous monitoring of the INT pin
 
   // Drop Mega link after 12s silence
-  if(megaLinked && millis()-lastMegaRx>12000){
-    megaLinked=false; screenDirty=true;
+  if (megaLinked && millis()-lastMegaRx > 12000) {
+    megaLinked = false; screenDirty = true;
   }
 
-  // Game loops (run every iteration — they have their own timing)
-  if     (curScreen==GAME_MARIO)     updateMario();
-  else if(curScreen==GAME_PACMAN)    updatePacman();
-  else if(curScreen==GAME_STARSHIP)  updateStarship();
-  else if(curScreen==GAME_MEMORY)    updateMemory();
-  else if(curScreen==GAME_COLORMATCH)updateColMatch();
-  else if(curScreen==GAME_MATH)      updateMath();
+  // Game loops (have their own frame timing)
+  if      (curScreen==GAME_MARIO)      updateMario();
+  else if (curScreen==GAME_PACMAN)     updatePacman();
+  else if (curScreen==GAME_STARSHIP)   updateStarship();
+  else if (curScreen==GAME_MEMORY)     updateMemory();
+  else if (curScreen==GAME_COLORMATCH) updateColMatch();
+  else if (curScreen==GAME_MATH)       updateMath();
   else {
-    // Non-game screens: redraw on dirty flag ~5Hz
-    if(screenDirty) {
-      screenDirty=false;
-      initScreen(curScreen);
-#if DEBUG_TOUCH && DEBUG_TOUCH_SELFTEST
-      // Live raw coordinate overlay so you can see exactly what the controller reports
-      if (g_lastTouchRawX || g_lastTouchRawY) drawTouchSelfTestOverlay(4, SCR_H-40);
-#endif
-    }
-    // Periodic telemetry refresh on sensor screens
-    static unsigned long lastRefresh=0;
-    bool isSensorScreen=(curScreen==SCR_SENS_EYES||curScreen==SCR_SENS_NOSE||
-                         curScreen==SCR_SENS_BRAIN||curScreen==SCR_SENS_TUMMY||
-                         curScreen==SCR_SENS_BRAIN||curScreen==SCR_SENS_TUMMY||
-                         curScreen==SCR_COMMS);
-    if(isSensorScreen && millis()-lastRefresh>3000){
+    // Non-game: redraw on dirty flag
+    if (screenDirty) { screenDirty=false; initScreen(curScreen); }
+
+    // Sensor screens auto-refresh every 3s
+    static unsigned long lastRefresh = 0;
+    bool isSensorScreen = (curScreen==SCR_SENS_EYES || curScreen==SCR_SENS_NOSE ||
+                           curScreen==SCR_SENS_BRAIN || curScreen==SCR_SENS_TUMMY ||
+                           curScreen==SCR_COMMS);
+    if (isSensorScreen && millis()-lastRefresh > 3000) {
+      lastRefresh = millis(); initScreen(curScreen);
     }
   }
 
-  // Touch handling (all screens)
-  if(touchReady()){
-    Touch t=readTouch();
-    if(t.pressed){
-      lastTouchMs=millis();
-      Screen prev=curScreen;
+  // Touch polling — check every 100ms regardless of INT pin
+  if (millis()-lastTouchMs > 100) {
+    Touch t = readTouch();
+    if (t.pressed) {
+      lastTouchMs = millis();
+      Screen prev = curScreen;
       handleTouch(t);
-      if(curScreen!=prev){ screenDirty=true; initScreen(curScreen); }
+      if (curScreen != prev) { screenDirty=true; initScreen(curScreen); }
     }
   }
 }
-
-
-
-
-
