@@ -126,7 +126,11 @@ Touch readTouch(){
   t.y=TOUCH_FLIP_Y?constrain(479-ry,0,479):constrain(ry,0,479);
   t.pressed=true; return t;
 }
-bool touchReady(){ return(!digitalRead(PIN_CTP_INT)&&millis()-lastTouchMs>120); }
+// Poll touch every 100ms regardless of INT pin state.
+// The INT pin is open-drain and only fires when the FT6336U is fully
+// initialized AND the interrupt line is correctly wired. Polling directly
+// is more reliable and still uses debounce to prevent spurious repeats.
+bool touchReady(){ return(millis()-lastTouchMs>100); }
 
 // ── Parsers ───────────────────────────────────────────────────────────
 void parseStat(const char* s){
@@ -1546,9 +1550,9 @@ void loop() {
     static unsigned long lastRefresh=0;
     bool isSensorScreen=(curScreen==SCR_SENS_EYES||curScreen==SCR_SENS_NOSE||
                          curScreen==SCR_SENS_BRAIN||curScreen==SCR_SENS_TUMMY||
-                         curScreen==SCR_COMMS||curScreen==SCR_MAIN);
-    if(isSensorScreen && millis()-lastRefresh>2000){
-      lastRefresh=millis(); initScreen(curScreen);
+                         curScreen==SCR_SENS_BRAIN||curScreen==SCR_SENS_TUMMY||
+                         curScreen==SCR_COMMS);   // SCR_MAIN excluded — updates via screenDirty
+    if(isSensorScreen && millis()-lastRefresh>3000){
     }
   }
 
@@ -1563,5 +1567,6 @@ void loop() {
     }
   }
 }
+
 
 
