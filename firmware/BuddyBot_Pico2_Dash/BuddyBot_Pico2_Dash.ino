@@ -1695,6 +1695,15 @@ void setup() {
   Serial.print("[TOUCH] FT6336U probe at 0x38: ");
   Serial.println(err == 0 ? "OK" : "FAIL (check wiring)");
 
+  // FT6336U init — MUST set polling mode or registers stay zero when touched.
+  // Default from factory is interrupt/trigger mode (0xA4 = 0x01) which only
+  // updates registers when INT fires. Since we poll by timer, force polling mode.
+  if (err == 0) {
+    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0x00); Wire1.write(0x00); Wire1.endTransmission(); delay(5);
+    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xA4); Wire1.write(0x00); Wire1.endTransmission(); delay(5);
+    Serial.println("[TOUCH] Polling mode set (reg 0xA4 = 0x00)");
+  }
+
   // ── Mega UART ─────────────────────────────────────────────────────
   Serial1.setTX(0); Serial1.setRX(1);
   MEGA_SERIAL.begin(115200);
@@ -1751,3 +1760,4 @@ void loop() {
     }
   }
 }
+
