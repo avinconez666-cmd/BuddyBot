@@ -78,6 +78,95 @@ Touch readTouch() {
 bool touchReady() { return (millis() - lastTouchMs > 100); }
 
 
+// ── Neon colour palette (RGB565) ─────────────────────────────────────
+#define C_BG     0x0208
+#define C_SURF   0x0841
+#define C_SURF2  0x10C3
+#define C_BORDER 0x2945
+#define C_CYAN   0x07FF
+#define C_GREEN  0x07E4
+#define C_PURPLE 0x781F
+#define C_ORANGE 0xFD20
+#define C_PINK   0xF81F
+#define C_YELLOW 0xFFE0
+#define C_RED    0xF800
+#define C_BLUE   0x001F
+#define C_WHITE  0xFFFF
+#define C_LGRAY  0x8C71
+#define C_DGRAY  0x4208
+#define C_BLACK  0x0000
+#define C_MRED   0xF800
+#define C_MBLUE  0x001F
+#define C_MSKIN  0xFD8C
+#define C_MBROWN 0x8200
+#define C_MPIPE  0x0320
+#define C_MYELL  0xFFE0
+#define C_MSKY   0x065F
+#define C_MGRND  0xC240
+
+// ── Screen states ─────────────────────────────────────────────────────
+enum Screen : uint8_t {
+  SCR_MAIN=0, SCR_GAMES, SCR_SENSORS,
+  SCR_SENS_EYES, SCR_SENS_NOSE, SCR_SENS_BRAIN, SCR_SENS_TUMMY,
+  SCR_COMMS, SCR_SETTINGS,
+  GAME_MARIO, GAME_PACMAN, GAME_STARSHIP,
+  GAME_MEMORY, GAME_COLORMATCH, GAME_MATH
+};
+Screen curScreen=SCR_MAIN, prevScreen=SCR_MAIN;
+bool   screenDirty=true;
+
+// ── Telemetry ─────────────────────────────────────────────────────────
+struct Telem {
+  int   gas=0; float temp=0,hum=0,volt=0,amps=0; int pct=0;
+  long  dFront=-1,dRear=-1,dLeft=-1,dRight=-1;
+  bool  r3ok=false,espok=false,s9ok=false,estop=false,autoM=false;
+  bool  irL=false,irR=false,pir=false,flame=false;
+  char  fw[16]=""; char mode[16]="NORMAL";
+} T;
+bool brainToggle[6]={true,true,true,true,true,true};
+const char* brainLabels[6]={"TEMP","GAS","VOLTAGE","ULTRASONICS","STATUS","MOTOR"};
+
+// ── Serial state ──────────────────────────────────────────────────────
+#define MEGA_SERIAL Serial1
+char megaBuf[256]; uint16_t megaBufLen=0;
+unsigned long lastMegaRx=0;
+bool megaLinked=false;
+
+// ── Audio queue ───────────────────────────────────────────────────────
+struct Note { uint16_t freq; uint16_t dur; };
+Note          sndQ[SND_QUEUE];
+int           sndHead=0, sndTail=0, sndLen=0;
+unsigned long sndEndMs=0;
+
+void sndUpdate(){
+  if(sndLen==0||millis()<sndEndMs)return;
+  tone(AUDIO_PIN,sndQ[sndHead].freq,sndQ[sndHead].dur);
+  sndEndMs=millis()+sndQ[sndHead].dur+8;
+  sndHead=(sndHead+1)%SND_QUEUE; sndLen--;
+}
+void sndQ1(uint16_t f,uint16_t d){
+  if(sndLen>=SND_QUEUE)return;
+  sndQ[sndTail]={f,d}; sndTail=(sndTail+1)%SND_QUEUE; sndLen++;
+  if(sndLen==1)sndUpdate();
+}
+void sndClear(){ sndLen=0; sndHead=sndTail=0; noTone(AUDIO_PIN); sndEndMs=0; }
+void sndClick()   { sndClear(); sndQ1(800,28); }
+void sndCoin()    { sndClear(); sndQ1(1047,45); sndQ1(1319,65); }
+void sndJump()    { sndClear(); sndQ1(523,22);  sndQ1(784,45); }
+void sndStomp()   { sndClear(); sndQ1(350,20);  sndQ1(175,35); }
+void sndDot()     { sndQ1(1200,12); }
+void sndPower()   { sndClear(); sndQ1(523,30); sndQ1(659,30); sndQ1(784,50); }
+void sndHit()     { sndClear(); sndQ1(220,35); sndQ1(110,55); }
+void sndBuzz()    { sndClear(); sndQ1(150,90); }
+void sndCorrect() { sndClear(); sndQ1(1047,55); sndQ1(1568,90); }
+void sndWrong()   { sndClear(); sndQ1(220,35);  sndQ1(165,60); }
+void sndMatch()   { sndClear(); sndQ1(1047,60); sndQ1(1319,90); }
+void sndDeath()   { sndClear(); sndQ1(392,60);  sndQ1(349,60); sndQ1(294,60); sndQ1(247,120); }
+void sndWin()     { sndClear(); sndQ1(523,80);  sndQ1(659,80); sndQ1(784,80); sndQ1(1047,160); }
+void sndGameOver(){ sndClear(); sndQ1(392,100); sndQ1(349,100); sndQ1(330,100); sndQ1(262,200); }
+void sndAlert()   { sndClear(); sndQ1(880,100); sndQ1(660,100); }
+void sndBoot()    { sndQ1(262,80); sndQ1(330,80); sndQ1(392,80); sndQ1(523,130); }
+
 // ── Parsers ───────────────────────────────────────────────────────────
 void parseStat(const char* s){
   static char b[160]; static char* f[11]; int n=0;
