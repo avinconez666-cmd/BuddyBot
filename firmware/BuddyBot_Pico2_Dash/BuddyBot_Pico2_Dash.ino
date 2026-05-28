@@ -962,6 +962,7 @@ void updateMario() {
 
   Touch t; bool tpressed=false;
   if(touchReady()){ t=readTouch(); tpressed=t.pressed; if(tpressed) lastTouchMs=millis(); }
+  if(tpressed && t.y<26 && t.x<80 && !M.gameOver){ curScreen=SCR_GAMES; return; }
 
   // Controls
   if(tpressed) {
@@ -1113,6 +1114,8 @@ void updatePacman(){
   if(now-PM.lastFrame<80) return; PM.lastFrame=now;
   if(PM.gameOver||PM.win) { if(touchReady()){readTouch();lastTouchMs=millis();pacReset();screenDirty=true;} return; }
 
+  // Top-left corner exits to games menu
+  if(touchReady()){ Touch et=readTouch(); if(et.pressed&&et.y<40&&et.x<70){ lastTouchMs=millis(); curScreen=SCR_GAMES; return; } }
   // Touch to set direction
   if(touchReady()){
     Touch t=readTouch(); lastTouchMs=millis();
@@ -1211,7 +1214,7 @@ void updateStarship(){
   unsigned long now=millis();
   if(now-ship.lastFrame<40)return; ship.lastFrame=now;
   if(ship.gameOver){if(touchReady()){readTouch();lastTouchMs=millis();ssReset();drawStarship();}return;}
-  if(touchReady()){Touch t=readTouch();lastTouchMs=millis();if(t.y>24)ship.sx=t.x;}
+  if(touchReady()){Touch t=readTouch();lastTouchMs=millis(); if(t.pressed&&t.y<26&&t.x<80&&!ship.gameOver){curScreen=SCR_GAMES;return;} if(t.y>24)ship.sx=t.x;}
   ship.sx=constrain(ship.sx,16,SCR_W-16);
   if(now-ship.lastShot>250){
     ship.lastShot=now;
@@ -1573,44 +1576,50 @@ void setup() {
 // ════════════════════════════════════════════════════════════════════
 //  LOOP
 // ════════════════════════════════════════════════════════════════════
+// Returns true if current screen is a game (games handle own touch)
+bool isGameScreen() {
+  return (curScreen==GAME_MARIO || curScreen==GAME_PACMAN ||
+          curScreen==GAME_STARSHIP || curScreen==GAME_MEMORY ||
+          curScreen==GAME_COLORMATCH || curScreen==GAME_MATH);
+}
+
 void loop() {
   sndUpdate();
   handleMegaSerial();
 
-  // Drop Mega link after 12s silence
   if (megaLinked && millis()-lastMegaRx > 12000) {
-    megaLinked = false; screenDirty = true;
+    megaLinked = false;
+    if (!isGameScreen()) screenDirty = true;
   }
 
-  // Game loops (have their own frame timing)
-  if      (curScreen==GAME_MARIO)      updateMario();
-  else if (curScreen==GAME_PACMAN)     updatePacman();
-  else if (curScreen==GAME_STARSHIP)   updateStarship();
-  else if (curScreen==GAME_MEMORY)     updateMemory();
-  else if (curScreen==GAME_COLORMATCH) updateColMatch();
-  else if (curScreen==GAME_MATH)       updateMath();
-  else {
-    // Non-game: redraw on dirty flag
+  if (isGameScreen()) {
+    // Games handle ALL touch and drawing internally — main loop stays out
+    if      (curScreen==GAME_MARIO)      updateMario();
+    else if (curScreen==GAME_PACMAN)     updatePacman();
+    else if (curScreen==GAME_STARSHIP)   updateStarship();
+    else if (curScreen==GAME_MEMORY)     updateMemory();
+    else if (curScreen==GAME_COLORMATCH) updateColMatch();
+    else if (curScreen==GAME_MATH)       updateMath();
+    // If game just exited, draw the menu it returned to
+    if (!isGameScreen()) { screenDirty=false; initScreen(curScreen); }
+  } else {
+    // Menu/sensor screens
     if (screenDirty) { screenDirty=false; initScreen(curScreen); }
+    static unsigned long lastRefresh=0;
+    bool isSensor=(curScreen==SCR_SENS_EYES||curScreen==SCR_SENS_NOSE||
+                   curScreen==SCR_SENS_BRAIN||curScreen==SCR_SENS_TUMMY||
+                   curScreen==SCR_COMMS);
+    if (isSensor && millis()-lastRefresh>3000) { lastRefresh=millis(); initScreen(curScreen); }
 
-    // Sensor screens auto-refresh every 3s
-    static unsigned long lastRefresh = 0;
-    bool isSensorScreen = (curScreen==SCR_SENS_EYES || curScreen==SCR_SENS_NOSE ||
-                           curScreen==SCR_SENS_BRAIN || curScreen==SCR_SENS_TUMMY ||
-                           curScreen==SCR_COMMS);
-    if (isSensorScreen && millis()-lastRefresh > 3000) {
-      lastRefresh = millis(); initScreen(curScreen);
-    }
-  }
-
-  // Touch polling — check every 100ms regardless of INT pin
-  if (millis()-lastTouchMs > 100) {
-    Touch t = readTouch();
-    if (t.pressed) {
-      lastTouchMs = millis();
-      Screen prev = curScreen;
-      handleTouch(t);
-      if (curScreen != prev) { screenDirty=true; initScreen(curScreen); }
+    // Touch only handled here — not during games
+    if (millis()-lastTouchMs>100) {
+      Touch t=readTouch();
+      if (t.pressed) {
+        lastTouchMs=millis();
+        Screen prev=curScreen;
+        handleTouch(t);
+        if (curScreen!=prev) { screenDirty=false; initScreen(curScreen); }
+      }
     }
   }
 }
