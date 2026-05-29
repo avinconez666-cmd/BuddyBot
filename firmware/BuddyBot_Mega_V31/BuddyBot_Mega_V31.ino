@@ -140,7 +140,7 @@ void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorCo
 #define LDR_DO            5     // LDR threshold output
 #define UNHINGED_SW       A1    // Physical switch — unhinged mode
 #define TILT_SENSOR       24    // Tilt / vibration sensor (HIGH = tilt)
-#define PIR_PIN           -1    // PIR motion sensor — set real pin when fitted
+#define PIR_PIN           6    // PIR motion sensor — set real pin when fitted
 #define DHT_PIN           33    // DHT11 data
 #define GAS_DO            -1    // Gas sensor digital output (HIGH = gas)
 #define RF_PIN            2     // 433 MHz RF receiver — INT4 (interrupt-capable on Mega)
@@ -156,8 +156,8 @@ void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorCo
 // ── Ultrasonic sensors (4× HC-SR04) ─────────────────────────────────────────
 #define FRONT_TRIG  46
 #define FRONT_ECHO  49
-#define LEFT_TRIG   29
-#define LEFT_ECHO   28
+#define LEFT_TRIG   28
+#define LEFT_ECHO   29
 #define RIGHT_TRIG  38
 #define RIGHT_ECHO  40
 #define REAR_TRIG   51
@@ -282,6 +282,7 @@ bool uvActive   = false;   // actual output state
 bool systemReady    = false;
 bool emergencyStop  = false;
 bool autonomousMode = false;
+bool gestureMode   = false;  // PAJ7620 gesture control — off until explicitly enabled
 bool unhingedMode   = false;
 bool fanAuto        = true;   // legacy alias (body fan auto) — kept for compatibility
 bool debugVerbose   = DEBUG_VERBOSE;
