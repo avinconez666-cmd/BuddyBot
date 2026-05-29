@@ -185,14 +185,14 @@ void parseStat(const char* s){
   char* p=strtok(b,":"); while(p&&n<11){f[n++]=p;p=strtok(NULL,":");}
   if(n<10)return;
   T.gas=atoi(f[0]);T.temp=atof(f[1]);T.hum=atof(f[2]);
-  T.volt=atof(f[7]);T.pct=atoi(f[8]);T.amps=atof(f[9]);screenDirty=true;
+  T.volt=atof(f[7]);T.pct=atoi(f[8]);T.amps=atof(f[9]); if((curScreen<GAME_MARIO))screenDirty=true;
 }
 void parseUS(const char* s){
   static char b[64]; static char* f[4]; int n=0;
   strncpy(b,s+3,sizeof(b)-1); b[sizeof(b)-1]=0;
   char* p=strtok(b,","); while(p&&n<4){f[n++]=p;p=strtok(NULL,",");}
   if(n<4)return;
-  T.dFront=atol(f[0]);T.dRear=atol(f[1]);T.dLeft=atol(f[2]);T.dRight=atol(f[3]);screenDirty=true;
+  T.dFront=atol(f[0]);T.dRear=atol(f[1]);T.dLeft=atol(f[2]);T.dRight=atol(f[3]); if((curScreen<GAME_MARIO))screenDirty=true;
 }
 void parseStatus(const char* s){
   const char* tags[]={"R3:","ESP:","S9:","ESTOP:","AUTO:"};
@@ -200,10 +200,10 @@ void parseStatus(const char* s){
   for(int i=0;i<5;i++){const char* p=strstr(s,tags[i]);if(p)*(vals[i])=(*(p+strlen(tags[i]))=='1');}
   const char* mp=strstr(s,"MODE:"); if(mp){strncpy(T.mode,mp+5,15);T.mode[15]=0;char*nl=strchr(T.mode,',');if(nl)*nl=0;}
   const char* fp=strstr(s,"FW:");  if(fp){strncpy(T.fw,fp+3,15);T.fw[15]=0;char*nl=strchr(T.fw,',');if(nl)*nl=0;}
-  screenDirty=true;
+  if(curScreen<GAME_MARIO)screenDirty=true;
 }
 void handleMegaLine(const char* line){
-  if(!megaLinked){megaLinked=true;screenDirty=true;}
+  if(!megaLinked){megaLinked=true; if((curScreen<GAME_MARIO))screenDirty=true;}
   lastMegaRx=millis();
   if(strncmp(line,"STAT:",5)==0)parseStat(line);
   else if(strncmp(line,"US:",3)==0)parseUS(line);
@@ -1616,5 +1616,7 @@ void loop() {
     }
   }
 }
+
+
 
 
