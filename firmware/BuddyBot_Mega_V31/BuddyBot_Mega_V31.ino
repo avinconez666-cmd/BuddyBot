@@ -854,8 +854,10 @@ void processS9Command(String cmd) {
   if (cmd.startsWith("SPEED:")) { motorCommPrintln(cmd); toS9("ACK|" + cmd + "|END"); return; }
 
   // ── Autonomous mode ──────────────────────────────────────────────────────────
-  if (cmd == "AUTO:ON")  { autonomousMode = true;  toS9("ACK|AUTO_ON|END");  return; }
-  if (cmd == "AUTO:OFF") { autonomousMode = false; sendMotor("STOP"); toS9("ACK|AUTO_OFF|END"); return; }
+  if (cmd == "AUTO:ON")    { autonomousMode = true;  toS9("ACK|AUTO_ON|END");       return; }
+  if (cmd == "AUTO:OFF")   { autonomousMode = false; sendMotor("STOP"); toS9("ACK|AUTO_OFF|END");  return; }
+  if (cmd == "GESTURE:ON") { gestureMode = true;  toS9("ACK|GESTURE_ON|END");  return; }
+  if (cmd == "GESTURE:OFF"){ gestureMode = false; toS9("ACK|GESTURE_OFF|END"); return; }
 
   // ── Emergency stop ───────────────────────────────────────────────────────────
   if (cmd == "EMERGENCY_STOP") {
@@ -1589,6 +1591,17 @@ void loop() {
   if (!systemReady) { delay(50); return; }
   unsigned long now = millis();
 
+  // One-shot STANDBY announcement when boot lock expires
+  static bool standbyAnnounced = false;
+  if (!standbyAnnounced) {
+    standbyAnnounced = true;
+    sendMotor("STOP");  // ensure motors are dead
+    toS9("SYSTEM|STANDBY|AWAITING_COMMAND|END");
+    Serial1.println(F("SYSTEM:STANDBY"));
+    Serial3.println(F("SYSTEM:STANDBY"));
+    dbg("[STANDBY] Boot complete — awaiting command. autonomousMode=OFF");
+  }
+
   drainMotorQueue();  // always first
 
   if (emergencyStop && estopRetries < MAX_ESTOP) handleEstopRecovery();
@@ -1672,4 +1685,6 @@ void loop() {
     Serial3.println(F("MEGA:BOOT"));
   }
 }
+
+
 
