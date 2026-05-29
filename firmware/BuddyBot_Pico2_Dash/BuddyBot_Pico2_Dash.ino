@@ -143,6 +143,19 @@ char megaBuf[256]; uint16_t megaBufLen=0;
 unsigned long lastMegaRx=0;
 bool megaLinked=false;
 
+// ── Debug log ────────────────────────────────────────────────────────────────
+#define DBG_LINES 10
+#define DBG_LEN   48
+char   dbgLog[DBG_LINES][DBG_LEN];
+int    dbgHead = 0;
+
+void dbgPush(const char* msg) {
+  strncpy(dbgLog[dbgHead], msg, DBG_LEN-1);
+  dbgLog[dbgHead][DBG_LEN-1] = 0;
+  dbgHead = (dbgHead+1) % DBG_LINES;
+  Serial.println(msg);  // Pico USB → PC Serial Monitor
+}
+
 // ── Audio queue ───────────────────────────────────────────────────────
 struct Note { uint16_t freq; uint16_t dur; };
 Note          sndQ[SND_QUEUE];
@@ -214,7 +227,8 @@ void parseStatus(const char* s){
   const char* tags[]={"R3:","ESP:","S9:","ESTOP:","AUTO:"};
   bool* vals[]={&T.r3ok,&T.espok,&T.s9ok,&T.estop,&T.autoM};
   bool changed=false;
-  for(int i=0;i<5;i++){const char* pp=strstr(s,tags[i]);if(pp){bool nv=(*(pp+strlen(tags[i]))=='1');if(nv!=*(vals[i])){*(vals[i])=nv;changed=true;}}}
+  const char* trueChars[]={'O','O','O','Y','O'};  // R3:Ok, ESP:Ok, S9:Ok, ESTOP:Yes, AUTO:On
+  for(int i=0;i<5;i++){const char* pp=strstr(s,tags[i]);if(pp){bool nv=(*(pp+strlen(tags[i]))==trueChars[i]);if(nv!=*(vals[i])){*(vals[i])=nv;changed=true;}}}
   const char* mp=strstr(s,"MODE:");
   if(mp){char nm[16];strncpy(nm,mp+5,15);nm[15]=0;char*nl2=strchr(nm,',');if(nl2)*nl2=0;if(strncmp(nm,T.mode,15)){strncpy(T.mode,nm,16);changed=true;}}
   const char* fp=strstr(s,"FW:");
@@ -222,8 +236,13 @@ void parseStatus(const char* s){
   if(changed)markDirty();
 }
 void handleMegaLine(const char* line){
-  if(!megaLinked){megaLinked=true;markDirty();}
+  if(!megaLinked){megaLinked=true;markDirty(); dbgPush("[PICO] Mega link established");}
   lastMegaRx=millis();
+  // Log non-telemetry messages to debug buffer + Pico USB Serial
+  if(strncmp(line,"STAT:",5)!=0 && strncmp(line,"US:",3)!=0){
+    else dbgPush(line);  // all other non-telem lines
+    if(strncmp(line,"DBG:",4)==0){ dbgPush(line+4); }  // Mega debug forward
+  }
   if(strncmp(line,"STAT:",5)==0)parseStat(line);
   else if(strncmp(line,"US:",3)==0)parseUS(line);
   else if(strncmp(line,"STATUS:",7)==0)parseStatus(line);
@@ -699,6 +718,36 @@ void drawSensNose() {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+//  DEBUG LOG VIEW  (toggled from BRAIN screen header tap)
+// ════════════════════════════════════════════════════════════════════
+bool showBrainLog = false;
+
+void drawBrainLog() {
+  tft.fillScreen(C_BG);
+  drawBack(C_PURPLE);
+  centreText(SCR_W/2, 8, "MEGA EVENT LOG", C_PURPLE, 2, C_BG);
+  hRule(34, C_PURPLE);
+  tft.setTextSize(1);
+  tft.setTextColor(C_DGRAY, C_BG);
+  tft.setCursor(4, SCR_H-12); tft.print("tap header to toggle telemetry view");
+  for (int i = 0; i < DBG_LINES; i++) {
+    int idx = (dbgHead + i) % DBG_LINES;
+    if (dbgLog[idx][0] == 0) continue;
+    int y = 40 + i * 43;
+    gradientRect(2, y, SCR_W-4, 40, blendCol(C_SURF,C_PURPLE,12), C_SURF);
+    tft.drawRect(2, y, SCR_W-4, 40, dimCol(C_PURPLE, 2));
+    // First 24 chars
+    char buf[32]; strncpy(buf, dbgLog[idx], 26); buf[26]=0;
+    tft.setTextColor(C_CYAN, C_SURF); tft.setCursor(4, y+4); tft.print(buf);
+    // Second 24 chars
+    if(strlen(dbgLog[idx])>26){
+      strncpy(buf, dbgLog[idx]+26, 22); buf[22]=0;
+      tft.setTextColor(C_LGRAY, C_SURF); tft.setCursor(4, y+20); tft.print(buf);
+    }
+  }
+}
+
 //  SENSOR — BRAIN  (all telemetry with toggles)
 // ════════════════════════════════════════════════════════════════════
 void drawSensBrain() {
@@ -762,8 +811,9 @@ void drawSensBrain() {
 }
 
 void handleBrainTouch(Touch& t) {
-  if(t.y<72){ curScreen=SCR_SENSORS; screenDirty=true; return; }
-  // Check toggles
+void handleBrainTouch(Touch& t) {
+  if(t.y<72 && t.x<(SCR_W-80)){ curScreen=SCR_SENSORS; screenDirty=true; return; } // left = back
+  if(t.y<72){ showBrainLog=!showBrainLog; screenDirty=true; return; }  // right = toggle log
   int firstToggleY=0;
   int y=80; int used=0;
   for(int i=0;i<6;i++) if(brainToggle[i]) used++;
@@ -1524,7 +1574,7 @@ void initScreen(Screen s) {
     case SCR_SENSORS:     drawSensors();      break;
     case SCR_SENS_EYES:   drawSensEyes();     break;
     case SCR_SENS_NOSE:   drawSensNose();     break;
-    case SCR_SENS_BRAIN:  drawSensBrain();    break;
+    case SCR_SENS_BRAIN:  if(showBrainLog) drawBrainLog(); else drawSensBrain(); break;
     case SCR_SENS_TUMMY:  drawSensTummy();    break;
     case SCR_COMMS:       drawComms();        break;
     case SCR_SETTINGS:    drawSettings();     break;
@@ -1575,6 +1625,11 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("[PICO] BuddyBot Dash v6.1 booting...");
+
+  // ── USB Serial debug (connect Pico USB to PC while S9 uses Mega USB) ──
+  Serial.begin(115200);
+  delay(100);
+  Serial.println("[PICO] BuddyBot Pico2 Dash v6.1 — USB debug active");
 
   // ── TFT ──────────────────────────────────────────────────────────
   tft.init();
@@ -1704,6 +1759,12 @@ void loop() {
     }
   }
 }
+
+
+
+
+
+
 
 
 

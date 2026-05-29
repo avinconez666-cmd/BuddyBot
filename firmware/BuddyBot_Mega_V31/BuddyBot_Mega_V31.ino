@@ -114,6 +114,18 @@ const unsigned long RF_AUTO = 5400;
 SoftwareSerial gpsSerial(10, 11);  // RX=10 ← GPS TX,  TX=11 (unused)
 
 // ── SoftwareSerial guard wrappers ────────────────────────────────────────────
+// ── Pico debug forwarding ──────────────────────────────────────────────────────
+// Sends debug lines to Pico via Serial1 — they appear in the BRAIN log screen
+// and on the Pico USB Serial Monitor (connect Pico USB to PC).
+void picoDbg(const char* msg) {
+  Serial1.print(F("DBG:"));
+  Serial1.println(msg);
+}
+void picoDbg(const String& msg) {
+  Serial1.print(F("DBG:"));
+  Serial1.println(msg);
+}
+
 void motorCommPrintln(const __FlashStringHelper *msg) { if (!r3CommFail) motorComm.println(msg); }
 void motorCommPrintln(const String &msg)              { if (!r3CommFail) motorComm.println(msg); }
 void motorCommPrintln(const char *msg)                { if (!r3CommFail) motorComm.println(msg); }
@@ -420,6 +432,7 @@ float readHeadTemp() {
 //  MOTOR QUEUE
 // ════════════════════════════════════════════════════════════════════
 void sendMotor(const char* cmd) {
+  picoDbg(String("MTR>")+cmd);  // log motor commands to Pico
   if      (strcmp(cmd, "FORWARD")  == 0) { nav.isMoving=true;  nav.isReversing=false; }
   else if (strcmp(cmd, "BACKWARD") == 0) { nav.isMoving=true;  nav.isReversing=true;  }
   else if (strcmp(cmd, "LEFT")     == 0) { nav.isMoving=true;  nav.isReversing=false; }
@@ -829,7 +842,8 @@ void processS9Command(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
   Serial.print(F("[RECV] S9: ")); Serial.println(cmd);
-  s9LastHB    = millis();
+  Serial.print(F("[RECV] S9: ")); Serial.println(cmd);
+  picoDbg("S9>" + cmd);
   s9Connected = true;
 
   // ── Motor commands ───────────────────────────────────────────────────────────
@@ -1598,6 +1612,7 @@ void loop() {
     standbyAnnounced = true;
     sendMotor("STOP");  // ensure motors are dead
     toS9("SYSTEM|STANDBY|AWAITING_COMMAND|END");
+    picoDbg("SYS:STANDBY - awaiting command");
     Serial1.println(F("SYSTEM:STANDBY"));
     Serial3.println(F("SYSTEM:STANDBY"));
     dbg("[STANDBY] Boot complete — awaiting command. autonomousMode=OFF");
@@ -1686,6 +1701,8 @@ void loop() {
     Serial3.println(F("MEGA:BOOT"));
   }
 }
+
+
 
 
 
