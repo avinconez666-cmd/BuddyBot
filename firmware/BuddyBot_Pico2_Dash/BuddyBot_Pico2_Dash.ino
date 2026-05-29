@@ -131,7 +131,7 @@ struct Telem {
   int   gas=0; float temp=0,hum=0,volt=0,amps=0; int pct=0;
   long  dFront=-1,dRear=-1,dLeft=-1,dRight=-1;
   bool  r3ok=false,espok=false,s9ok=false,estop=false,autoM=false;
-  bool  irL=false,irR=false,pir=false,flame=false;
+  bool  irFront=false,irRear=false,pir=false,flame=false;
   char  fw[16]=""; char mode[16]="NORMAL";
 } T;
 bool brainToggle[6]={true,true,true,true,true,true};
@@ -151,7 +151,13 @@ unsigned long sndEndMs=0;
 
 void sndUpdate(){
   if(sndLen==0||millis()<sndEndMs)return;
-  tone(AUDIO_PIN,sndQ[sndHead].freq,sndQ[sndHead].dur);
+  // RP2040: use analogWriteFreq + analogWrite for reliable tone output
+  if(sndQ[sndHead].freq == 0){
+    analogWrite(AUDIO_PIN, 0);
+  } else {
+    analogWriteFreq(sndQ[sndHead].freq);
+    analogWrite(AUDIO_PIN, 127); // 50% duty cycle = loudest square wave
+  }
   sndEndMs=millis()+sndQ[sndHead].dur+8;
   sndHead=(sndHead+1)%SND_QUEUE; sndLen--;
 }
@@ -160,7 +166,7 @@ void sndQ1(uint16_t f,uint16_t d){
   sndQ[sndTail]={f,d}; sndTail=(sndTail+1)%SND_QUEUE; sndLen++;
   if(sndLen==1)sndUpdate();
 }
-void sndClear(){ sndLen=0; sndHead=sndTail=0; noTone(AUDIO_PIN); sndEndMs=0; }
+void sndClear(){ sndLen=0; sndHead=sndTail=0; analogWrite(AUDIO_PIN,0); sndEndMs=0; }
 void sndClick()   { sndClear(); sndQ1(800,28); }
 void sndCoin()    { sndClear(); sndQ1(1047,45); sndQ1(1319,65); }
 void sndJump()    { sndClear(); sndQ1(523,22);  sndQ1(784,45); }
@@ -238,136 +244,205 @@ void handleMegaSerial(){
 //    and fires the next queued note. Zero blocking in the game loop.
 // ════════════════════════════════════════════════════════════════════
 
-//  UI PRIMITIVES  — neon glow aesthetic
 // ════════════════════════════════════════════════════════════════════
-// Simulate glow by drawing 2 concentric rect outlines (dim then bright)
-void neonBox(int x,int y,int w,int h,uint16_t col,uint16_t bg=C_SURF) {
-  uint16_t dimCol = (uint16_t)(((col>>11)>>1)<<11)
-                  | (uint16_t)((((col>>5)&0x3F)>>1)<<5)
-                  | (uint16_t)(((col&0x1F)>>1));
-  tft.fillRoundRect(x,y,w,h,6,bg);
-  tft.drawRoundRect(x+2,y+2,w-4,h-4,5,dimCol);
+//  UI PRIMITIVES  — High-End 3D / Glassmorphic Aesthetic
+// ════════════════════════════════════════════════════════════════════
+
+// Colour math helpers
+uint16_t dimCol(uint16_t c,uint8_t shift=1){
+  return (uint16_t)(((c>>11)>>shift)<<11)
+        |(uint16_t)((((c>>5)&0x3F)>>shift)<<5)
+        |(uint16_t)(((c&0x1F)>>shift));
+}
+uint16_t blendCol(uint16_t a,uint16_t b,uint8_t t){
+  uint8_t r=(((a>>11)*(255-t)+(b>>11)*t)>>8)&0x1F;
+  uint8_t g=(((((a>>5)&0x3F)*(255-t))+(((b>>5)&0x3F)*t))>>8)&0x3F;
+  uint8_t bl=((((a&0x1F)*(255-t))+((b&0x1F)*t))>>8)&0x1F;
+  return (r<<11)|(g<<5)|bl;
+}
+
+// Vertical gradient fill (top col1 → bottom col2)
+void gradientRect(int x,int y,int w,int h,uint16_t c1,uint16_t c2){
+  for(int i=0;i<h;i++){
+    tft.drawFastHLine(x,y+i,w,blendCol(c1,c2,(uint8_t)((i*255)/max(h-1,1))));
+  }
+}
+
+// Glass card: dark gradient bg + coloured top edge + inner highlight
+void glassCard(int x,int y,int w,int h,uint16_t accent){
+  // Background gradient (dark top to slightly lighter bottom)
+  gradientRect(x+1,y+1,w-2,h-2,0x0C62,0x0841);
+  // Outer border — accent colour, slightly dim
+  tft.drawRoundRect(x,y,w,h,8,dimCol(accent,1));
+  // Inner highlight — bright accent top
+  tft.drawFastHLine(x+4,y+1,w-8,dimCol(accent,0));
+  // Top accent line — full brightness
+  tft.drawFastHLine(x+2,y,w-4,accent);
+  // Drop shadow (2px right+down, very dark)
+  tft.drawFastHLine(x+4,y+h,w-4,0x0208);
+  tft.drawFastVLine(x+w,y+4,h-4,0x0208);
+}
+
+// Neon box with glow, gradient fill and drop shadow
+void neonBox(int x,int y,int w,int h,uint16_t col,uint16_t bg=C_SURF){
+  // Drop shadow
+  tft.fillRoundRect(x+3,y+3,w,h,6,0x0208);
+  // Gradient fill
+  gradientRect(x+1,y+1,w-2,h-2,blendCol(bg,col,40),bg);
+  // Outer glow — dim
+  tft.drawRoundRect(x+1,y+1,w-2,h-2,5,dimCol(col,2));
+  // Main border
   tft.drawRoundRect(x,y,w,h,6,col);
+  // Top gloss line
+  tft.drawFastHLine(x+4,y+1,w-8,dimCol(col,1));
 }
 
-// Glow text: draw dimmed shadow then bright text
-void glowText(int x,int y,const char* txt,uint16_t col,uint8_t sz=1) {
-  uint16_t dim=(uint16_t)(((col>>11)>>2)<<11)
-              |(uint16_t)((((col>>5)&0x3F)>>2)<<5)
-              |(uint16_t)(((col&0x1F)>>2));
-  tft.setTextSize(sz);
-  tft.setTextColor(dim,C_BG);
-  tft.setCursor(x+1,y+1); tft.print(txt);
-  tft.setTextColor(col,C_BG);
-  tft.setCursor(x,y); tft.print(txt);
+// Glow text: 3-layer (shadow + dim + bright)
+void glowText(int x,int y,const char* txt,uint16_t col,uint8_t sz=1){
+  uint16_t d1=dimCol(col,2), d2=dimCol(col,1);
+  tft.setTextSize(sz); tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(d1,C_BG); tft.setCursor(x+2,y+2); tft.print(txt);
+  tft.setTextColor(d2,C_BG); tft.setCursor(x+1,y+1); tft.print(txt);
+  tft.setTextColor(col,C_BG); tft.setCursor(x,y);     tft.print(txt);
 }
 
-// Centred text helper
-void centreText(int cx,int y,const char* txt,uint16_t col,uint8_t sz,uint16_t bg=C_BG) {
-  tft.setTextSize(sz);
-  tft.setTextColor(col,bg);
+// Centred text
+void centreText(int cx,int y,const char* txt,uint16_t col,uint8_t sz,uint16_t bg=C_BG){
+  tft.setTextSize(sz); tft.setTextColor(col,bg);
   int16_t tw=strlen(txt)*6*sz;
   tft.setCursor(cx-tw/2,y); tft.print(txt);
 }
 
-// Neon button with icon emoji hint and label
-void neonBtn(int x,int y,int w,int h,const char* top,const char* bot,
-             uint16_t col, bool pressed=false) {
-  uint16_t bg = pressed ? col : C_SURF;
-  uint16_t tc = pressed ? C_BLACK : col;
-  neonBox(x,y,w,h,col,bg);
-  // Top text (icon/emoji represented as big text)
-  tft.setTextSize(3); tft.setTextColor(tc,bg);
-  int16_t tw=strlen(top)*18;
-  tft.setCursor(x+(w-tw)/2, y+h/2-28); tft.print(top);
-  // Bottom label
-  tft.setTextSize(2); tft.setTextColor(tc,bg);
-  tw=strlen(bot)*12;
-  tft.setCursor(x+(w-tw)/2, y+h/2+10); tft.print(bot);
+// High-end main menu button with 3D bevel + gradient + icon
+void neonBtn(int x,int y,int w,int h,const char* icon,const char* label,uint16_t col,bool pressed=false){
+  uint16_t bg   = pressed ? dimCol(col,1) : 0x0A41;
+  uint16_t tc   = pressed ? C_BLACK : col;
+  // Drop shadow
+  tft.fillRoundRect(x+4,y+4,w,h,10,0x0104);
+  // Gradient body
+  gradientRect(x,y,w,h,blendCol(bg,col,30),bg);
+  // Rounded clip (re-blank corners)
+  tft.drawRoundRect(x,y,w,h,10,bg);
+  // Outer border — bright accent
+  tft.drawRoundRect(x,y,w,h,10,col);
+  // Inner bevel highlight (top-left)
+  tft.drawFastHLine(x+4,y+1,w-8,dimCol(col,1));
+  tft.drawFastVLine(x+1,y+4,h/3,dimCol(col,2));
+  // Bottom-right shadow bevel
+  tft.drawFastHLine(x+4,y+h-1,w-8,dimCol(col,3));
+  // Icon — large centre top
+  tft.setTextSize(3); tft.setTextColor(tc,0x0A41);
+  int16_t iw=strlen(icon)*18;
+  tft.setCursor(x+(w-iw)/2, y+h/2-26); tft.print(icon);
+  // Label — centred bottom
+  tft.setTextSize(2); tft.setTextColor(col,0x0A41);
+  int16_t lw=strlen(label)*12;
+  tft.setCursor(x+(w-lw)/2, y+h/2+8); tft.print(label);
 }
 
-// Small stat pill (coloured bar with label:value)
-void statPill(int x,int y,int w,const char* lbl,const char* val,uint16_t col) {
-  tft.fillRoundRect(x,y,w,22,4,C_SURF);
-  tft.drawRoundRect(x,y,w,22,4,col);
+// Stat pill with gradient and side accent bar
+void statPill(int x,int y,int w,const char* lbl,const char* val,uint16_t col){
+  // Gradient bg
+  gradientRect(x,y,w,26,blendCol(C_SURF,col,20),C_SURF);
+  // Left accent bar
+  tft.fillRect(x,y,3,26,col);
+  // Border
+  tft.drawRect(x,y,w,26,dimCol(col,1));
+  // Top gloss
+  tft.drawFastHLine(x+3,y+1,w-4,dimCol(col,2));
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF);
+  tft.setCursor(x+8,y+5); tft.print(lbl);
+  if(val&&strlen(val)>0){
+    tft.setTextColor(col,C_SURF);
+    tft.setCursor(x+w-strlen(val)*6-4,y+9); tft.print(val);
+  }
+}
+
+// US distance bar — 3D segmented style
+void usBar(int x,int y,int w,long dist,const char* lbl){
+  gradientRect(x,y,w,34,0x0C62,C_SURF);
+  tft.drawRect(x,y,w,34,C_BORDER);
+  tft.drawFastHLine(x+1,y+1,w-2,0x18C6);  // inner gloss
   tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF);
   tft.setCursor(x+4,y+4); tft.print(lbl);
-  tft.setTextColor(col,C_SURF);
-  int16_t tw=strlen(val)*6;
-  tft.setCursor(x+w-tw-4,y+8); tft.print(val);
-}
-
-// US distance bar (horizontal proportional to distance)
-void usBar(int x,int y,int w,long dist,const char* lbl) {
-  tft.fillRect(x,y,w,32,C_SURF);
-  tft.drawRect(x,y,w,32,C_BORDER);
-  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF);
-  tft.setCursor(x+3,y+3); tft.print(lbl);
-  if(dist<0){
-    tft.setTextColor(C_DGRAY,C_SURF); tft.setCursor(x+3,y+16); tft.print("---");
-    return;
-  }
+  if(dist<0){ tft.setTextColor(C_DGRAY,C_SURF); tft.setCursor(x+4,y+20); tft.print("NO SIGNAL"); return; }
   long capped=min(dist,200L);
-  int barW=(int)((capped*( w-6))/200);
-  uint16_t col = dist<20?C_RED : dist<50?C_ORANGE : dist<100?C_YELLOW : C_GREEN;
-  tft.fillRect(x+3,y+16,barW,10,col);
+  int bw=(int)((capped*(w-8))/200);
+  uint16_t col=dist<20?C_RED:dist<50?C_ORANGE:dist<100?C_YELLOW:C_GREEN;
+  // Segmented bar
+  for(int i=0;i<bw;i+=5){
+    tft.fillRect(x+4+i,y+18,4,10,blendCol(C_RED,C_GREEN,(uint8_t)((i*255)/max(bw,1))));
+  }
+  tft.drawRect(x+4,y+18,w-8,10,dimCol(col,1));
   char buf[12]; snprintf(buf,12,"%ldcm",dist);
-  tft.setTextColor(C_WHITE,C_SURF); tft.setCursor(x+w-40,y+18); tft.print(buf);
+  tft.setTextColor(C_WHITE,C_SURF); tft.setCursor(x+w-42,y+20); tft.print(buf);
 }
 
-// Back button (top-left corner)
-void drawBack(uint16_t col=C_CYAN) {
-  tft.fillRoundRect(4,4,60,28,4,C_SURF);
-  tft.drawRoundRect(4,4,60,28,4,col);
+// Back button — right-aligned chevron, tap anywhere in top 72px
+void drawBack(uint16_t col=C_CYAN){
+  // Glass pill button top-right corner
+  gradientRect(SCR_W-68,4,64,28,blendCol(C_SURF,col,30),C_SURF);
+  tft.drawRoundRect(SCR_W-68,4,64,28,6,col);
+  tft.drawFastHLine(SCR_W-64,5,56,dimCol(col,1));
   tft.setTextSize(2); tft.setTextColor(col,C_SURF);
-  tft.setCursor(10,9); tft.print("< ");
-  tft.setTextSize(1); tft.setCursor(28,12); tft.print("BACK");
+  tft.setCursor(SCR_W-60,9); tft.print("< BCK");
 }
 
-// Horizontal neon divider
-void hRule(int y,uint16_t col=C_CYAN) {
-  uint16_t dim=(uint16_t)(((col>>11)>>2)<<11)
-              |(uint16_t)((((col>>5)&0x3F)>>2)<<5)
-              |(uint16_t)(((col&0x1F)>>2));
-  tft.drawFastHLine(8,y+1,SCR_W-16,dim);
-  tft.drawFastHLine(8,y,  SCR_W-16,col);
+// Horizontal rule — double line with glow
+void hRule(int y,uint16_t col=C_CYAN){
+  tft.drawFastHLine(0,y+2,SCR_W,dimCol(col,3));
+  tft.drawFastHLine(0,y+1,SCR_W,dimCol(col,1));
+  tft.drawFastHLine(0,y,  SCR_W,col);
 }
-
 // ════════════════════════════════════════════════════════════════════
 //  HEADER  (shared across all non-game screens)
 // ════════════════════════════════════════════════════════════════════
-void drawHeader() {
-  // Title bar
-  tft.fillRect(0,0,SCR_W,52,C_SURF);
-  hRule(51,C_CYAN);
+void drawHeader(){
+  // Premium gradient header bar
+  gradientRect(0,0,SCR_W,56,0x1082,0x0208);
+  // Cyan top edge glow
+  tft.drawFastHLine(0,0,SCR_W,C_CYAN);
+  tft.drawFastHLine(0,1,SCR_W,dimCol(C_CYAN,1));
+  // Bottom separator
+  tft.drawFastHLine(0,55,SCR_W,dimCol(C_CYAN,2));
+  tft.drawFastHLine(0,56,SCR_W,dimCol(C_CYAN,3));
 
-  // Title — animated cyan glow
-  tft.setTextSize(2); tft.setTextColor(C_CYAN,C_SURF);
-  centreText(SCR_W/2,6,"AJ2BUDDYCOMMS",C_CYAN,2,C_SURF);
+  // Title with 3-layer glow
+  tft.setTextSize(2);
+  uint16_t s1=dimCol(C_CYAN,3),s2=dimCol(C_CYAN,2),s3=dimCol(C_CYAN,1);
+  int16_t tw=13*12; int tx=SCR_W/2-tw/2;
+  tft.setTextColor(s1,0x0000); tft.setCursor(tx+2,8+2); tft.print("AJ2BUDDYCOMMS");
+  tft.setTextColor(s2,0x0000); tft.setCursor(tx+1,8+1); tft.print("AJ2BUDDYCOMMS");
+  tft.setTextColor(C_CYAN,0x0000); tft.setCursor(tx,8);  tft.print("AJ2BUDDYCOMMS");
 
-  // Vitals row
-  char buf[24];
-  // Link status
-  uint16_t lkCol = megaLinked ? C_GREEN : C_RED;
-  tft.fillCircle(10,42,4,lkCol);
-  tft.setTextSize(1); tft.setTextColor(lkCol,C_SURF);
-  tft.setCursor(17,38); tft.print(megaLinked?"LIVE":"WAIT");
+  // Status row
+  // Link indicator — pulsing dot
+  uint16_t lk=megaLinked?C_GREEN:C_RED;
+  tft.fillCircle(10,44,5,dimCol(lk,2));
+  tft.fillCircle(10,44,3,lk);
+  tft.setTextSize(1); tft.setTextColor(megaLinked?C_GREEN:C_RED,0x0000);
+  tft.setCursor(18,40); tft.print(megaLinked?"LIVE":"WAIT");
 
-  // Battery
-  snprintf(buf,sizeof(buf),"%d%%",T.pct);
-  uint16_t batCol = T.pct>50?C_GREEN:T.pct>20?C_ORANGE:C_RED;
-  tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(55,38); tft.print("BAT");
-  tft.setTextColor(batCol,C_SURF);  tft.setCursor(76,38); tft.print(buf);
+  // Battery bar
+  char buf[10];
+  uint16_t bc=T.pct>50?C_GREEN:T.pct>20?C_ORANGE:C_RED;
+  snprintf(buf,10,"%d%%",T.pct);
+  // Mini battery bar (30px wide)
+  tft.drawRect(54,38,32,12,C_LGRAY);
+  tft.fillRect(55,39,(int)(T.pct*30/100),10,bc);
+  tft.fillRect(86,41,3,6,C_LGRAY);  // terminal nub
+  tft.setTextColor(bc,0x0000); tft.setCursor(92,40); tft.print(buf);
 
   // Voltage
-  snprintf(buf,sizeof(buf),"%.1fV",T.volt);
-  tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(110,38); tft.print("V");
-  tft.setTextColor(C_CYAN,C_SURF);  tft.setCursor(120,38); tft.print(buf);
+  snprintf(buf,10,"%.1fV",T.volt);
+  tft.setTextColor(C_CYAN,0x0000); tft.setCursor(128,40); tft.print(buf);
 
-  // Mode
-  tft.setTextColor(C_PURPLE,C_SURF);
-  int16_t tw=strlen(T.mode)*6;
-  tft.setCursor(SCR_W-tw-4,38); tft.print(T.mode);
+  // Mode badge — right side
+  uint16_t mc=C_PURPLE;
+  int16_t mw=strlen(T.mode)*6+8;
+  gradientRect(SCR_W-mw-2,34,mw,18,blendCol(C_SURF,mc,40),C_SURF);
+  tft.drawRect(SCR_W-mw-2,34,mw,18,mc);
+  tft.setTextColor(mc,0x0000); tft.setCursor(SCR_W-mw+2,39); tft.print(T.mode);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -445,7 +520,7 @@ void drawGames() {
 }
 
 void handleGamesTouch(Touch& t) {
-  if(t.y<40){ curScreen=SCR_MAIN; screenDirty=true; return; }
+  if(t.y<72){ curScreen=SCR_MAIN; screenDirty=true; return; }
   Screen games[]={GAME_MARIO,GAME_PACMAN,GAME_STARSHIP,GAME_MEMORY,GAME_COLORMATCH,GAME_MATH};
   for(int i=0;i<6;i++){
     int by=80+i*62;
@@ -482,7 +557,7 @@ void drawSensors() {
 }
 
 void handleSensorsTouch(Touch& t) {
-  if(t.y<40){ curScreen=SCR_MAIN; screenDirty=true; return; }
+  if(t.y<72){ curScreen=SCR_MAIN; screenDirty=true; return; }
   Screen subs[]={SCR_SENS_EYES,SCR_SENS_NOSE,SCR_SENS_BRAIN,SCR_SENS_TUMMY};
   for(int i=0;i<4;i++){
     int by=80+i*96;
@@ -549,17 +624,17 @@ void drawSensEyes() {
 
   // IR sensors
   hRule(380,C_CYAN);
-  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(8,388); tft.print("IR SENSORS");
-  uint16_t ilCol=T.irL?C_RED:C_DGRAY;
-  uint16_t irCol=T.irR?C_RED:C_DGRAY;
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(8,388); tft.print("IR SENSORS (FRONT / REAR)");
+  uint16_t ilCol=T.irFront?C_RED:C_DGRAY;
+  uint16_t irCol=T.irRear?C_RED:C_DGRAY;
   tft.fillRoundRect(8,400,148,36,6,C_SURF);
   tft.drawRoundRect(8,400,148,36,6,ilCol);
   tft.setTextColor(ilCol,C_SURF); tft.setTextSize(2); tft.setCursor(16,412);
-  tft.print(T.irL?"IR-L DETECT":"IR-L clear ");
+  tft.print(T.irFront?"IR-F DETECT":"IR-F clear ");
   tft.fillRoundRect(164,400,148,36,6,C_SURF);
   tft.drawRoundRect(164,400,148,36,6,irCol);
   tft.setTextColor(irCol,C_SURF); tft.setCursor(172,412);
-  tft.print(T.irR?"IR-R DETECT":"IR-R clear ");
+  tft.print(T.irRear?"IR-Rear DETECT":"IR-Rear clear ");
 
   // Camera placeholder
   hRule(440,C_PURPLE);
@@ -687,7 +762,7 @@ void drawSensBrain() {
 }
 
 void handleBrainTouch(Touch& t) {
-  if(t.y<40){ curScreen=SCR_SENSORS; screenDirty=true; return; }
+  if(t.y<72){ curScreen=SCR_SENSORS; screenDirty=true; return; }
   // Check toggles
   int firstToggleY=0;
   int y=80; int used=0;
@@ -825,7 +900,7 @@ void drawSettings() {
 }
 
 void handleSettingsTouch(Touch& t) {
-  if(t.y<40){ curScreen=SCR_MAIN; screenDirty=true; return; }
+  if(t.y<72){ curScreen=SCR_MAIN; screenDirty=true; return; }
   const char* megaCmds[]={"PING","STATUS","SENSOR_STATUS","ESTOP"};
   for(int i=0;i<4;i++){
     if(t.y>=150+i*72 && t.y<210+i*72 && t.x>=8 && t.x<SCR_W-8){
@@ -1474,7 +1549,7 @@ void handleTouch(Touch& t) {
     case SCR_SENS_EYES:
     case SCR_SENS_NOSE:
     case SCR_SENS_TUMMY:
-      if(t.y<40&&t.x<80){curScreen=SCR_SENSORS;screenDirty=true;}
+      if(t.y<72){curScreen=SCR_SENSORS;screenDirty=true;}
       break;
     case SCR_COMMS:
       if(t.y<72){curScreen=SCR_MAIN;screenDirty=true;} // full header = back
@@ -1629,6 +1704,8 @@ void loop() {
     }
   }
 }
+
+
 
 
 

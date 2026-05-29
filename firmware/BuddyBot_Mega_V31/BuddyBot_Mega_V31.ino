@@ -76,7 +76,7 @@ const float BAT_MAX   = 8.4f;
 const float BAT_MIN   = 6.0f;    // CRITICAL — ESTOP
 const float BAT_LOW   = 6.6f;    // LOW — warn + slow
 const float BAT_WARN  = 7.0f;    // WARN — first notice
-const float BAT_VDIV  = 4.75f;   // Voltage-divider multiplier for A14
+const float BAT_VDIV  = 5.62f;   // Corrected: was 4.75 reading 6.59V vs actual 7.8V → 4.75*(7.8/6.59)=5.62
 const float BAT_CTEMP = 50.0f;   // Battery over-temp ESTOP threshold
 const float BAT_WTEMP = 45.0f;   // Body fan-on threshold (battery temp)
 
@@ -1672,3 +1672,4 @@ void loop() {
     Serial3.println(F("MEGA:BOOT"));
   }
 }
+
