@@ -51,6 +51,28 @@ TFT_eSPI tft = TFT_eSPI();
 #define TOUCH_FLIP_X true
 #define TOUCH_FLIP_Y false
 
+// ── Screen states (must be defined early because Arduino auto-generates
+//     function prototypes at the top of the file, before most user code)
+enum Screen : uint8_t {
+  SCR_MAIN, 
+  SCR_GAMES, 
+  SCR_SENSORS,
+  SCR_SENS_EYES, 
+  SCR_SENS_NOSE, 
+  SCR_SENS_BRAIN, 
+  SCR_SENS_TUMMY,
+  SCR_COMMS, 
+  SCR_SETTINGS,
+  GAME_MARIO, 
+  GAME_PACMAN, 
+  GAME_STARSHIP,
+  GAME_MEMORY,
+  GAME_COLORMATCH, 
+  GAME_MATH
+};
+Screen curScreen = SCR_MAIN, prevScreen = SCR_MAIN;
+bool   screenDirty = true;
+
 struct Touch { int16_t x,y; bool pressed; };
 unsigned long lastTouchMs = 0;
 
@@ -103,17 +125,6 @@ bool touchReady() { return (millis() - lastTouchMs > 100); }
 #define C_MYELL  0xFFE0
 #define C_MSKY   0x065F
 #define C_MGRND  0xC240
-
-// ── Screen states ─────────────────────────────────────────────────────
-enum Screen : uint8_t {
-  SCR_MAIN=0, SCR_GAMES, SCR_SENSORS,
-  SCR_SENS_EYES, SCR_SENS_NOSE, SCR_SENS_BRAIN, SCR_SENS_TUMMY,
-  SCR_COMMS, SCR_SETTINGS,
-  GAME_MARIO, GAME_PACMAN, GAME_STARSHIP,
-  GAME_MEMORY, GAME_COLORMATCH, GAME_MATH
-};
-Screen curScreen=SCR_MAIN, prevScreen=SCR_MAIN;
-bool   screenDirty=true;
 
 // ── Telemetry ─────────────────────────────────────────────────────────
 struct Telem {
@@ -213,41 +224,6 @@ void handleMegaSerial(){
 //    sndUpdate() called every loop() checks if the note's time has expired
 //    and fires the next queued note. Zero blocking in the game loop.
 // ════════════════════════════════════════════════════════════════════
-struct Note { uint16_t freq; uint16_t dur; };
-Note          sndQ[SND_QUEUE];
-int           sndHead=0, sndTail=0, sndLen=0;
-unsigned long sndEndMs=0;
-
-void sndUpdate(){
-  if(sndLen==0||millis()<sndEndMs)return;
-  tone(AUDIO_PIN,sndQ[sndHead].freq,sndQ[sndHead].dur);
-  sndEndMs=millis()+sndQ[sndHead].dur+8;
-  sndHead=(sndHead+1)%SND_QUEUE; sndLen--;
-}
-void sndQ1(uint16_t f,uint16_t d){
-  if(sndLen>=SND_QUEUE)return;
-  sndQ[sndTail]={f,d}; sndTail=(sndTail+1)%SND_QUEUE; sndLen++;
-  if(sndLen==1)sndUpdate();
-}
-void sndClear(){ sndLen=0; sndHead=sndTail=0; noTone(AUDIO_PIN); sndEndMs=0; }
-
-// ── Sound effects ─────────────────────────────────────────────────────
-void sndClick()   { sndClear(); sndQ1(800,28); }
-void sndCoin()    { sndClear(); sndQ1(1047,45); sndQ1(1319,65); }
-void sndJump()    { sndClear(); sndQ1(523,22);  sndQ1(784,45); }
-void sndStomp()   { sndClear(); sndQ1(350,20);  sndQ1(175,35); }
-void sndDot()     { sndQ1(1200,12); }
-void sndPower()   { sndClear(); sndQ1(523,30); sndQ1(659,30); sndQ1(784,50); }
-void sndHit()     { sndClear(); sndQ1(220,35); sndQ1(110,55); }
-void sndBuzz()    { sndClear(); sndQ1(150,90); }
-void sndCorrect() { sndClear(); sndQ1(1047,55); sndQ1(1568,90); }
-void sndWrong()   { sndClear(); sndQ1(220,35);  sndQ1(165,60); }
-void sndMatch()   { sndClear(); sndQ1(1047,60); sndQ1(1319,90); }
-void sndDeath()   { sndClear(); sndQ1(392,60);  sndQ1(349,60); sndQ1(294,60); sndQ1(247,120); }
-void sndWin()     { sndClear(); sndQ1(523,80);  sndQ1(659,80); sndQ1(784,80); sndQ1(1047,160); }
-void sndGameOver(){ sndClear(); sndQ1(392,100); sndQ1(349,100); sndQ1(330,100); sndQ1(262,200); }
-void sndAlert()   { sndClear(); sndQ1(880,100); sndQ1(660,100); }
-void sndBoot()    { sndQ1(262,80); sndQ1(330,80); sndQ1(392,80); sndQ1(523,130); }
 
 //  UI PRIMITIVES  — neon glow aesthetic
 // ════════════════════════════════════════════════════════════════════
@@ -425,12 +401,12 @@ void drawMain() {
 void handleMainTouch(Touch& t) {
   const int BW=148,BH=148,PAD=8,ROW1=60,ROW2=ROW1+BH+PAD;
   sndClick(); if(t.x>=PAD && t.x<PAD+BW) {
-    if(t.y>=ROW1 && t.y<ROW1+BH) { curScreen=SCR_GAMES;   screenDirty=true; }
-    if(t.y>=ROW2 && t.y<ROW2+BH) { curScreen=SCR_COMMS;   screenDirty=true; }
-  }
-  if(t.x>=PAD+BW+PAD && t.x<PAD+BW+PAD+BW) {
     if(t.y>=ROW1 && t.y<ROW1+BH) { curScreen=SCR_SENSORS; screenDirty=true; }
     if(t.y>=ROW2 && t.y<ROW2+BH) { curScreen=SCR_SETTINGS;screenDirty=true; }
+  }
+  if(t.x>=PAD+BW+PAD && t.x<PAD+BW+PAD+BW) {
+    if(t.y>=ROW1 && t.y<ROW1+BH) { curScreen=SCR_GAMES;   screenDirty=true; }
+    if(t.y>=ROW2 && t.y<ROW2+BH) { curScreen=SCR_COMMS;   screenDirty=true; }
   }
 }
 
@@ -962,7 +938,7 @@ void updateMario() {
 
   Touch t; bool tpressed=false;
   if(touchReady()){ t=readTouch(); tpressed=t.pressed; if(tpressed) lastTouchMs=millis(); }
-  if(tpressed && t.y<26 && t.x<80 && !M.gameOver){ curScreen=SCR_GAMES; return; }
+  if (tpressed && handleGameBack(t)) return;
 
   // Controls
   if(tpressed) {
@@ -1114,8 +1090,7 @@ void updatePacman(){
   if(now-PM.lastFrame<80) return; PM.lastFrame=now;
   if(PM.gameOver||PM.win) { if(touchReady()){readTouch();lastTouchMs=millis();pacReset();screenDirty=true;} return; }
 
-  // Top-left corner exits to games menu
-  if(touchReady()){ Touch et=readTouch(); if(et.pressed&&et.y<40&&et.x<70){ lastTouchMs=millis(); curScreen=SCR_GAMES; return; } }
+  if(touchReady()){ Touch et=readTouch(); if (et.pressed && handleGameBack(et)) return; }
   // Touch to set direction
   if(touchReady()){
     Touch t=readTouch(); lastTouchMs=millis();
@@ -1214,7 +1189,7 @@ void updateStarship(){
   unsigned long now=millis();
   if(now-ship.lastFrame<40)return; ship.lastFrame=now;
   if(ship.gameOver){if(touchReady()){readTouch();lastTouchMs=millis();ssReset();drawStarship();}return;}
-  if(touchReady()){Touch t=readTouch();lastTouchMs=millis(); if(t.pressed&&t.y<26&&t.x<80&&!ship.gameOver){curScreen=SCR_GAMES;return;} if(t.y>24)ship.sx=t.x;}
+  if(touchReady()){Touch t=readTouch();lastTouchMs=millis(); if (t.pressed && handleGameBack(t)) return; if(t.y>24)ship.sx=t.x;}
   ship.sx=constrain(ship.sx,16,SCR_W-16);
   if(now-ship.lastShot>250){
     ship.lastShot=now;
@@ -1304,7 +1279,7 @@ void updateMemory(){
   }
   if(!touchReady())return;
   Touch t=readTouch(); lastTouchMs=millis();
-  if(t.y<40&&t.x<70){curScreen=SCR_GAMES;screenDirty=true;return;}
+  if (handleGameBack(t)) return;
   int c=(t.x-MEM_OX)/(MEM_CW+MEM_PAD), r=(t.y-MEM_OY)/(MEM_CH+MEM_PAD);
   if(r<0||r>=MEM_ROWS||c<0||c>=MEM_COLS)return;
   if(MEM.flipped[r][c]||MEM.matched[r][c])return;
@@ -1369,7 +1344,7 @@ void drawColMatch(){
 void updateColMatch(){
   if(!touchReady())return;
   Touch t=readTouch(); lastTouchMs=millis();
-  if(t.y<40&&t.x<70){curScreen=SCR_GAMES;screenDirty=true;return;}
+  if (handleGameBack(t)) return;
   const int BW=(SCR_W-28)/2,BH=96;
   for(int i=0;i<4;i++){
     int bx=8+(i%2)*(BW+12),by=180+(i/2)*(BH+10);
@@ -1440,7 +1415,7 @@ void updateMath(){
   if(MQ.gameOver){if(touchReady()){readTouch();lastTouchMs=millis();MQ.score=0;MQ.streak=0;MQ.lives=3;MQ.gameOver=false;mqNewRound();drawMathGame();}return;}
   if(!touchReady())return;
   Touch t=readTouch(); lastTouchMs=millis();
-  if(t.y<40&&t.x<70){curScreen=SCR_GAMES;screenDirty=true;return;}
+  if (handleGameBack(t)) return;
   const int BW=(SCR_W-28)/2,BH=92;
   for(int i=0;i<4;i++){
     int bx=8+(i%2)*(BW+12),by=168+(i/2)*(BH+10);
@@ -1470,7 +1445,7 @@ void initScreen(Screen s) {
     case GAME_STARSHIP:   ssReset();          drawStarship();   break;
     case GAME_MEMORY:     memShuffle();       drawMemGame();    break;
     case GAME_COLORMATCH: cmNewRound();       drawColMatch();   break;
-    case GAME_MATH:       MQ.score=0;MQ.streak=0;MQ.lives=3;MQ.gameOver=false;mqNewRound();drawMathGame(); break;
+    case GAME_MATH:       MQ.score=0;MQ.streak=0;MQ.lives=3;MQ.gameOver=false;mqNewRound(); drawMathGame(); break;
     default: break;
   }
 }
@@ -1583,6 +1558,18 @@ bool isGameScreen() {
           curScreen==GAME_COLORMATCH || curScreen==GAME_MATH);
 }
 
+bool gameDirty = true;   // games set this when they need a full redraw
+
+// Consistent top-left back button for all games (larger area for easier exit)
+bool handleGameBack(const Touch& t) {
+  if (t.pressed && t.y < 50 && t.x < 100) {
+    curScreen = SCR_GAMES;
+    screenDirty = true;
+    return true;
+  }
+  return false;
+}
+
 void loop() {
   sndUpdate();
   handleMegaSerial();
@@ -1600,6 +1587,12 @@ void loop() {
     else if (curScreen==GAME_MEMORY)     updateMemory();
     else if (curScreen==GAME_COLORMATCH) updateColMatch();
     else if (curScreen==GAME_MATH)       updateMath();
+
+    // Only do expensive full redraw when a game actually needs it
+    if (gameDirty && isGameScreen()) {
+      gameDirty = false;
+    }
+
     // If game just exited, draw the menu it returned to
     if (!isGameScreen()) { screenDirty=false; initScreen(curScreen); }
   } else {
@@ -1623,4 +1616,5 @@ void loop() {
     }
   }
 }
+
 
