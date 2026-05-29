@@ -179,31 +179,44 @@ void sndAlert()   { sndClear(); sndQ1(880,100); sndQ1(660,100); }
 void sndBoot()    { sndQ1(262,80); sndQ1(330,80); sndQ1(392,80); sndQ1(523,130); }
 
 // ── Parsers ───────────────────────────────────────────────────────────
+// Only redraw when displayed values actually change — prevents constant flicker
+static void markDirty(){ if(curScreen<GAME_MARIO) screenDirty=true; }
+
 void parseStat(const char* s){
   static char b[160]; static char* f[11]; int n=0;
   strncpy(b,s+5,sizeof(b)-1); b[sizeof(b)-1]=0;
   char* p=strtok(b,":"); while(p&&n<11){f[n++]=p;p=strtok(NULL,":");}
   if(n<10)return;
-  T.gas=atoi(f[0]);T.temp=atof(f[1]);T.hum=atof(f[2]);
-  T.volt=atof(f[7]);T.pct=atoi(f[8]);T.amps=atof(f[9]); if((curScreen<GAME_MARIO))screenDirty=true;
+  int ng=atoi(f[0]); float nt=atof(f[1]),nh=atof(f[2]);
+  float nv=atof(f[7]); int np=atoi(f[8]); float na=atof(f[9]);
+  bool changed=(ng!=T.gas||np!=T.pct||(int)(nv*10)!=(int)(T.volt*10));
+  T.gas=ng;T.temp=nt;T.hum=nh;T.volt=nv;T.pct=np;T.amps=na;
+  if(changed)markDirty();
 }
 void parseUS(const char* s){
   static char b[64]; static char* f[4]; int n=0;
   strncpy(b,s+3,sizeof(b)-1); b[sizeof(b)-1]=0;
   char* p=strtok(b,","); while(p&&n<4){f[n++]=p;p=strtok(NULL,",");}
   if(n<4)return;
-  T.dFront=atol(f[0]);T.dRear=atol(f[1]);T.dLeft=atol(f[2]);T.dRight=atol(f[3]); if((curScreen<GAME_MARIO))screenDirty=true;
+  long nf=atol(f[0]),nr=atol(f[1]),nl2=atol(f[2]),nrr=atol(f[3]);
+  if(nf!=T.dFront||nr!=T.dRear||nl2!=T.dLeft||nrr!=T.dRight){
+    T.dFront=nf;T.dRear=nr;T.dLeft=nl2;T.dRight=nrr;
+    markDirty();
+  }
 }
 void parseStatus(const char* s){
   const char* tags[]={"R3:","ESP:","S9:","ESTOP:","AUTO:"};
   bool* vals[]={&T.r3ok,&T.espok,&T.s9ok,&T.estop,&T.autoM};
-  for(int i=0;i<5;i++){const char* p=strstr(s,tags[i]);if(p)*(vals[i])=(*(p+strlen(tags[i]))=='1');}
-  const char* mp=strstr(s,"MODE:"); if(mp){strncpy(T.mode,mp+5,15);T.mode[15]=0;char*nl=strchr(T.mode,',');if(nl)*nl=0;}
-  const char* fp=strstr(s,"FW:");  if(fp){strncpy(T.fw,fp+3,15);T.fw[15]=0;char*nl=strchr(T.fw,',');if(nl)*nl=0;}
-  if(curScreen<GAME_MARIO)screenDirty=true;
+  bool changed=false;
+  for(int i=0;i<5;i++){const char* pp=strstr(s,tags[i]);if(pp){bool nv=(*(pp+strlen(tags[i]))=='1');if(nv!=*(vals[i])){*(vals[i])=nv;changed=true;}}}
+  const char* mp=strstr(s,"MODE:");
+  if(mp){char nm[16];strncpy(nm,mp+5,15);nm[15]=0;char*nl2=strchr(nm,',');if(nl2)*nl2=0;if(strncmp(nm,T.mode,15)){strncpy(T.mode,nm,16);changed=true;}}
+  const char* fp=strstr(s,"FW:");
+  if(fp){char nfw[16];strncpy(nfw,fp+3,15);nfw[15]=0;char*nl2=strchr(nfw,',');if(nl2)*nl2=0;if(strncmp(nfw,T.fw,15)){strncpy(T.fw,nfw,16);changed=true;}}
+  if(changed)markDirty();
 }
 void handleMegaLine(const char* line){
-  if(!megaLinked){megaLinked=true; if((curScreen<GAME_MARIO))screenDirty=true;}
+  if(!megaLinked){megaLinked=true;markDirty();}
   lastMegaRx=millis();
   if(strncmp(line,"STAT:",5)==0)parseStat(line);
   else if(strncmp(line,"US:",3)==0)parseUS(line);
@@ -1464,7 +1477,7 @@ void handleTouch(Touch& t) {
       if(t.y<40&&t.x<80){curScreen=SCR_SENSORS;screenDirty=true;}
       break;
     case SCR_COMMS:
-      if(t.y<40&&t.x<80){curScreen=SCR_MAIN;screenDirty=true;}
+      if(t.y<72){curScreen=SCR_MAIN;screenDirty=true;} // full header = back
       break;
     // Game back buttons (top-left tap)
     case GAME_MARIO:
@@ -1601,7 +1614,7 @@ void loop() {
     static unsigned long lastRefresh=0;
     bool isSensor=(curScreen==SCR_SENS_EYES||curScreen==SCR_SENS_NOSE||
                    curScreen==SCR_SENS_BRAIN||curScreen==SCR_SENS_TUMMY||
-                   curScreen==SCR_COMMS);
+                   false); // SCR_COMMS removed — no timer refresh needed
     if (isSensor && millis()-lastRefresh>3000) { lastRefresh=millis(); initScreen(curScreen); }
 
     // Touch only handled here — not during games
@@ -1616,6 +1629,7 @@ void loop() {
     }
   }
 }
+
 
 
 
