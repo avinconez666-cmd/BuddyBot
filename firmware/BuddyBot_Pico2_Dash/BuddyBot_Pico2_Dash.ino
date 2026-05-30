@@ -227,7 +227,7 @@ void parseStatus(const char* s){
   const char* tags[]={"R3:","ESP:","S9:","ESTOP:","AUTO:"};
   bool* vals[]={&T.r3ok,&T.espok,&T.s9ok,&T.estop,&T.autoM};
   bool changed=false;
-  const char* trueChars[]={'O','O','O','Y','O'};  // R3:Ok, ESP:Ok, S9:Ok, ESTOP:Yes, AUTO:On
+  char trueChars[]={'O','O','O','Y','O'};  // R3:Ok ESP:Ok S9:Ok ESTOP:Yes AUTO:On
   for(int i=0;i<5;i++){const char* pp=strstr(s,tags[i]);if(pp){bool nv=(*(pp+strlen(tags[i]))==trueChars[i]);if(nv!=*(vals[i])){*(vals[i])=nv;changed=true;}}}
   const char* mp=strstr(s,"MODE:");
   if(mp){char nm[16];strncpy(nm,mp+5,15);nm[15]=0;char*nl2=strchr(nm,',');if(nl2)*nl2=0;if(strncmp(nm,T.mode,15)){strncpy(T.mode,nm,16);changed=true;}}
@@ -240,8 +240,8 @@ void handleMegaLine(const char* line){
   lastMegaRx=millis();
   // Log non-telemetry messages to debug buffer + Pico USB Serial
   if(strncmp(line,"STAT:",5)!=0 && strncmp(line,"US:",3)!=0){
-    else dbgPush(line);  // all other non-telem lines
-    if(strncmp(line,"DBG:",4)==0){ dbgPush(line+4); }  // Mega debug forward
+    if(strncmp(line,"DBG:",4)==0) dbgPush(line+4);
+    else dbgPush(line);
   }
   if(strncmp(line,"STAT:",5)==0)parseStat(line);
   else if(strncmp(line,"US:",3)==0)parseUS(line);
