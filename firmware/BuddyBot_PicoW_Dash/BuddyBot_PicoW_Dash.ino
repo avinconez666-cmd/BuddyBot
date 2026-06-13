@@ -31,6 +31,13 @@
 #include <SPI.h>
 #include <math.h>
 #include <WiFiEspAT.h>
+// ── Core 1 shared volatile forward declarations ───────────────────────
+// Defined in the WiFi/Core1 section at end of file; declared here so
+// Core 0 functions (handleMegaLine, loop) can reference them.
+extern volatile bool wifiOK;
+extern volatile bool webCmdReady;
+extern volatile char webCmd[64];
+void updateShared();   // forward declaration
 
 TFT_eSPI tft = TFT_eSPI();
 
