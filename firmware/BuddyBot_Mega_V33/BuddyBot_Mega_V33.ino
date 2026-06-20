@@ -1,6 +1,6 @@
 /*
  * ════════════════════════════════════════════════════════════════════
- *  BUDDYBOT  ·  KEYESTUDIO MEGA 2560 PLUS WiFi  ·  PRODUCTION V31.0
+ *  BUDDYBOT  ·  KEYESTUDIO MEGA 2560 PLUS WiFi  ·  PRODUCTION V33.0
  * ════════════════════════════════════════════════════════════════════
  *  
  *  DO NOT CHANGE PIN DEFINITIONS WITHOUT EXPLICIT PERMISSION!!!
@@ -55,17 +55,21 @@
 #include <TinyGPS++.h>
 #include <Wire.h>
 #include <DHT.h>
-#include <RCSwitch.h>
 #include "paj7620.h"
 #include <util/atomic.h>
 
 bool r3CommFail = false;
 
+// Forward declarations (defined later)
+void setLedMode(String m);
+void updateLeds();
+void triggerDocking(bool manual=false);
+
 // ════════════════════════════════════════════════════════════════════
 //  CONFIGURATION
 // ════════════════════════════════════════════════════════════════════
 #define DEBUG_VERBOSE   false
-#define FW_VERSION      "V32.0"
+#define FW_VERSION      "V33.0"
 
 const String PRIORITY_USER = "AJ";
 
@@ -91,13 +95,10 @@ const int T90      = 700;
 
 const int GAS_ALERT_THRESHOLD = 400;
 
-// RF remote codes (315 / 433 MHz)
-const unsigned long RF_FWD  = 5393;
-const unsigned long RF_BWD  = 5396;
-const unsigned long RF_LFT  = 5394;
-const unsigned long RF_RGT  = 5397;
-const unsigned long RF_STP  = 5392;
-const unsigned long RF_AUTO = 5400;
+// ACS712-30A analog current sensor (A9)
+const float CURRENT_SENSITIVITY = 0.066f;  // V per A (66 mV/A, 30A module)
+const int   CURRENT_ZERO_OFFSET = 512;      // ADC counts at 0 A (~2.5V) -- calibrate
+const float CURRENT_VREF        = 5.0f;
 
 // ════════════════════════════════════════════════════════════════════
 //  PIN DEFINITIONS
@@ -114,30 +115,33 @@ const unsigned long RF_AUTO = 5400;
 #define GAS_AO            -1
 #define GESTURE_INT       -1
 
+// --- RGBW interior lighting (all PWM-capable) ---
+#define LED_R_PIN         4     // RGB COB red
+#define LED_G_PIN         5     // RGB COB green
+#define LED_B_PIN         7     // RGB COB blue
+#define LED_W_PIN         6     // 10mm white interior glow
+
 // ── Digital outputs ──────────────────────────────────────────────────────────
-#define FAN_BODY_PIN      9
-#define FAN_HEAD_BLOW_PIN 7
+#define FAN_BODY_PIN      11
+#define FAN_HEAD_BLOW_PIN 12
 #define FAN_HEAD_EXT_PIN  8
-#define UV_LIGHT_PIN      4
+#define UV_LIGHT_PIN      2
 #define BUZZER_PIN        22
 
 // ── Digital inputs ───────────────────────────────────────────────────────────
-#define MOMENTARY_BTN     24
-#define LDR_DO            5
-#define UNHINGED_SW       A1
-#define TILT_SENSOR       3    // NOTE: pin 24 shared with MOMENTARY_BTN/GAS_DO -- resolve physically
-#define PIR_PIN           6
+#define MOMENTARY_BTN     8
+#define UNHINGED_SW       40
+#define TILT_SENSOR       3
+#define PIR_PIN           10
 #define DHT_PIN           44
-#define GAS_DO            -1    // NOTE: pin 24 also used by MOMENTARY_BTN/TILT_SENSOR -- resolve physically
-#define RF_PIN            2     // INT4
-#define CURRENT_SENSOR    3     // INT5
+#define GAS_DO            -1
+#define CURRENT_SENSOR    A9    // ACS712-30A analog output (was D3 pulse)
 #define CHARGE_DETECT_PIN -1
 #define TSOP_LEFT         34    // TSOP38 dock homing -- 30 deg left
 #define TSOP_CENTRE       36    // TSOP38 dock homing -- straight ahead
 #define TSOP_RIGHT        38    // TSOP38 dock homing -- 30 deg right
 #define HALL_DOCK         -1    // active LOW
 #define RELAY_MOTORS      -1    // HIGH=motors disconnected during charging
-#define COB_LED_PIN       -1    // PWM Timer5B
 
 // ── IR obstacle sensors (LOW = obstacle detected) ────────────────────────────
 #define REAR_IR   25
@@ -160,7 +164,6 @@ const unsigned long RF_AUTO = 5400;
 // ════════════════════════════════════════════════════════════════════
 DHT         dht(DHT_PIN, DHT11);
 TinyGPSPlus gps;
-RCSwitch    rfReceiver = RCSwitch();
 
 // ════════════════════════════════════════════════════════════════════
 //  SENSOR TOGGLE TABLE
@@ -248,7 +251,6 @@ bool  pirDetected   = false;
 enum BatTier { BAT_TIER_OK, BAT_TIER_WARN, BAT_TIER_LOW, BAT_TIER_CRITICAL };
 BatTier lastBatTier = BAT_TIER_OK;
 
-volatile unsigned long currentPulses = 0;
 unsigned long lastCurrentCalc = 0;
 
 bool fanBodyAuto = true;
@@ -260,8 +262,16 @@ bool uvManualOn = false;
 bool uvAuto     = false;
 bool uvActive   = false;
 
-// COB + Magnetometer + Dock globals
-bool  cobOn=false; bool cobAuto=false;
+// RGBW lighting + Magnetometer + Dock globals
+enum LedMode { LED_OFF, LED_POLICE, LED_ALERT, LED_RAINBOW, LED_BREATHE, LED_PARTY, LED_SOLID };
+LedMode ledMode = LED_OFF;
+uint8_t ledR=0, ledG=0, ledB=0;
+uint8_t ledBright = 255;
+enum WhiteMode { WHITE_M_OFF, WHITE_M_ON, WHITE_M_AUTO };
+WhiteMode whiteMode = WHITE_M_OFF;
+unsigned long ledTimer = 0;
+uint16_t ledHue = 0;
+bool ledPhase = false;
 float magHeading=-1.0f; bool magOk=false; uint8_t magChip=0;
 unsigned long lastHDGTx=0, lastGPSTx=0;
 enum DockState{DOCK_IDLE,DOCK_SEARCHING,DOCK_ALIGNING,DOCK_APPROACHING,DOCK_LOCKED,DOCK_COMPLETE,DOCK_FAILED};
@@ -303,8 +313,6 @@ unsigned long bootStartTime  = 0;
 const unsigned long BOOT_LOCK_TIME = 5000;
 unsigned long uptimeSec      = 0;
 
-unsigned long lastRFCode = 0;
-unsigned long lastRFTime = 0;
 
 bool          btnPressed = false;
 unsigned long lastBtn    = 0;
@@ -479,20 +487,16 @@ void readAllSensors() {
   lastSenseTs = millis();
 }
 
-void currentPulseISR() { currentPulses++; }
-
 void updatePower() {
-  if (!sens.current) return;
+  if (!sens.current || CURRENT_SENSOR < 0) { currentAmps = 0.0f; return; }
   unsigned long now = millis();
-  unsigned long dt  = now - lastCurrentCalc;
-  if (dt >= 1000) {
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-      unsigned long pulses = currentPulses;
-      currentPulses = 0;
-      currentAmps = (pulses / (dt / 1000.0f)) * 0.066f;
-    }
-    lastCurrentCalc = now;
-  }
+  if (now - lastCurrentCalc < 250) return;            // throttle ~4 Hz
+  lastCurrentCalc = now;
+  int raw = analogRead(CURRENT_SENSOR);
+  float volts = ((raw - CURRENT_ZERO_OFFSET) / 1023.0f) * CURRENT_VREF;
+  float amps  = volts / CURRENT_SENSITIVITY;
+  if (amps < 0) amps = -amps;                         // magnitude only
+  currentAmps = (currentAmps * 0.7f) + (amps * 0.3f); // light smoothing
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -726,6 +730,8 @@ void handleS9Communication() {
 
 void processS9Command(String cmd) {
   cmd.trim();
+  if (cmd.startsWith("CMD:")) cmd = cmd.substring(4);
+  cmd.trim();
   if (cmd.length() == 0) return;
   picoDbg("S9>" + cmd);
   s9Connected = true;
@@ -822,15 +828,23 @@ void processS9Command(String cmd) {
   if(cmd=="AUTODOCK:OFF"){selfChargeEnabled=false;cancelDocking();toS9("ACK|AUTODOCK:OFF|END");Serial1.println(F("AUTODOCK:OFF"));return;}
   if(cmd=="DOCK:START")  {triggerDocking(true);return;}
   if(cmd=="DOCK:CANCEL") {cancelDocking();return;}
-  if(cmd=="COB:ON")  {cobAuto=false;cobOn=true; analogWrite(COB_LED_PIN,255);toS9("ACK|COB:ON|END"); return;}
-  if(cmd=="COB:OFF") {cobAuto=false;cobOn=false;analogWrite(COB_LED_PIN,0);  toS9("ACK|COB:OFF|END");return;}
-  if(cmd=="COB:DIM") {cobAuto=false;cobOn=true; analogWrite(COB_LED_PIN,128);toS9("ACK|COB:DIM|END");return;}
-  if(cmd=="COB:AUTO"){cobAuto=true;             toS9("ACK|COB:AUTO|END");    return;}
+  if(cmd=="COB:ON")  { whiteMode=WHITE_M_ON;   updateLeds(); toS9("ACK|COB:ON|END");   return;}
+  if(cmd=="COB:OFF") { whiteMode=WHITE_M_OFF;  updateLeds(); toS9("ACK|COB:OFF|END");  return;}
+  if(cmd=="COB:DIM") { whiteMode=WHITE_M_ON; ledBright=128; updateLeds(); toS9("ACK|COB:DIM|END"); return;}
+  if(cmd=="COB:AUTO"){ whiteMode=WHITE_M_AUTO; updateLeds(); toS9("ACK|COB:AUTO|END"); return;}
+  if(cmd.startsWith("LED:")) { setLedMode(cmd.substring(4)); return; }
   if (cmd == "DEBUG:ON")  { debugVerbose = true;  return; }
   if (cmd == "DEBUG:OFF") { debugVerbose = false; return; }
   if (cmd == "R3:RETRY")  { r3CommFail = false; runR3CommTest(); return; }
   if (cmd == "NOTIFY:PATROL_START") { toS9("ACK|PATROL_START|END"); return; }
   if (cmd == "KEEP_DISTANCE")       { toS9("ACK|KEEP_DISTANCE|END"); return; }
+
+  // Forward WiFi credentials from S9 to Pico W (format: WIFI|SSID|PASSWORD)
+  if (cmd.startsWith("WIFI|")) {
+    Serial1.println(cmd);
+    toS9("ACK|WIFI_CONNECTING|END");
+    return;
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -855,6 +869,9 @@ void processPicoCommand(String cmd) {
     else if (sub == "ESTOP")  { emergencyStop=true; sendMotor("STOP"); return; }
     else if (sub == "CLEAR")  { emergencyStop=false; estopRetries=0; estopT=0; return; }
     else if (sub.startsWith("TOGGLE_SENSOR:")) { applyToggle(sub); return; }
+    else if (sub.startsWith("LED:")) { setLedMode(sub.substring(4)); return; }
+    else if (sub.startsWith("COB:")) { processS9Command(sub); return; }
+    else if (sub=="UV:ON"||sub=="UV:OFF"||sub=="UV:AUTO") { processS9Command(sub); return; }
     return;
   }
 
@@ -895,6 +912,12 @@ void processPicoCommand(String cmd) {
   }
 
   if (cmd == "PONG") { return; }
+
+  // Pico W reports its WiFi IP after connecting
+  if (cmd.startsWith("WIFI_IP:")) {
+    toS9(cmd);
+    return;
+  }
 
   if (debugVerbose) { Serial.print(F("[PICO] Unknown: ")); Serial.println(cmd); }
 }
@@ -957,35 +980,14 @@ void handleGPS() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  RF REMOTE
+//  RF REMOTE  (removed in V33 -- no free interrupt pin)
 // ════════════════════════════════════════════════════════════════════
-void handleRF() {
-  noInterrupts();
-  if (!rfReceiver.available()) { interrupts(); return; }
-  unsigned long code = rfReceiver.getReceivedValue();
-  rfReceiver.resetAvailable();
-  interrupts();
-  if (code == 0 || code == lastRFCode) return;
-  lastRFCode = code; lastRFTime = millis();
-
-  if      (code == RF_FWD)  { sendMotor("FORWARD");  toS9("RF:FORWARD");  }
-  else if (code == RF_BWD)  { sendMotor("BACKWARD"); toS9("RF:BACKWARD"); }
-  else if (code == RF_LFT)  { sendMotor("LEFT");     toS9("RF:LEFT");     }
-  else if (code == RF_RGT)  { sendMotor("RIGHT");    toS9("RF:RIGHT");    }
-  else if (code == RF_STP)  { sendMotor("STOP"); autonomousMode=false; toS9("RF:STOP"); }
-  else if (code == RF_AUTO) {
-    autonomousMode = !autonomousMode;
-    if (!autonomousMode) sendMotor("STOP");
-    toS9(autonomousMode ? "RF:AUTO_ON" : "RF:AUTO_OFF");
-    beep(autonomousMode ? 1500 : 1000, 200);
-  }
-}
 
 // ════════════════════════════════════════════════════════════════════
 //  PAJ7620 GESTURE SENSOR
 // ════════════════════════════════════════════════════════════════════
 void checkGestures() {
-  if (GESTURE_INT < 0) return;
+  if (GESTURE_INT < 0 || !gestureMode) return;
   uint8_t data = 0;
   paj7620ReadReg(0x43, 1, &data);
   if (data == 0) return;
@@ -1228,15 +1230,16 @@ bool waitForR3Ready() {
 bool tsopLeft()  {return digitalRead(TSOP_LEFT)==LOW;}
 bool tsopCentre(){return digitalRead(TSOP_CENTRE)==LOW;}
 bool tsopRight() {return digitalRead(TSOP_RIGHT)==LOW;}
-bool dockLocked(){return digitalRead(HALL_DOCK)==LOW;}
+bool dockLocked(){ if(HALL_DOCK<0) return false; return digitalRead(HALL_DOCK)==LOW;}
+void relayMotors(bool on){ if(RELAY_MOTORS>=0) digitalWrite(RELAY_MOTORS, on?HIGH:LOW); }
 
 void cancelDocking(){
-  dockState=DOCK_IDLE;digitalWrite(RELAY_MOTORS,LOW);
+  dockState=DOCK_IDLE;relayMotors(false);
   motorCommPrintln(F("SPEED:200"));sendMotor("STOP");
   toS9("DOCK:CANCELLED");Serial1.println(F("DOCK:CANCELLED"));
 }
 
-void triggerDocking(bool manual=false){
+void triggerDocking(bool manual){
   if(dockState!=DOCK_IDLE)return;
   dockState=DOCK_SEARCHING;searchTimer=dockTimer=dockSearchDir=millis();
   toS9("DOCK:SEARCHING");Serial1.println(F("DOCK:SEARCHING"));
@@ -1268,21 +1271,145 @@ void runDockingStateMachine(){
   if(dockState==DOCK_APPROACHING){
     if(!C&&L){sendMotor("STOP");delay(40);sendMotor("LEFT");delay(80);sendMotor("STOP");delay(40);motorCommPrintln(F("SPEED:70"));sendMotor("FORWARD");}
     if(!C&&R){sendMotor("STOP");delay(40);sendMotor("RIGHT");delay(80);sendMotor("STOP");delay(40);motorCommPrintln(F("SPEED:70"));sendMotor("FORWARD");}
-    if(dockLocked()){sendMotor("STOP");delay(100);digitalWrite(RELAY_MOTORS,HIGH);dockState=DOCK_LOCKED;dockTimer=now;toS9("DOCK:LOCKED:CHARGING");Serial1.println(F("DOCK:LOCKED"));beep(880,100);delay(80);beep(1100,100);delay(80);beep(1320,200);return;}
+    if(dockLocked()){sendMotor("STOP");delay(100);relayMotors(true);dockState=DOCK_LOCKED;dockTimer=now;toS9("DOCK:LOCKED:CHARGING");Serial1.println(F("DOCK:LOCKED"));beep(880,100);delay(80);beep(1100,100);delay(80);beep(1320,200);return;}
     if(now-dockTimer>DOCK_APPROACH_MS){sendMotor("STOP");motorCommPrintln(F("SPEED:130"));delay(30);sendMotor("BACKWARD");delay(600);sendMotor("STOP");delay(100);dockState=DOCK_ALIGNING;dockTimer=now;}
     return;
   }
   if(dockState==DOCK_LOCKED){
-    if(!dockLocked()&&!isCharging){digitalWrite(RELAY_MOTORS,LOW);delay(100);motorCommPrintln(F("SPEED:70"));delay(20);sendMotor("FORWARD");dockState=DOCK_APPROACHING;dockTimer=now;toS9("DOCK:CONTACT_LOST");return;}
+    if(!dockLocked()&&!isCharging){relayMotors(false);delay(100);motorCommPrintln(F("SPEED:70"));delay(20);sendMotor("FORWARD");dockState=DOCK_APPROACHING;dockTimer=now;toS9("DOCK:CONTACT_LOST");return;}
     if(battPct>=DOCK_FULL_PCT){dockState=DOCK_COMPLETE;toS9("DOCK:CHARGED");Serial1.println(F("DOCK:CHARGED"));beep(880,200);delay(80);beep(1100,200);delay(80);beep(1320,400);}
     return;
   }
-  if(dockState==DOCK_COMPLETE){digitalWrite(RELAY_MOTORS,LOW);delay(200);motorCommPrintln(F("SPEED:130"));delay(30);sendMotor("BACKWARD");delay(1200);sendMotor("STOP");motorCommPrintln(F("SPEED:200"));dockState=DOCK_IDLE;toS9("DOCK:COMPLETE:RESUMING");Serial1.println(F("DOCK:COMPLETE"));return;}
-  if(dockState==DOCK_FAILED){motorCommPrintln(F("SPEED:200"));sendMotor("STOP");digitalWrite(RELAY_MOTORS,LOW);if(now-dockTimer>8000)dockState=DOCK_IDLE;return;}
+  if(dockState==DOCK_COMPLETE){relayMotors(false);delay(200);motorCommPrintln(F("SPEED:130"));delay(30);sendMotor("BACKWARD");delay(1200);sendMotor("STOP");motorCommPrintln(F("SPEED:200"));dockState=DOCK_IDLE;toS9("DOCK:COMPLETE:RESUMING");Serial1.println(F("DOCK:COMPLETE"));return;}
+  if(dockState==DOCK_FAILED){motorCommPrintln(F("SPEED:200"));sendMotor("STOP");relayMotors(false);if(now-dockTimer>8000)dockState=DOCK_IDLE;return;}
 }
 
 void checkAutoDocktrigger(){if(dockState!=DOCK_IDLE||!selfChargeEnabled)return;if(battPct<=DOCK_TRIGGER_PCT&&autonomousMode)triggerDocking(false);}
-void updateCOBLed(){if(cobAuto)cobOn=(sens.light&&lightLevel<300);analogWrite(COB_LED_PIN,cobOn?255:0);}
+// ====================================================================
+//  RGBW INTERIOR LIGHTING ENGINE  (R=4 G=5 B=7 W=6, all PWM)
+// ====================================================================
+#define LED_ACTIVE_HIGH 1   // set 0 if COB is common-anode (colours invert)
+
+void writeChan(int pin, uint8_t v){
+  if (pin < 0) return;
+  uint8_t out = (uint8_t)(((uint16_t)v * ledBright) / 255);
+#if LED_ACTIVE_HIGH
+  analogWrite(pin, out);
+#else
+  analogWrite(pin, 255 - out);
+#endif
+}
+
+void hsvToRgb(uint16_t h, uint8_t s, uint8_t v, uint8_t &r, uint8_t &g, uint8_t &b){
+  uint8_t region = h / 60; uint16_t rem = (h % 60) * 255 / 60;
+  uint8_t p = (uint16_t)v * (255 - s) / 255;
+  uint8_t q = (uint16_t)v * (255 - ((uint16_t)s * rem) / 255) / 255;
+  uint8_t t = (uint16_t)v * (255 - ((uint16_t)s * (255 - rem)) / 255) / 255;
+  switch (region % 6){
+    case 0: r=v; g=t; b=p; break;
+    case 1: r=q; g=v; b=p; break;
+    case 2: r=p; g=v; b=t; break;
+    case 3: r=p; g=q; b=v; break;
+    case 4: r=t; g=p; b=v; break;
+    default:r=v; g=p; b=q; break;
+  }
+}
+
+uint8_t whiteLevel(){
+  switch (whiteMode){
+    case WHITE_M_ON:   return 255;
+    case WHITE_M_AUTO: return (sens.light && lightLevel >= 0 && lightLevel < 300) ? 255 : 0;
+    default:           return 0;
+  }
+}
+
+void updateLeds(){
+  unsigned long now = millis();
+  uint8_t r=0, g=0, b=0;
+  switch (ledMode){
+    case LED_OFF:   r=g=b=0; break;
+    case LED_SOLID: r=ledR; g=ledG; b=ledB; break;
+    case LED_POLICE:
+      if (now - ledTimer > 120){ ledTimer = now; ledPhase = !ledPhase; }
+      if (ledPhase){ r=255; g=0; b=0; } else { r=0; g=0; b=255; }
+      break;
+    case LED_ALERT:
+      if (now - ledTimer > 350){ ledTimer = now; ledPhase = !ledPhase; }
+      r = ledPhase ? 255 : 25; g=0; b=0;
+      break;
+    case LED_RAINBOW:
+      if (now - ledTimer > 20){ ledTimer = now; ledHue = (ledHue + 2) % 360; }
+      hsvToRgb(ledHue, 255, 255, r, g, b);
+      break;
+    case LED_BREATHE: {
+      float ph = (sinf(now / 700.0f) + 1.0f) * 0.5f;
+      uint8_t lvl = (uint8_t)(ph * 255);
+      r = (uint16_t)ledR * lvl / 255; g = (uint16_t)ledG * lvl / 255; b = (uint16_t)ledB * lvl / 255;
+      break;
+    }
+    case LED_PARTY:
+      if (now - ledTimer > 180){ ledTimer = now; hsvToRgb(random(360), 255, 255, ledR, ledG, ledB); }
+      r=ledR; g=ledG; b=ledB;
+      break;
+  }
+  writeChan(LED_R_PIN, r);
+  writeChan(LED_G_PIN, g);
+  writeChan(LED_B_PIN, b);
+  writeChan(LED_W_PIN, whiteLevel());
+}
+
+void announceLed(){
+  const char* m = "OFF";
+  switch (ledMode){
+    case LED_POLICE: m="POLICE"; break;  case LED_ALERT:  m="ALERT";  break;
+    case LED_RAINBOW:m="RAINBOW";break;  case LED_BREATHE:m="BREATHE";break;
+    case LED_PARTY:  m="PARTY";  break;  case LED_SOLID:  m="SOLID";  break;
+    default:         m="OFF";    break;
+  }
+  const char* w = (whiteMode==WHITE_M_ON)?"ON":(whiteMode==WHITE_M_AUTO)?"AUTO":"OFF";
+  String msg = String("LED|MODE:") + m + "|WHITE:" + w + "|BR:" + String(ledBright) + "|END";
+  toS9(msg);
+  Serial1.println(msg);
+}
+
+void setSolid(uint8_t r, uint8_t g, uint8_t b){ ledR=r; ledG=g; ledB=b; ledMode=LED_SOLID; }
+
+void setLedMode(String m){
+  m.trim(); m.toUpperCase();
+  if      (m == "OFF")        { ledMode = LED_OFF; whiteMode = WHITE_M_OFF; }
+  else if (m == "POLICE")     { ledMode = LED_POLICE;  ledTimer = millis(); }
+  else if (m == "ALERT")      { ledMode = LED_ALERT;   ledTimer = millis(); }
+  else if (m == "RAINBOW")    { ledMode = LED_RAINBOW; ledTimer = millis(); }
+  else if (m == "BREATHE")    { ledMode = LED_BREATHE; if(ledR==0&&ledG==0&&ledB==0){ ledR=0; ledG=180; ledB=255; } }
+  else if (m == "PARTY")      { ledMode = LED_PARTY;   ledTimer = millis(); }
+  else if (m == "RED")        setSolid(255,0,0);
+  else if (m == "GREEN")      setSolid(0,255,0);
+  else if (m == "BLUE")       setSolid(0,0,255);
+  else if (m == "CYAN")       setSolid(0,255,255);
+  else if (m == "PURPLE")     setSolid(160,0,255);
+  else if (m == "ORANGE")     setSolid(255,90,0);
+  else if (m == "YELLOW")     setSolid(255,200,0);
+  else if (m == "WHITE")      { ledMode = LED_OFF; whiteMode = WHITE_M_ON; }
+  else if (m == "WHITE:ON")   { whiteMode = WHITE_M_ON; }
+  else if (m == "WHITE:OFF")  { whiteMode = WHITE_M_OFF; }
+  else if (m == "WHITE:AUTO") { whiteMode = WHITE_M_AUTO; }
+  else if (m == "WHITE:SOLO") { ledMode = LED_OFF; whiteMode = WHITE_M_ON; }
+  else if (m.startsWith("BRIGHT:")) { ledBright = (uint8_t)constrain(m.substring(7).toInt(), 0, 255); }
+  else if (m.startsWith("COLOR:")) {
+    String p = m.substring(6);
+    int c1=p.indexOf(','), c2=p.indexOf(',',c1+1), c3=p.indexOf(',',c2+1);
+    if (c1>0 && c2>0){
+      uint8_t rr=p.substring(0,c1).toInt();
+      uint8_t gg=p.substring(c1+1,c2).toInt();
+      uint8_t bb=p.substring(c2+1, c3>0?c3:p.length()).toInt();
+      setSolid(rr,gg,bb);
+      if (c3>0 && p.substring(c3+1).toInt() > 0) whiteMode = WHITE_M_ON;
+    }
+  }
+  else { toS9("ERR|UNKNOWN_LED:" + m + "|END"); return; }
+  updateLeds();
+  announceLed();
+}
 
 void initMagnetometer(){
   Wire.beginTransmission(0x30);Wire.write(0x2F);
@@ -1304,7 +1431,7 @@ void readMagnetometer(){
 //  MANUAL CHARGE DETECTION
 // ════════════════════════════════════════════════════════════════════
 void checkManualCharging() {
-  isCharging = (digitalRead(CHARGE_DETECT_PIN) == LOW);
+  isCharging = (CHARGE_DETECT_PIN >= 0) ? (digitalRead(CHARGE_DETECT_PIN) == LOW) : false;
   if (isCharging && !wasCharging) {
     wasCharging    = true;
     autonomousMode = false;
@@ -1331,8 +1458,8 @@ void initPins() {
   pinMode(LDR_AO,           INPUT);
   if (GAS_AO   >= 0) pinMode(GAS_AO,   INPUT);
   if (SOUND_AO >= 0) pinMode(SOUND_AO, INPUT);
+  if (CURRENT_SENSOR >= 0) pinMode(CURRENT_SENSOR, INPUT);   // ACS712 analog
 
-  pinMode(LDR_DO,       INPUT);
   pinMode(REAR_IR,      INPUT);
   pinMode(FRONT_IR,     INPUT);
   if (LEFT_IR  >= 0) pinMode(LEFT_IR,  INPUT);
@@ -1341,8 +1468,7 @@ void initPins() {
   if (PIR_PIN  >= 0) pinMode(PIR_PIN,  INPUT);
   pinMode(UNHINGED_SW,  INPUT_PULLUP);
   pinMode(MOMENTARY_BTN,INPUT_PULLUP);
-  pinMode(GESTURE_INT,  INPUT);
-  pinMode(CURRENT_SENSOR,INPUT);
+  if (GESTURE_INT >= 0) pinMode(GESTURE_INT, INPUT);
 
   pinMode(FRONT_ECHO, INPUT); pinMode(LEFT_ECHO,  INPUT);
   pinMode(RIGHT_ECHO, INPUT); pinMode(REAR_ECHO,  INPUT);
@@ -1357,11 +1483,17 @@ void initPins() {
   pinMode(FAN_HEAD_EXT_PIN,  OUTPUT); digitalWrite(FAN_HEAD_EXT_PIN,  LOW);
   pinMode(UV_LIGHT_PIN,      OUTPUT); digitalWrite(UV_LIGHT_PIN,      LOW);
   pinMode(BUZZER_PIN,        OUTPUT); digitalWrite(BUZZER_PIN,        LOW);
-  pinMode(CHARGE_DETECT_PIN, INPUT_PULLUP);
+
+  // RGBW interior lighting
+  pinMode(LED_R_PIN, OUTPUT); pinMode(LED_G_PIN, OUTPUT);
+  pinMode(LED_B_PIN, OUTPUT); pinMode(LED_W_PIN, OUTPUT);
+  writeChan(LED_R_PIN,0); writeChan(LED_G_PIN,0);
+  writeChan(LED_B_PIN,0); writeChan(LED_W_PIN,0);
+
+  if (CHARGE_DETECT_PIN >= 0) pinMode(CHARGE_DETECT_PIN, INPUT_PULLUP);
   pinMode(TSOP_LEFT,   INPUT_PULLUP); pinMode(TSOP_CENTRE, INPUT_PULLUP); pinMode(TSOP_RIGHT, INPUT_PULLUP);
-  pinMode(HALL_DOCK,   INPUT_PULLUP);
-  pinMode(RELAY_MOTORS, OUTPUT); digitalWrite(RELAY_MOTORS, LOW);
-  pinMode(COB_LED_PIN,  OUTPUT); analogWrite(COB_LED_PIN, 0);
+  if (HALL_DOCK >= 0) pinMode(HALL_DOCK, INPUT_PULLUP);
+  if (RELAY_MOTORS >= 0) { pinMode(RELAY_MOTORS, OUTPUT); digitalWrite(RELAY_MOTORS, LOW); }
   if (GAS_DO >= 0) pinMode(GAS_DO, INPUT);
 }
 
@@ -1393,8 +1525,6 @@ void setup() {
   dht.begin();
   initPins();
 
-  rfReceiver.enableReceive(digitalPinToInterrupt(RF_PIN));  // INT4 on pin 2
-  attachInterrupt(digitalPinToInterrupt(CURRENT_SENSOR), currentPulseISR, RISING);
 
   initMagnetometer();
 
@@ -1481,7 +1611,7 @@ void loop() {
   handleGPS();
   if(millis()-lastGPSTx>15000&&gps.location.isValid()){lastGPSTx=millis();String gm=F("GPS:");gm+=String(gps_lat,6);gm+=",";gm+=String(gps_lon,6);gm+=",";gm+=String(gps_sats);toS9(gm);Serial1.println(gm);}
   if(magOk&&millis()-lastHDGTx>500){lastHDGTx=millis();String hm=F("HDG:");hm+=String(magHeading,1);toS9(hm);Serial1.println(hm);}
-  handleRF();
+  updateLeds();   // RGBW interior lighting -- every loop for smooth effects
 
   if (s9Connected && (now - s9LastHB > S9_TIMEOUT)) {
     s9Connected = false;
@@ -1498,7 +1628,7 @@ void loop() {
     lastSense=now;
     readAllSensors();updatePower();updateFans();updateUV();
     checkSafety();checkGestures();handleButton();checkManualCharging();
-    checkAutoDocktrigger();readMagnetometer();updateCOBLed();
+    checkAutoDocktrigger();readMagnetometer();
   }
 
   if (now - lastTelem > 1000) {
@@ -1530,5 +1660,4 @@ void loop() {
     if (now - lastBeepT > 500) { lastBeepT = now; beep(1000, 80); }
   }
 
-  if (now - lastRFTime > 500) lastRFCode = 0;
 }

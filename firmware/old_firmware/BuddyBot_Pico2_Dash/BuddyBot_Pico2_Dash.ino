@@ -811,7 +811,6 @@ void drawSensBrain() {
 }
 
 void handleBrainTouch(Touch& t) {
-void handleBrainTouch(Touch& t) {
   if(t.y<72 && t.x<(SCR_W-80)){ curScreen=SCR_SENSORS; screenDirty=true; return; } // left = back
   if(t.y<72){ showBrainLog=!showBrainLog; screenDirty=true; return; }  // right = toggle log
   int firstToggleY=0;

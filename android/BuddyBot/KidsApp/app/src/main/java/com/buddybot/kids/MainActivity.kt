@@ -253,6 +253,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     private var isDogFollowing = true
     private val elevenLabsMutex = Mutex()
 
+    // ElevenLabs lipsync — only set during ElevenLabs playback, never during local TTS
+    private val _lipSyncAmplitude     = MutableStateFlow(0f)
+    private val _isElevenLabsSpeaking = MutableStateFlow(false)
+
     // Phase 4: Call Daddy overlay manager
     private var callOverlayManager: CallOverlayManager? = null
 
@@ -867,12 +871,22 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     }
 
     private fun onHotwordDetected() {
-        if (isProcessingCommand || _robotState.value.isSpeaking) return
+        if (isProcessingCommand) {
+            Log.d(TAG, "Hotword ignored — already processing a command")
+            resumeHotwordService()
+            return
+        }
+        if (_robotState.value.isSpeaking) {
+            Log.d(TAG, "Hotword ignored — robot is speaking")
+            resumeHotwordService()
+            return
+        }
         Log.d(TAG, "Hotword triggered — capturing command")
+        pauseHotwordService()
         isProcessingCommand = true
         isListeningForWakeWord = false
         speakText("Yeah?")
-        Handler(Looper.getMainLooper()).postDelayed({ startCommandListening() }, 1200)
+        Handler(Looper.getMainLooper()).postDelayed({ startCommandListening() }, 1500)
     }
 
     private fun startSequence(playIntro: Boolean) {
@@ -955,8 +969,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 
                 if (_robotState.value.currentMode == RobotMode.UNHINGED && !isProcessingCommand && !_robotState.value.isSpeaking) {
                     delay((5000..15000).random().toLong())
-                    // 100% speak in UNHINGED mode (was 70% speak, 30% HEAD:JITTER)
-                    speakText(getAIResponse("Tell me a random short unhinged joke or comment."))
+                    // Re-check after the delay — a user command may have started speaking
+                    // during the wait, and we must not talk over it.
+                    if (!isProcessingCommand && !_robotState.value.isSpeaking) {
+                        speakText(getAIResponse("Tell me a random short unhinged joke or comment."))
+                    }
                 }
                 delay(5000)
             }
@@ -967,6 +984,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         findViewById<androidx.compose.ui.platform.ComposeView>(R.id.composeView).setContent {
             val state by robotState.collectAsState()
             val telemetryData by telemetry.collectAsState()
+            val isElevenLabsSpeaking by _isElevenLabsSpeaking.collectAsState()
+            val lipSyncAmplitude by _lipSyncAmplitude.collectAsState()
             var showSettings by remember { mutableStateOf(false) }
             var showPasscodeDialog by remember { mutableStateOf(false) }
 
@@ -1033,6 +1052,17 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                                 textAlign = TextAlign.Center
                             )
                         }
+                    }
+
+                    // ── ElevenLabs lipsync mouth overlay (bottom-centre, landscape) ──
+                    if (isElevenLabsSpeaking && !state.isSplashScreen && !state.showIntroDialog && !showSettings) {
+                        LipSyncMouthOverlay(
+                            amplitude = lipSyncAmplitude,
+                            mode = state.currentMode,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 56.dp)
+                        )
                     }
 
                     if (state.showIntroDialog) {
@@ -1102,6 +1132,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                             onModeChange = { setRobotMode(it) },
                             onMotorCommand = { arduinoComms.sendCommand(it) },
                             onIPChange = { updateIP(it) },
+                            onConnectRobotWifi = { ssid, password -> connectRobotToWifi(ssid, password) },
                             onNetworkPreferenceChange = { applyNetworkPreference(it) },
                             onToggleCommunication = {
                                 val currentMode = _robotState.value.communicationMode
@@ -1509,10 +1540,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             }
 
             override fun onError(error: Int) {
-                if (!isProcessingCommand) Handler(Looper.getMainLooper()).postDelayed(
-                    { startContinuousListening() },
-                    1000
-                )
+                Log.w(TAG, "SpeechRecognizer error=$error isProcessingCommand=$isProcessingCommand")
+                _robotState.value = _robotState.value.copy(isListening = false)
+                // Reset command-capture state so the robot doesn't go deaf after a
+                // mic error mid-command (e.g. ERROR_RECOGNIZER_BUSY on Samsung S9).
+                isProcessingCommand = false
+                isListeningForWakeWord = false
+                silenceHandler.removeCallbacksAndMessages(null)
+                Handler(Looper.getMainLooper()).postDelayed({ returnToWakeWordListening() }, 1000)
             }
 
             override fun onResults(results: Bundle?) {
@@ -1538,6 +1573,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         // speechRecognizer NOT started here — HotwordService broadcasts trigger us
     }
 
+    private fun returnToWakeWordListening() {
+        startContinuousListening()
+        resumeHotwordService()
+    }
+
     private fun startListening() {
         isListeningForWakeWord = false; isProcessingCommand = true
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -1553,20 +1593,24 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         if (_robotState.value.currentMode == RobotMode.DOG) {
             if ("stop" in lowerText) {
                 isDogFollowing = false
+                isProcessingCommand = false
+                returnToWakeWordListening()
                 speakText("Stopping follow mode.")
                 return
             }
             if ("patrol" in lowerText) {
+                isProcessingCommand = false
+                returnToWakeWordListening()
                 startPatrol()
                 return
             }
         }
 
         if (isListeningForWakeWord && !isProcessingCommand) {
-            if (lowerText.contains(BuddyBotConfig.WAKE_WORD)) {
+            if (BuddyBotConfig.matchesWakeWord(lowerText)) {
                 if (_robotState.value.currentMode == RobotMode.BODYGUARD && _robotState.value.recognizedPerson != BuddyBotConfig.PRIORITY_USER) {
                     speakText("I only respond to ${BuddyBotConfig.PRIORITY_USER}")
-                    startContinuousListening()
+                    returnToWakeWordListening()
                     return
                 }
                 isProcessingCommand = true; isListeningForWakeWord = false
@@ -1574,7 +1618,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                     { startCommandListening() },
                     1500
                 )
-            } else startContinuousListening()
+            } else returnToWakeWordListening()
         } else if (isProcessingCommand) {
             currentSpeechText = text; lastSpeechTime = System.currentTimeMillis(); checkForSilence()
         }
@@ -1582,6 +1626,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
 
     private fun startCommandListening() {
         currentSpeechText = ""; lastSpeechTime = System.currentTimeMillis()
+        // Cancel any still-active session before starting a new one.
+        // startListening() while a session is live causes ERROR_RECOGNIZER_BUSY on
+        // some devices (Samsung S9) and silently drops the new request on others.
+        speechRecognizer?.cancel()
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
@@ -1594,7 +1642,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             if (System.currentTimeMillis() - lastSpeechTime >= BuddyBotConfig.SILENCE_THRESHOLD_MS) {
                 if (currentSpeechText.isNotEmpty()) processCommand(currentSpeechText)
                 else {
-                    isProcessingCommand = false; startContinuousListening()
+                    isProcessingCommand = false; returnToWakeWordListening()
                 }
             } else checkForSilence()
         }, 500)
@@ -1653,7 +1701,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             } finally {
                 _robotState.value = _robotState.value.copy(isProcessing = false)
                 isProcessingCommand = false; currentSpeechText = ""
-                Handler(Looper.getMainLooper()).postDelayed({ startContinuousListening() }, 1000)
+                Handler(Looper.getMainLooper()).postDelayed({ returnToWakeWordListening() }, 1000)
             }
         }
     }
@@ -1957,8 +2005,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         if (!response.isSuccessful) throw Exception("ElevenLabs HTTP ${response.code}")
 
         val audioFile = File(cacheDir, "speech_${System.currentTimeMillis()}.mp3")
-        response.body?.bytes()?.let { FileOutputStream(audioFile).use { fos -> fos.write(it) } }
-            ?: throw Exception("ElevenLabs response body was null")
+        try {
+            response.body?.bytes()?.let { FileOutputStream(audioFile).use { fos -> fos.write(it) } }
+                ?: throw Exception("ElevenLabs response body was null")
+        } catch (e: Exception) {
+            audioFile.delete()   // clean up any partially-written file before re-throwing
+            throw e
+        }
 
         // ── Play via MediaPlayer and wait for completion ─────────────────
         val completion = kotlinx.coroutines.CompletableDeferred<Unit>()
@@ -1980,6 +2033,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
 
                     // Tell FaceCoordinator to start the talk video for this mode
                     faceCoordinator.setSpeaking(true)
+                    _isElevenLabsSpeaking.value = true
 
                     // ── Amplitude polling for lip sync ────────────────────
                     // Poll every 50 ms, synthesise amplitude from a sine envelope
@@ -1995,9 +2049,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                                 kotlin.math.abs(kotlin.math.sin(phase * 2.3)).toFloat() * 0.20f)
                                 .coerceIn(0f, 1f)
                             faceCoordinator.setAmplitude(amp)
+                            _lipSyncAmplitude.value = amp
                             delay(50)
                         }
                         faceCoordinator.setAmplitude(0f)
+                        _lipSyncAmplitude.value = 0f
                     }
                 }
 
@@ -2005,6 +2061,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                     Log.d(TAG, "[TTS] MediaPlayer completed")
                     faceCoordinator.setSpeaking(false)
                     faceCoordinator.setAmplitude(0f)
+                    _lipSyncAmplitude.value = 0f
+                    _isElevenLabsSpeaking.value = false
                     try { player.release() } catch (_: Exception) {}
                     audioFile.delete()
                     completion.complete(Unit)
@@ -2014,6 +2072,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                     Log.e(TAG, "[TTS] MediaPlayer error: what=$what extra=$extra")
                     faceCoordinator.setSpeaking(false)
                     faceCoordinator.setAmplitude(0f)
+                    _lipSyncAmplitude.value = 0f
+                    _isElevenLabsSpeaking.value = false
                     try { player.release() } catch (_: Exception) {}
                     audioFile.delete()
                     completion.complete(Unit)   // unblock speakText()
@@ -2030,7 +2090,17 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             }
         }
 
-        completion.await()
+        // 30-second hard timeout — if MediaPlayer never fires onCompletion/onError
+        // (corrupted MP3, audio focus stolen, speaker disabled), this unblocks
+        // speakText() so the robot doesn't hang forever with isSpeaking=true.
+        if (withTimeoutOrNull(30_000L) { completion.await() } == null) {
+            Log.e(TAG, "[TTS] MediaPlayer timed out after 30 s — forcing speech completion")
+            faceCoordinator.setSpeaking(false)
+            faceCoordinator.setAmplitude(0f)
+            _lipSyncAmplitude.value = 0f
+            _isElevenLabsSpeaking.value = false
+            audioFile.delete()
+        }
     }
 
 
@@ -2130,6 +2200,24 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         }
     }
 
+    private fun connectRobotToWifi(ssid: String, password: String) {
+        val safeSsid = ssid.trim().replace("|", "")
+        val safePass = password.replace("|", "")
+        if (safeSsid.isEmpty()) {
+            logComm("WIFI", "Cannot connect — phone not on WiFi")
+            Toast.makeText(this, "Connect this phone to WiFi first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (safePass.isEmpty()) {
+            logComm("WIFI", "Cannot connect — password empty")
+            Toast.makeText(this, "Enter the WiFi password", Toast.LENGTH_SHORT).show()
+            return
+        }
+        logComm("WIFI", "Sending credentials for \"$safeSsid\" to robot")
+        arduinoComms.sendCommand("WIFI|$safeSsid|$safePass")
+        speakText("Connecting to WiFi. One moment.")
+    }
+
     private fun updateIP(ip: String) {
         val trimmed = ip.trim()
         if (trimmed.isEmpty()) return
@@ -2181,6 +2269,20 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         startService(Intent(this, EnvironmentMonitoringService::class.java))
     }
 
+    private fun pauseHotwordService() {
+        val intent = Intent(this, HotwordService::class.java).apply {
+            action = HotwordService.ACTION_PAUSE_LISTENING
+        }
+        startService(intent)
+    }
+
+    private fun resumeHotwordService() {
+        val intent = Intent(this, HotwordService::class.java).apply {
+            action = HotwordService.ACTION_RESUME_LISTENING
+        }
+        startService(intent)
+    }
+
     // Phase 3: Start the always-listening hotword foreground service
     private fun startHotwordService() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
@@ -2216,8 +2318,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     }
 
     override fun onDestroy() {
-        // Change 5: cancel the alive-behavior coroutine to prevent leaks/crashes after destroy
+        // Cancel alive-behavior coroutine to prevent leaks/crashes after destroy
         aliveBehaviorJob?.cancel()
+        // Drain all pending silence-detection callbacks so they can't fire on a dead activity
+        silenceHandler.removeCallbacksAndMessages(null)
         // Phase 4: dismiss Call Daddy overlay so it doesn't leak after activity is destroyed
         callOverlayManager?.dismiss()
         callOverlayManager = null

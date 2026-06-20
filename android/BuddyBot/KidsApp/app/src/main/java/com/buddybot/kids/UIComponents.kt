@@ -34,6 +34,12 @@ import com.jiangdg.ausbc.CameraClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.foundation.Canvas
@@ -322,6 +328,108 @@ fun DetectionOverlay(
                 }
                 canvas.nativeCanvas.drawText(label, left, (top - 8f).coerceAtLeast(28f), paint)
             }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LipSyncMouthOverlay — animated mouth drawn on top of face videos.
+// Only shown during ElevenLabs TTS; amplitude (0..1) drives the jaw open amount.
+// Positioned bottom-centre in landscape by the parent Box.
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+fun LipSyncMouthOverlay(
+    amplitude: Float,
+    mode: RobotMode,
+    modifier: Modifier = Modifier
+) {
+    val lipColor = when (mode) {
+        RobotMode.NORMAL    -> Color(0xFF00D4FF)
+        RobotMode.DOG       -> Color(0xFF33FF33)
+        RobotMode.BODYGUARD -> Color(0xFFFF9500)
+        RobotMode.UNHINGED  -> Color(0xFFBF00FF)
+        RobotMode.PARTY     -> Color(0xFFFFDD00)
+    }
+
+    val smoothAmp by animateFloatAsState(
+        targetValue = amplitude.coerceIn(0f, 1f),
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "lipSyncAmp"
+    )
+
+    Box(
+        modifier = modifier
+            .background(Color(0xCC000000), RoundedCornerShape(40.dp))
+            .padding(horizontal = 28.dp, vertical = 14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(
+            modifier = Modifier
+                .width(200.dp)
+                .height(70.dp)
+        ) {
+            val cx      = size.width / 2f
+            val baseY   = size.height * 0.48f
+            val halfW   = size.width * 0.46f
+            val lipCurve = size.height * 0.20f
+            val openAmt  = smoothAmp * size.height * 0.58f
+
+            val cornerL = Offset(cx - halfW, baseY)
+            val cornerR = Offset(cx + halfW, baseY)
+
+            // Dark mouth cavity — only drawn when open
+            if (openAmt > 2f) {
+                val cavity = Path().apply {
+                    moveTo(cornerL.x, cornerL.y)
+                    cubicTo(
+                        cx - halfW * 0.5f, baseY - lipCurve,
+                        cx + halfW * 0.5f, baseY - lipCurve,
+                        cornerR.x, cornerR.y
+                    )
+                    cubicTo(
+                        cx + halfW * 0.5f, baseY + openAmt,
+                        cx - halfW * 0.5f, baseY + openAmt,
+                        cornerL.x, cornerL.y
+                    )
+                    close()
+                }
+                drawPath(cavity, color = Color(0xFF0A0010))
+            }
+
+            val strokeUpper = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round)
+            val strokeLower = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+
+            // Upper lip
+            drawPath(
+                Path().apply {
+                    moveTo(cornerL.x, cornerL.y)
+                    cubicTo(
+                        cx - halfW * 0.5f, baseY - lipCurve,
+                        cx + halfW * 0.5f, baseY - lipCurve,
+                        cornerR.x, cornerR.y
+                    )
+                },
+                color = lipColor,
+                style = strokeUpper
+            )
+
+            // Lower lip — moves down with amplitude
+            drawPath(
+                Path().apply {
+                    moveTo(cornerL.x, cornerL.y)
+                    cubicTo(
+                        cx - halfW * 0.5f, baseY + openAmt,
+                        cx + halfW * 0.5f, baseY + openAmt,
+                        cornerR.x, cornerR.y
+                    )
+                },
+                color = lipColor.copy(alpha = 0.70f),
+                style = strokeLower
+            )
+
+            // Corner dots
+            drawCircle(lipColor, radius = 3.5.dp.toPx(), center = cornerL)
+            drawCircle(lipColor, radius = 3.5.dp.toPx(), center = cornerR)
         }
     }
 }

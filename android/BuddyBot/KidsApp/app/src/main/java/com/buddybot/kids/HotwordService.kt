@@ -44,6 +44,8 @@ class HotwordService : Service() {
         const val NOTIF_ID     = 200
         const val ACTION_HOTWORD_DETECTED = "com.buddybot.kids.HOTWORD_DETECTED"
         const val ACTION_STOP_SERVICE     = "com.buddybot.kids.STOP_HOTWORD"
+        const val ACTION_PAUSE_LISTENING  = "com.buddybot.kids.PAUSE_HOTWORD"
+        const val ACTION_RESUME_LISTENING = "com.buddybot.kids.RESUME_HOTWORD"
 
         // Backoff constants
         private const val INITIAL_RESTART_DELAY_MS = 500L
@@ -64,6 +66,12 @@ class HotwordService : Service() {
     /** Exponential backoff counter for error restarts. */
     private var restartDelayMs = INITIAL_RESTART_DELAY_MS
 
+    /** Prevents duplicate broadcasts from partial + final results. */
+    @Volatile private var hotwordCooldown = false
+
+    /** MainActivity sets this while capturing a spoken command. */
+    @Volatile private var pausedForCommand = false
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     override fun onCreate() {
@@ -74,12 +82,28 @@ class HotwordService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP_SERVICE) {
-            Log.d(TAG, "Stop requested via intent")
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP_SERVICE -> {
+                Log.d(TAG, "Stop requested via intent")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_PAUSE_LISTENING -> {
+                Log.d(TAG, "Pausing hotword listening for command capture")
+                pausedForCommand = true
+                releaseRecognizer()
+                isListening = false
+                return START_STICKY
+            }
+            ACTION_RESUME_LISTENING -> {
+                Log.d(TAG, "Resuming hotword listening")
+                pausedForCommand = false
+                hotwordCooldown = false
+                if (shouldRun && !isListening) startListeningLoop()
+                return START_STICKY
+            }
         }
-        if (shouldRun && !isListening) {
+        if (shouldRun && !isListening && !pausedForCommand) {
             startListeningLoop()
         }
         return START_STICKY   // OS restarts us if killed
@@ -156,7 +180,7 @@ class HotwordService : Service() {
      * SpeechRecognizer). Restarts automatically after results or errors.
      */
     private fun startListeningLoop() {
-        if (!shouldRun) return
+        if (!shouldRun || pausedForCommand) return
 
         // Guard: microphone permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
@@ -185,7 +209,7 @@ class HotwordService : Service() {
         // Release any stale recognizer before creating a new one
         releaseRecognizer()
 
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this).also { sr ->
+        recognizer = SpeechRecognizer.createSpeechRecognizer(applicationContext).also { sr ->
             sr.setRecognitionListener(object : RecognitionListener {
 
                 override fun onReadyForSpeech(params: Bundle?) {
@@ -203,14 +227,8 @@ class HotwordService : Service() {
                     val transcript = matches.joinToString(" ").lowercase()
                     Log.d(TAG, "Hotword check: \"$transcript\"")
 
-                    if (transcript.contains(BuddyBotConfig.WAKE_WORD.lowercase())) {
-                        Log.i(TAG, "🎤 HOTWORD DETECTED: \"$transcript\"")
-                        broadcastHotword()
-                        // Short pause so MainActivity can take over the mic
-                        scope.launch {
-                            delay(4000) // give MainActivity full time to capture command
-                            scheduleRestart()
-                        }
+                    if (BuddyBotConfig.matchesWakeWord(transcript)) {
+                        onHotwordMatched(transcript, partial = false)
                     } else {
                         scheduleRestart()
                     }
@@ -221,14 +239,8 @@ class HotwordService : Service() {
                     val partial = partialResults
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull()?.lowercase() ?: return
-                    if (partial.contains(BuddyBotConfig.WAKE_WORD.lowercase())) {
-                        Log.i(TAG, "🎤 HOTWORD (partial): \"$partial\"")
-                        isListening = false
-                        broadcastHotword()
-                        scope.launch {
-                            delay(4000) // give MainActivity full time to capture command
-                            scheduleRestart()
-                        }
+                    if (BuddyBotConfig.matchesWakeWord(partial)) {
+                        onHotwordMatched(partial, partial = true)
                     }
                 }
 
@@ -263,6 +275,7 @@ class HotwordService : Service() {
         // Build the recognition intent — continuous, offline-preferred
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
@@ -289,8 +302,20 @@ class HotwordService : Service() {
         }
     }
 
+    private fun onHotwordMatched(transcript: String, partial: Boolean) {
+        if (hotwordCooldown || pausedForCommand) return
+        hotwordCooldown = true
+        isListening = false
+        Log.i(TAG, "🎤 HOTWORD ${if (partial) "(partial)" else "detected"}: \"$transcript\"")
+        // Release mic immediately — keeping the recognizer alive causes
+        // ERROR_RECOGNIZER_BUSY when MainActivity starts command capture.
+        releaseRecognizer()
+        pausedForCommand = true
+        broadcastHotword()
+    }
+
     private fun scheduleRestart() {
-        if (!shouldRun) return
+        if (!shouldRun || pausedForCommand) return
         scope.launch(Dispatchers.Main) {
             startRecognition()
         }

@@ -28,7 +28,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -92,6 +96,7 @@ fun SettingsMenu(
     onIPChange: (String) -> Unit,
     onToggleCommunication: () -> Unit,
     onNetworkPreferenceChange: (NetworkPreference) -> Unit = {},
+    onConnectRobotWifi: (ssid: String, password: String) -> Unit = { _, _ -> },
     webcamClient: CameraClient? = null,
     onTestSerial: (() -> Unit)? = null,
     onTestWebSocket: (() -> Unit)? = null
@@ -143,7 +148,8 @@ fun SettingsMenu(
                         ConnectionCard(
                             robotState = robotState,
                             onToggleCommunication = onToggleCommunication,
-                            onIPChange = onIPChange
+                            onIPChange = onIPChange,
+                            onConnectRobotWifi = onConnectRobotWifi
                         )
                     }
 
@@ -629,10 +635,36 @@ private fun NeonTestButton(
 private fun ConnectionCard(
     robotState: RobotState,
     onToggleCommunication: () -> Unit,
-    onIPChange: (String) -> Unit
+    onIPChange: (String) -> Unit,
+    onConnectRobotWifi: (ssid: String, password: String) -> Unit
 ) {
+    val context = LocalContext.current
     var ipInput by remember { mutableStateOf(robotState.buddybotIP) }
     var ipSaved by remember { mutableStateOf(false) }
+    var phoneSsid by remember { mutableStateOf<String?>(null) }
+    var wifiPassword by remember { mutableStateOf("") }
+    var wifiFeedback by remember { mutableStateOf<String?>(null) }
+    var wifiConnecting by remember { mutableStateOf(false) }
+
+    fun refreshPhoneSsid() {
+        phoneSsid = WiFiNetworkHelper.getConnectedSsid(context)
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) refreshPhoneSsid()
+        else wifiFeedback = "Location permission needed to read WiFi name"
+    }
+
+    LaunchedEffect(Unit) { refreshPhoneSsid() }
+
+    LaunchedEffect(robotState.buddybotIP) {
+        if (wifiConnecting && robotState.buddybotIP.isNotEmpty()) {
+            wifiConnecting = false
+            wifiFeedback = "Robot connected — IP ${robotState.buddybotIP}"
+        }
+    }
 
     GlassCard(accentColor = NeonCyan) {
         CardHeader("Connection", Icons.Default.SettingsEthernet, NeonCyan)
@@ -719,6 +751,156 @@ private fun ConnectionCard(
                     fontSize = 12.sp
                 )
             }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // ── Connect robot to phone's WiFi ───────────────────────────────────
+        Text(
+            "ROBOT WIFI SETUP",
+            color = NeonCyan.copy(alpha = 0.6f),
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            letterSpacing = 1.sp
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Uses the WiFi network this phone is connected to",
+            color = Color.White.copy(alpha = 0.45f),
+            fontSize = 11.sp
+        )
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(DarkCard, RoundedCornerShape(8.dp))
+                .border(1.dp, NeonGreen.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Icon(Icons.Default.Wifi, null, tint = NeonGreen, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Phone network",
+                    color = Color.White.copy(alpha = 0.5f),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    phoneSsid ?: if (WiFiNetworkHelper.isOnWifi(context)) "Unknown (grant location)" else "Not on WiFi",
+                    color = if (phoneSsid != null) NeonGreen else Color.White.copy(alpha = 0.7f),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            TextButton(onClick = { refreshPhoneSsid() }) {
+                Text("REFRESH", color = NeonCyan, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            }
+        }
+
+        if (phoneSsid == null && WiFiNetworkHelper.isOnWifi(context) &&
+            !WiFiNetworkHelper.hasLocationPermission(context)
+        ) {
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    locationPermissionLauncher.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NeonOrange.copy(alpha = 0.15f),
+                    contentColor = NeonOrange
+                ),
+                border = BorderStroke(1.dp, NeonOrange.copy(alpha = 0.5f))
+            ) {
+                Text("Allow location to read WiFi name", fontSize = 12.sp)
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(
+            value = wifiPassword,
+            onValueChange = { wifiPassword = it; wifiFeedback = null },
+            label = {
+                Text("WiFi password", color = NeonCyan.copy(alpha = 0.6f), fontSize = 11.sp)
+            },
+            placeholder = {
+                Text("Enter network password", color = NeonCyan.copy(alpha = 0.3f), fontSize = 13.sp)
+            },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = NeonCyan,
+                unfocusedBorderColor = NeonCyan.copy(alpha = 0.3f),
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                cursorColor = NeonCyan,
+                focusedContainerColor = DarkCard,
+                unfocusedContainerColor = DarkCard
+            ),
+            textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+            shape = RoundedCornerShape(8.dp)
+        )
+
+        Spacer(Modifier.height(10.dp))
+        Button(
+            onClick = {
+                val ssid = phoneSsid
+                when {
+                    ssid.isNullOrBlank() -> wifiFeedback = "Connect phone to WiFi first"
+                    wifiPassword.isBlank() -> wifiFeedback = "Enter the WiFi password"
+                    else -> {
+                        wifiConnecting = true
+                        wifiFeedback = "Sending credentials to robot…"
+                        onConnectRobotWifi(ssid, wifiPassword)
+                    }
+                }
+            },
+            enabled = !wifiConnecting,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = NeonGreen.copy(alpha = 0.2f),
+                contentColor = NeonGreen,
+                disabledContainerColor = NeonGreen.copy(alpha = 0.08f),
+                disabledContentColor = NeonGreen.copy(alpha = 0.4f)
+            ),
+            border = BorderStroke(1.dp, NeonGreen.copy(alpha = 0.6f))
+        ) {
+            if (wifiConnecting) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    color = NeonGreen,
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Icon(Icons.Default.WifiTethering, null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Connect Robot to This WiFi",
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp
+            )
+        }
+
+        wifiFeedback?.let { msg ->
+            Spacer(Modifier.height(6.dp))
+            Text(
+                msg,
+                color = if (msg.contains("fail", true) || msg.contains("error", true)) NeonRed else NeonGreen,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace
+            )
         }
     }
 }

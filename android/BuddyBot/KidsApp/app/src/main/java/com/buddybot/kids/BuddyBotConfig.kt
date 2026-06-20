@@ -35,6 +35,15 @@ object BuddyBotConfig {
     const val WAKE_WORD            = "hey buddy"
     const val SILENCE_THRESHOLD_MS = 2000L
 
+    /** Fuzzy wake-word check — STT often mishears "buddy" as "body", "bud", etc. */
+    fun matchesWakeWord(text: String): Boolean {
+        val lower = text.lowercase().trim()
+        if (lower.contains(WAKE_WORD)) return true
+        val hasHey = "hey" in lower || "hay" in lower
+        val hasBuddy = "buddy" in lower || "body" in lower || " bud" in lower || lower.endsWith("bud")
+        return hasHey && hasBuddy
+    }
+
     // Model strings
     const val CLAUDE_MODEL     = "claude-3-haiku-20240307"   // cheapest Claude tier
     const val GROQ_MODEL_FAST  = "llama-3.1-8b-instant"     // fastest Groq model
