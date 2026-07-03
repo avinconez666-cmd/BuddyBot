@@ -1,8 +1,13 @@
 /*
- * BuddyBot  Pico W-2023 Dashboard  V1.0  PORTRAIT 320x480
+ * BuddyBot  Pico W-2023 Dashboard  V1.1  PORTRAIT 320x480
  * Board : RP2040 Pico W-2023  TFT_eSPI  FT6336U touch  WiFiEspAT
  * Audio : Keyestudio SC8002B Power Amplifier (GP14 IN)
- * Serial: GP4(TX)/GP5(RX)  <->  Mega Serial1 @ 115200  (UART1, GP0/GP1 are ESP8285)
+ *         Non-blocking hardware-PWM tone engine — receives BEEP:/BEEP:SEQ:
+ *         from Mega (Timer2 clash on Mega freed motor PWM pins 9/10).
+ * Serial: GP4(TX)/GP5(RX) <-> Mega Serial1 @ 115200 (UART1, GP0/GP1 are ESP8285)
+ *         S9 <-> USB CDC (Serial). Bridging via serial_bridge.h
+ *         Mega ↔ Pico ↔ S9 line-forwarding is inside bridgeLoop(); this
+ *         sketch implements onMegaLine() and onS9Line() callbacks.
  */
 
 #include <TFT_eSPI.h>
@@ -10,6 +15,7 @@
 #include <SPI.h>
 #include <math.h>
 #include <WiFiEspAT.h>
+#include "serial_bridge.h"    // S9↔Mega USB↔UART1 bridge (owns Serial2 GP4/GP5)
 extern volatile bool wifiOK;
 extern volatile bool webCmdReady;
 extern volatile char webCmd[64];
@@ -117,7 +123,13 @@ struct Telem {
 bool brainToggle[6]={true,true,true,true,true,true};
 const char* brainLabels[6]={"TEMP","GAS","VOLTAGE","ULTRASONICS","STATUS","MOTOR"};
 
+// MEGA_SERIAL — writes go directly to Serial2 (the bridge's UART).
+// The bridge owns bidirectional forwarding S9↔Mega; this alias exists so
+// legacy direct .print/.println() call sites still work without rewriting.
 #define MEGA_SERIAL Serial2
+
+// GP14: SC8002B audio amplifier input. Non-blocking hardware-PWM tone engine.
+#define AUDIO_PIN 14
 #define MEGA_BUF_LEN  320
 #define MEGA_PING_MS  5000
 #define MEGA_USB_ECHO 1
@@ -201,6 +213,39 @@ void sndWin()     { sndClear(); sndQ1(523,80);  sndQ1(659,80); sndQ1(784,80); sn
 void sndGameOver(){ sndClear(); sndQ1(392,100); sndQ1(349,100); sndQ1(330,100); sndQ1(262,200); }
 void sndAlert()   { sndClear(); sndQ1(880,100); sndQ1(660,100); }
 void sndBoot()    { sndQ1(262,80); sndQ1(330,80); sndQ1(392,80); sndQ1(523,130); }
+
+// ─── Beep handler (V1.1) ─────────────────────────────────────────────────────
+//  Called by onMegaLine() when a BEEP: line arrives over Serial2.
+//  Wire protocol from Mega V37:
+//    BEEP:<hz>:<ms>              single tone (queued after any current beep)
+//    BEEP:SEQ:hz,ms,hz,ms,...    multi-tone chirp (queued in order)
+//  Zero-length or freq==0 is treated as silence (gap between tones).
+void handleBeep(const char* line){
+  // Skip leading "BEEP:"
+  const char* p = line + 5;
+
+  // Multi-tone sequence: "SEQ:hz,ms,hz,ms,..."
+  if (strncmp(p,"SEQ:",4)==0) {
+    p += 4;
+    while (*p) {
+      long f = strtol(p,(char**)&p,10);
+      if (*p==',') p++;
+      long d = strtol(p,(char**)&p,10);
+      if (d <= 0) break;
+      sndQ1((uint16_t)constrain(f,0,20000),(uint16_t)constrain(d,1,5000));
+      if (*p==',') p++;
+      else break;
+    }
+    return;
+  }
+
+  // Single tone: "hz:ms"
+  long f = strtol(p,(char**)&p,10);
+  if (*p==':') p++;
+  long d = strtol(p,NULL,10);
+  if (d <= 0) return;
+  sndQ1((uint16_t)constrain(f,0,20000),(uint16_t)constrain(d,1,5000));
+}
 
 // Parsers
 static void markTelemDirty(){
@@ -352,13 +397,39 @@ void handleMegaLine(const char* line){
   else if(strcmp(line,"AUTODOCK:ON")==0){T.autodock=true;requestBodyRefresh();}
   else if(strcmp(line,"AUTODOCK:OFF")==0){T.autodock=false;requestBodyRefresh();}
   else if(strncmp(line,"WIFI|",5)==0) parseWifiConnect(line);
+  else if(strncmp(line,"BEEP:",5)==0) handleBeep(line);
 }
-void handleMegaSerial(){
-  while(MEGA_SERIAL.available()){
-    char c=(char)MEGA_SERIAL.read();
-    if(c=='\n'){megaBuf[megaBufLen]=0;if(megaBufLen>0)handleMegaLine(megaBuf);megaBufLen=0;}
-    else if(c!='\r'&&megaBufLen<MEGA_BUF_LEN-1)megaBuf[megaBufLen++]=c;
+// ═══ V1.1 — Serial bridge integration ═══════════════════════════════════════
+//  All Mega-line reading now happens inside bridgeLoop() (serial_bridge.h).
+//  The bridge invokes these two callbacks for every line it parses:
+//
+//    onMegaLine(line) — every line received from Mega (Serial2 / UART1)
+//                      Bridge has already forwarded it to S9 over USB and
+//                      stripped the |CRC:XX suffix. We just process locally.
+//
+//    onS9Line(line)   — every line received from S9 (USB CDC).
+//                      Bridge has already forwarded non-PICO: lines to Mega.
+//                      We inspect for PICO:-prefixed commands aimed at us.
+//
+//  handleMegaSerial() kept as an empty stub for backwards compatibility with
+//  any legacy call sites; the actual work is inside bridgeLoop().
+// Legacy alias — all reads/forwards now happen in bridgeLoop().
+// Kept so waitMs() and other legacy call sites can still keep the pipe flowing.
+void handleMegaSerial(){ bridgeLoop(); }
+
+// Bridge callbacks — invoked by bridgeLoop() in serial_bridge.h
+void onMegaLine(const String& line){
+  handleMegaLine(line.c_str());
+}
+
+void onS9Line(const String& line){
+  // PICO:-prefixed messages are for us only (bridge never forwards them).
+  // Add local handlers here as needed. For now, just log to dbg ring buffer.
+  if (line.startsWith("PICO:")) {
+    dbgPush(line.c_str() + 5);
+    // Future: PICO:BEEP:..., PICO:DISPLAY:..., PICO:AUDIO:... etc.
   }
+  // Everything else has already been forwarded to Mega by the bridge.
 }
 
 void waitMs(unsigned ms){
@@ -2001,15 +2072,16 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("[PICO] BuddyBot Dash booting...");
-  Serial2.setTX(4); Serial2.setRX(5);
-  MEGA_SERIAL.begin(115200);
+  // V1.1: bridgeSetup() owns Serial2 init (GP4/GP5 @ 115200).
+  // Also enables Mega↔S9 line forwarding via bridgeLoop().
+  bridgeSetup();
   tft.init();
   tft.setRotation(ROTATION);
   tft.invertDisplay(false);
   tft.fillScreen(C_BG);
   pinMode(22, OUTPUT); digitalWrite(22, HIGH);
   centreText(SCR_W/2, SCR_H/2-24, "AJ2BUDDYCOMMS", C_CYAN, 2, C_BG);
-  centreText(SCR_W/2, SCR_H/2+8,  "BuddyBot v6.1",  C_LGRAY,1, C_BG);
+  centreText(SCR_W/2, SCR_H/2+8,  "PicoW Dash v1.1",  C_LGRAY,1, C_BG);
   waitMs(1200);
   sndBoot();
   pinMode(AUDIO_PIN, OUTPUT);
@@ -2060,16 +2132,18 @@ bool handleGameBack(const TouchPt& t) {
 
 void loop() {
   sndUpdate();
-  handleMegaSerial();
+  bridgeLoop();               // V1.1: S9↔Mega bidirectional line forwarding
   sendMegaHeartbeat();
   if (wifiIpReady) {
     wifiIpReady = false;
-    MEGA_SERIAL.print(F("WIFI_IP:"));
-    MEGA_SERIAL.println(pendingWifiIp);
+    picoToMega(String(F("WIFI_IP:")) + pendingWifiIp);
     dbgPush("[PICO] Sent WiFi IP to Mega");
   }
-  if (webCmdReady) { char wc[64]; strncpy(wc,(char*)webCmd,63); wc[63]=0; webCmdReady=false; MEGA_SERIAL.print(F("CMD:")); MEGA_SERIAL.println(wc); }
-  handleMegaSerial();
+  if (webCmdReady) {
+    char wc[64]; strncpy(wc,(char*)webCmd,63); wc[63]=0; webCmdReady=false;
+    picoToMega(String(F("CMD:")) + wc);
+  }
+  bridgeLoop();
   if (megaLinked && millis()-lastMegaRx > 12000) {
     megaLinked = false;
     if (!isGameScreen()) markDirty();
