@@ -1,0 +1,24 @@
+---
+pid: 42052
+cwd: "D:\BuddyBot"
+command: "python \"D:\\BuddyBot\\firmware\\Ultrasonic_Pin_Scan\\map_sensors.py\""
+started_at: 2026-06-22T14:14:05.875Z
+running_for_ms: 23070000 
+---
+Scanning COM18...
+{"trig":37,"echo":39,"cm":15,"spread":1}
+{"trig":47,"echo":49,"cm":42,"spread":2}
+{"trig":48,"echo":50,"cm":25,"spread":1}
+{"trig":8,"echo":51,"cm":18,"spread":0}
+
+All stable echo lines found: 4
+  TRIG 37  ECHO 39  -> 15 cm  (spread 1)
+  TRIG  8  ECHO 51  -> 18 cm  (spread 0)
+  TRIG 48  ECHO 50  -> 25 cm  (spread 1)
+  TRIG 47  ECHO 49  -> 42 cm  (spread 2)
+
+=== YOUR 4 ULTRASONIC SENSORS ===
+RIGHT : TRIG = 37, ECHO = 39 (measured 15 cm, expected ~14 cm)
+REAR  : TRIG = 48, ECHO = 50 (measured 25 cm, expected ~22 cm)
+LEFT  : TRIG = 8, ECHO = 51 (measured 18 cm, expected ~27 cm)
+FRONT : TRIG = 47, ECHO = 49 (measured 42 cm, expected ~49 cm)

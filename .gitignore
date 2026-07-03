@@ -35,3 +35,13 @@ google-services.json
 # BuddyBot secrets — never commit these
 secrets.properties
 wifi_config.h
+
+# MCP tool definition files (auto-generated, not source)
+android/**/mcps/
+firmware/mcps/
+mcps/
+
+android/**/terminals/
+android/**/deploy-apk.bat
+android/**/deploy-apk.ps1
+

@@ -96,7 +96,8 @@ fun SettingsMenu(
     onIPChange: (String) -> Unit,
     onToggleCommunication: () -> Unit,
     onNetworkPreferenceChange: (NetworkPreference) -> Unit = {},
-    onConnectRobotWifi: (ssid: String, password: String) -> Unit = { _, _ -> },
+    onConnectRobotWifi: (ssid: String, password: String) -> Boolean = { _, _ -> false },
+    onSaveWifiPassword: (ssid: String, password: String) -> Boolean = { _, _ -> false },
     webcamClient: CameraClient? = null,
     onTestSerial: (() -> Unit)? = null,
     onTestWebSocket: (() -> Unit)? = null
@@ -149,7 +150,8 @@ fun SettingsMenu(
                             robotState = robotState,
                             onToggleCommunication = onToggleCommunication,
                             onIPChange = onIPChange,
-                            onConnectRobotWifi = onConnectRobotWifi
+                            onConnectRobotWifi = onConnectRobotWifi,
+                            onSaveWifiPassword = onSaveWifiPassword
                         )
                     }
 
@@ -636,7 +638,8 @@ private fun ConnectionCard(
     robotState: RobotState,
     onToggleCommunication: () -> Unit,
     onIPChange: (String) -> Unit,
-    onConnectRobotWifi: (ssid: String, password: String) -> Unit
+    onConnectRobotWifi: (ssid: String, password: String) -> Boolean,
+    onSaveWifiPassword: (ssid: String, password: String) -> Boolean
 ) {
     val context = LocalContext.current
     var ipInput by remember { mutableStateOf(robotState.buddybotIP) }
@@ -645,9 +648,16 @@ private fun ConnectionCard(
     var wifiPassword by remember { mutableStateOf("") }
     var wifiFeedback by remember { mutableStateOf<String?>(null) }
     var wifiConnecting by remember { mutableStateOf(false) }
+    var ipAtConnectStart by remember { mutableStateOf("") }
+    var passwordSaved by remember { mutableStateOf(false) }
 
     fun refreshPhoneSsid() {
-        phoneSsid = WiFiNetworkHelper.getConnectedSsid(context)
+        try {
+            phoneSsid = WiFiNetworkHelper.getConnectedSsid(context)
+        } catch (e: Exception) {
+            phoneSsid = null
+            wifiFeedback = "Could not read WiFi name — enable location"
+        }
     }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
@@ -659,10 +669,33 @@ private fun ConnectionCard(
 
     LaunchedEffect(Unit) { refreshPhoneSsid() }
 
-    LaunchedEffect(robotState.buddybotIP) {
-        if (wifiConnecting && robotState.buddybotIP.isNotEmpty()) {
+    LaunchedEffect(phoneSsid) {
+        val ssid = phoneSsid
+        if (!ssid.isNullOrBlank()) {
+            wifiPassword = WiFiCredentialsStore.loadPassword(context, ssid) ?: ""
+            passwordSaved = WiFiCredentialsStore.hasSaved(context, ssid)
+        } else {
+            passwordSaved = false
+        }
+    }
+
+    LaunchedEffect(robotState.buddybotIP, wifiConnecting) {
+        if (wifiConnecting &&
+            robotState.buddybotIP.isNotEmpty() &&
+            robotState.buddybotIP != ipAtConnectStart
+        ) {
             wifiConnecting = false
             wifiFeedback = "Robot connected — IP ${robotState.buddybotIP}"
+        }
+    }
+
+    LaunchedEffect(wifiConnecting) {
+        if (wifiConnecting) {
+            delay(90_000)
+            if (wifiConnecting) {
+                wifiConnecting = false
+                wifiFeedback = "Timed out — robot did not report an IP yet"
+            }
         }
     }
 
@@ -824,31 +857,78 @@ private fun ConnectionCard(
         }
 
         Spacer(Modifier.height(10.dp))
-        OutlinedTextField(
-            value = wifiPassword,
-            onValueChange = { wifiPassword = it; wifiFeedback = null },
-            label = {
-                Text("WiFi password", color = NeonCyan.copy(alpha = 0.6f), fontSize = 11.sp)
-            },
-            placeholder = {
-                Text("Enter network password", color = NeonCyan.copy(alpha = 0.3f), fontSize = 13.sp)
-            },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = NeonCyan,
-                unfocusedBorderColor = NeonCyan.copy(alpha = 0.3f),
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                cursorColor = NeonCyan,
-                focusedContainerColor = DarkCard,
-                unfocusedContainerColor = DarkCard
-            ),
-            textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
-            shape = RoundedCornerShape(8.dp)
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = wifiPassword,
+                onValueChange = {
+                    wifiPassword = it
+                    wifiFeedback = null
+                    passwordSaved = false
+                },
+                label = {
+                    Text("WiFi password", color = NeonCyan.copy(alpha = 0.6f), fontSize = 11.sp)
+                },
+                placeholder = {
+                    Text("Enter network password", color = NeonCyan.copy(alpha = 0.3f), fontSize = 13.sp)
+                },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.weight(1f),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = NeonCyan.copy(alpha = 0.3f),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    cursorColor = NeonCyan,
+                    focusedContainerColor = DarkCard,
+                    unfocusedContainerColor = DarkCard
+                ),
+                textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                shape = RoundedCornerShape(8.dp)
+            )
+            Button(
+                onClick = {
+                    val ssid = phoneSsid
+                    when {
+                        ssid.isNullOrBlank() -> wifiFeedback = "Connect phone to WiFi first"
+                        wifiPassword.isBlank() -> wifiFeedback = "Enter the WiFi password"
+                        onSaveWifiPassword(ssid, wifiPassword) -> {
+                            passwordSaved = true
+                            wifiFeedback = "Password saved for $ssid"
+                        }
+                        else -> wifiFeedback = "Could not save password"
+                    }
+                },
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (passwordSaved) NeonGreen.copy(alpha = 0.2f) else NeonCyan.copy(alpha = 0.2f),
+                    contentColor = if (passwordSaved) NeonGreen else NeonCyan
+                ),
+                border = BorderStroke(1.dp, if (passwordSaved) NeonGreen.copy(alpha = 0.6f) else NeonCyan.copy(alpha = 0.6f)),
+                modifier = Modifier.height(56.dp)
+            ) {
+                Text(
+                    if (passwordSaved) "SAVED" else "SAVE",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        if (passwordSaved) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Saved for this network — auto-loads when you open settings",
+                color = NeonGreen.copy(alpha = 0.7f),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
 
         Spacer(Modifier.height(10.dp))
         Button(
@@ -858,9 +938,21 @@ private fun ConnectionCard(
                     ssid.isNullOrBlank() -> wifiFeedback = "Connect phone to WiFi first"
                     wifiPassword.isBlank() -> wifiFeedback = "Enter the WiFi password"
                     else -> {
+                        ipAtConnectStart = robotState.buddybotIP
                         wifiConnecting = true
-                        wifiFeedback = "Sending credentials to robot…"
-                        onConnectRobotWifi(ssid, wifiPassword)
+                        wifiFeedback = "Sending credentials to robot..."
+                        val ok = try {
+                            onConnectRobotWifi(ssid, wifiPassword)
+                        } catch (e: Exception) {
+                            wifiFeedback = "Error: ${e.message}"
+                            false
+                        }
+                        if (!ok) {
+                            wifiConnecting = false
+                            if (wifiFeedback?.startsWith("Error:") != true) {
+                                wifiFeedback = "Failed to send credentials — check USB connection"
+                            }
+                        }
                     }
                 }
             },
@@ -1478,7 +1570,7 @@ private fun LogsCard(logs: List<String>) {
                 Spacer(Modifier.height(10.dp))
                 Divider(color = NeonGreen.copy(alpha = 0.2f))
                 Spacer(Modifier.height(8.dp))
-                val displayLogs = logs.take(30)
+                val displayLogs = remember(logs.size, logs.firstOrNull()) { logs.take(30).toList() }
                 displayLogs.forEach { log ->
                     val logColor = when {
                         log.contains("ERROR") || log.contains("❌") -> NeonRed

@@ -335,6 +335,17 @@ void defensePattern() {
 //  COMMAND PARSER
 // ════════════════════════════════════════════════════════════════════
 
+void cancelPatterns() {
+  if (danceState != DANCE_IDLE) {
+    danceState = DANCE_IDLE;
+    stopAll();
+  }
+  if (defenseState != DEFENSE_IDLE) {
+    defenseState = DEFENSE_IDLE;
+    stopAll();
+  }
+}
+
 void processCommand(String cmd) {
   cmd.trim();
   // Accept both upper and mixed case from Mega
@@ -342,26 +353,31 @@ void processCommand(String cmd) {
 
   // ── MOVEMENT ───────────────────────────────────────────────────
   if (cmd == "MOTOR|F") {
+    cancelPatterns();
     moveForward();
     megaSerial.println(F("ACK:MOTOR|F"));
     return;
   }
   if (cmd == "MOTOR|B") {
+    cancelPatterns();
     moveBackward();
     megaSerial.println(F("ACK:MOTOR|B"));
     return;
   }
   if (cmd == "MOTOR|L") {
+    cancelPatterns();
     spinLeft();
     megaSerial.println(F("ACK:MOTOR|L"));
     return;
   }
   if (cmd == "MOTOR|R") {
+    cancelPatterns();
     spinRight();
     megaSerial.println(F("ACK:MOTOR|R"));
     return;
   }
   if (cmd == "MOTOR|S") {
+    cancelPatterns();
     stopAll();
     megaSerial.println(F("ACK:MOTOR|S"));
     return;
@@ -369,15 +385,15 @@ void processCommand(String cmd) {
 
   // ── PATTERNS ───────────────────────────────────────────────────
   if (cmd == "MOTOR|DANCE") {
-    if (danceState == DANCE_IDLE) {
-      danceState = DANCE_SET_SPEED;   // actually start the pattern
+    if (danceState == DANCE_IDLE && defenseState == DEFENSE_IDLE) {
+      dancePattern();
       megaSerial.println(F("ACK:MOTOR|DANCE"));
     }
     return;
   }
   if (cmd == "DEFENSE") {
-    if (defenseState == DEFENSE_IDLE) {
-      defenseState = DEFENSE_SET_SPEED;   // actually start the pattern
+    if (defenseState == DEFENSE_IDLE && danceState == DANCE_IDLE) {
+      defensePattern();
       megaSerial.println(F("ACK:DEFENSE"));
     }
     return;

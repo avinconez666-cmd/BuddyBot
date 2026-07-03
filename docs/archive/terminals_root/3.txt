@@ -1,0 +1,124 @@
+---
+pid: 34232
+cwd: "D:\BuddyBot"
+command: "python \"D:\\BuddyBot\\firmware\\Ultrasonic_Pin_Scan\\read_scan.py\""
+started_at: 2026-06-22T13:59:46.290Z
+running_for_ms: 23929999 
+---
+Listening on COM18...
+{"hit":true,"trig":2,"echo":34,"dist_cm":35,"samples_ok":1}
+{"hit":true,"trig":2,"echo":46,"dist_cm":9,"samples_ok":1}
+{"progress_pct":0}
+{"hit":true,"trig":3,"echo":46,"dist_cm":8,"samples_ok":1}
+{"hit":true,"trig":3,"echo":51,"dist_cm":21,"samples_ok":1}
+{"hit":true,"trig":4,"echo":51,"dist_cm":22,"samples_ok":1}
+{"hit":true,"trig":5,"echo":46,"dist_cm":2,"samples_ok":1}
+{"hit":true,"trig":7,"echo":34,"dist_cm":35,"samples_ok":1}
+{"hit":true,"trig":7,"echo":46,"dist_cm":11,"samples_ok":1}
+{"hit":true,"trig":8,"echo":46,"dist_cm":17,"samples_ok":1}
+{"hit":true,"trig":8,"echo":51,"dist_cm":25,"samples_ok":1}
+{"progress_pct":11}
+{"hit":true,"trig":9,"echo":51,"dist_cm":22,"samples_ok":1}
+{"hit":true,"trig":12,"echo":51,"dist_cm":22,"samples_ok":1}
+{"hit":true,"trig":14,"echo":51,"dist_cm":22,"samples_ok":1}
+{"hit":true,"trig":15,"echo":51,"dist_cm":25,"samples_ok":1}
+{"progress_pct":23}
+{"hit":true,"trig":16,"echo":51,"dist_cm":26,"samples_ok":1}
+{"hit":true,"trig":19,"echo":51,"dist_cm":25,"samples_ok":1}
+{"hit":true,"trig":21,"echo":51,"dist_cm":22,"samples_ok":1}
+{"progress_pct":35}
+{"hit":true,"trig":24,"echo":34,"dist_cm":71,"samples_ok":1}
+{"hit":true,"trig":24,"echo":51,"dist_cm":22,"samples_ok":1}
+{"hit":true,"trig":25,"echo":51,"dist_cm":22,"samples_ok":1}
+{"hit":true,"trig":26,"echo":51,"dist_cm":26,"samples_ok":1}
+{"progress_pct":47}
+{"hit":true,"trig":28,"echo":51,"dist_cm":25,"samples_ok":1}
+{"hit":true,"trig":30,"echo":28,"dist_cm":13,"samples_ok":1}
+{"hit":true,"trig":30,"echo":34,"dist_cm":10,"samples_ok":1}
+{"hit":true,"trig":30,"echo":46,"dist_cm":6,"samples_ok":1}
+{"hit":true,"trig":30,"echo":51,"dist_cm":22,"samples_ok":1}
+{"hit":true,"trig":32,"echo":51,"dist_cm":23,"samples_ok":1}
+{"progress_pct":58}
+{"hit":true,"trig":35,"echo":51,"dist_cm":23,"samples_ok":1}
+{"hit":true,"trig":36,"echo":28,"dist_cm":14,"samples_ok":1}
+{"hit":true,"trig":36,"echo":51,"dist_cm":25,"samples_ok":1}
+{"hit":true,"trig":37,"echo":28,"dist_cm":32,"samples_ok":1}
+{"hit":true,"trig":37,"echo":46,"dist_cm":6,"samples_ok":1}
+{"hit":true,"trig":37,"echo":51,"dist_cm":22,"samples_ok":1}
+{"hit":true,"trig":38,"echo":34,"dist_cm":32,"samples_ok":1}
+{"hit":true,"trig":38,"echo":46,"dist_cm":3,"samples_ok":1}
+{"hit":true,"trig":38,"echo":51,"dist_cm":26,"samples_ok":1}
+{"hit":true,"trig":39,"echo":31,"dist_cm":4,"samples_ok":1}
+{"progress_pct":70}
+{"hit":true,"trig":40,"echo":31,"dist_cm":35,"samples_ok":1}
+{"hit":true,"trig":40,"echo":51,"dist_cm":26,"samples_ok":1}
+{"hit":true,"trig":42,"echo":51,"dist_cm":22,"samples_ok":1}
+{"hit":true,"trig":43,"echo":34,"dist_cm":35,"samples_ok":1}
+{"hit":true,"trig":44,"echo":34,"dist_cm":35,"samples_ok":1}
+{"hit":true,"trig":44,"echo":51,"dist_cm":22,"samples_ok":1}
+{"progress_pct":82}
+{"hit":true,"trig":47,"echo":51,"dist_cm":21,"samples_ok":1}
+{"hit":true,"trig":48,"echo":28,"dist_cm":3,"samples_ok":1}
+{"hit":true,"trig":48,"echo":31,"dist_cm":2,"samples_ok":1}
+{"hit":true,"trig":48,"echo":47,"dist_cm":9,"samples_ok":1}
+{"hit":true,"trig":48,"echo":50,"dist_cm":26,"samples_ok":2}
+{"hit":true,"trig":48,"echo":51,"dist_cm":23,"samples_ok":1}
+{"hit":true,"trig":49,"echo":28,"dist_cm":3,"samples_ok":1}
+{"hit":true,"trig":50,"echo":28,"dist_cm":5,"samples_ok":1}
+{"hit":true,"trig":51,"echo":28,"dist_cm":9,"samples_ok":2}
+{"progress_pct":94}
+{"scan":"DONE","hits":52}
+--- SUMMARY ---
+done=True hits=52
+TRIG  2  ECHO 34  dist=35cm  samples=1
+TRIG  2  ECHO 46  dist=9cm  samples=1
+TRIG  3  ECHO 46  dist=8cm  samples=1
+TRIG  3  ECHO 51  dist=21cm  samples=1
+TRIG  4  ECHO 51  dist=22cm  samples=1
+TRIG  5  ECHO 46  dist=2cm  samples=1
+TRIG  7  ECHO 34  dist=35cm  samples=1
+TRIG  7  ECHO 46  dist=11cm  samples=1
+TRIG  8  ECHO 46  dist=17cm  samples=1
+TRIG  8  ECHO 51  dist=25cm  samples=1
+TRIG  9  ECHO 51  dist=22cm  samples=1
+TRIG 12  ECHO 51  dist=22cm  samples=1
+TRIG 14  ECHO 51  dist=22cm  samples=1
+TRIG 15  ECHO 51  dist=25cm  samples=1
+TRIG 16  ECHO 51  dist=26cm  samples=1
+TRIG 19  ECHO 51  dist=25cm  samples=1
+TRIG 21  ECHO 51  dist=22cm  samples=1
+TRIG 24  ECHO 34  dist=71cm  samples=1
+TRIG 24  ECHO 51  dist=22cm  samples=1
+TRIG 25  ECHO 51  dist=22cm  samples=1
+TRIG 26  ECHO 51  dist=26cm  samples=1
+TRIG 28  ECHO 51  dist=25cm  samples=1
+TRIG 30  ECHO 28  dist=13cm  samples=1
+TRIG 30  ECHO 34  dist=10cm  samples=1
+TRIG 30  ECHO 46  dist=6cm  samples=1
+TRIG 30  ECHO 51  dist=22cm  samples=1
+TRIG 32  ECHO 51  dist=23cm  samples=1
+TRIG 35  ECHO 51  dist=23cm  samples=1
+TRIG 36  ECHO 28  dist=14cm  samples=1
+TRIG 36  ECHO 51  dist=25cm  samples=1
+TRIG 37  ECHO 28  dist=32cm  samples=1
+TRIG 37  ECHO 46  dist=6cm  samples=1
+TRIG 37  ECHO 51  dist=22cm  samples=1
+TRIG 38  ECHO 34  dist=32cm  samples=1
+TRIG 38  ECHO 46  dist=3cm  samples=1
+TRIG 38  ECHO 51  dist=26cm  samples=1
+TRIG 39  ECHO 31  dist=4cm  samples=1
+TRIG 40  ECHO 31  dist=35cm  samples=1
+TRIG 40  ECHO 51  dist=26cm  samples=1
+TRIG 42  ECHO 51  dist=22cm  samples=1
+TRIG 43  ECHO 34  dist=35cm  samples=1
+TRIG 44  ECHO 34  dist=35cm  samples=1
+TRIG 44  ECHO 51  dist=22cm  samples=1
+TRIG 47  ECHO 51  dist=21cm  samples=1
+TRIG 48  ECHO 28  dist=3cm  samples=1
+TRIG 48  ECHO 31  dist=2cm  samples=1
+TRIG 48  ECHO 47  dist=9cm  samples=1
+TRIG 48  ECHO 50  dist=26cm  samples=2
+TRIG 48  ECHO 51  dist=23cm  samples=1
+TRIG 49  ECHO 28  dist=3cm  samples=1
+TRIG 50  ECHO 28  dist=5cm  samples=1
+TRIG 51  ECHO 28  dist=9cm  samples=2

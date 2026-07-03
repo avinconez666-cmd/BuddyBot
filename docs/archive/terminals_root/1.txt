@@ -1,0 +1,33 @@
+---
+pid: 46000
+cwd: "D:\BuddyBot"
+command: "python -c \"
+import serial, time
+ser = serial.Serial('COM18', 115200, timeout=2)
+time.sleep(2)
+data = ser.read(4096)
+print('PASSIVE:', repr(data))
+for c in [b'HELP\\n', b'help\\n', b'PINS\\n', b'pins\\n', b'pinmap\\n', b'config\\n']:
+    ser.reset_input_buffer()
+    ser.write(c)
+    time.sleep(0.8)
+    r = ser.read(4096)
+    if r: print(c, '->', r.decode('utf-8', errors='replace'))
+ser.close()
+\""
+started_at: 2026-06-22T13:27:19.807Z
+running_for_ms: 25855000 
+---
+PASSIVE: b'{"lv":"READY","board":"mega","digital":54,"analog":16,"fw":"LiveVision_Detector_v1.0"}\r\n'
+b'HELP\n' -> {"lv":"ERR","msg":"unknown: HELP"}
+
+b'help\n' -> {"lv":"ERR","msg":"unknown: help"}
+
+b'PINS\n' -> {"lv":"ERR","msg":"unknown: PINS"}
+
+b'pins\n' -> {"lv":"ERR","msg":"unknown: pins"}
+
+b'pinmap\n' -> {"lv":"ERR","msg":"unknown: pinmap"}
+
+b'config\n' -> {"lv":"ERR","msg":"unknown: config"}
+

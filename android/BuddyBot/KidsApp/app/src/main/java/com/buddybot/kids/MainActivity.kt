@@ -493,24 +493,28 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                     Log.d(TAG, "Loaded saved IP: $savedIP")
                     logComm("COMM", "✅ Loaded saved IP: $savedIP")
                 }
-                arduinoComms.onMessageReceived = { handleArduinoMessage(it) }
+                arduinoComms.onMessageReceived = { msg ->
+                    // Serial read callback runs on a background thread; all Compose
+                    // state (_commLogs) and UI handlers must run on the main thread.
+                    if (Looper.myLooper() == Looper.getMainLooper()) {
+                        handleArduinoMessage(msg)
+                    } else {
+                        runOnUiThread { handleArduinoMessage(msg) }
+                    }
+                }
                 arduinoComms.initialize(_robotState.value.buddybotIP)
                 Log.d(TAG, "initializeApp: Arduino communications initialized")
                 
                 // Monitor communication status
                 lifecycleScope.launch {
                     arduinoComms.communicationMode.collect { mode ->
-                        Log.d(TAG, "Communication mode changed: $mode")
-                        _robotState.value = _robotState.value.copy(communicationMode = mode)
-                        when (mode) {
-                            CommunicationMode.USB_SERIAL -> {
-                                logComm("COMM", "✅ USB Serial CONNECTED")
-                            }
-                            CommunicationMode.WEBSOCKET -> {
-                                logComm("COMM", "✅ WebSocket CONNECTED")
-                            }
-                            CommunicationMode.DISCONNECTED -> {
-                                logComm("COMM", "⚠️ Communication DISCONNECTED")
+                        withContext(Dispatchers.Main) {
+                            Log.d(TAG, "Communication mode changed: $mode")
+                            _robotState.value = _robotState.value.copy(communicationMode = mode)
+                            when (mode) {
+                                CommunicationMode.USB_SERIAL -> logComm("COMM", "USB Serial CONNECTED")
+                                CommunicationMode.WEBSOCKET -> logComm("COMM", "WebSocket CONNECTED")
+                                CommunicationMode.DISCONNECTED -> logComm("COMM", "Communication DISCONNECTED")
                             }
                         }
                     }
@@ -585,6 +589,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 when (inner) {
                     "AUTO:ON"  -> _robotState.value = _robotState.value.copy(isAutoMode = true)
                     "AUTO:OFF" -> _robotState.value = _robotState.value.copy(isAutoMode = false)
+                    "WIFI_CONNECTING" -> logComm("WIFI", "Robot acknowledged — joining WiFi...")
                 }
             } else if (msg.startsWith("US:")) {
                 parseUltrasonicData(msg)
@@ -986,6 +991,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             val telemetryData by telemetry.collectAsState()
             val isElevenLabsSpeaking by _isElevenLabsSpeaking.collectAsState()
             val lipSyncAmplitude by _lipSyncAmplitude.collectAsState()
+            val commLogs by remember { derivedStateOf { _commLogs.toList() } }
             var showSettings by remember { mutableStateOf(false) }
             var showPasscodeDialog by remember { mutableStateOf(false) }
 
@@ -1127,12 +1133,22 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                         SettingsMenu(
                             robotState = state,
                             telemetry = telemetryData,
-                            logs = _commLogs,
+                            logs = commLogs,
                             onClose = { showSettings = false },
                             onModeChange = { setRobotMode(it) },
                             onMotorCommand = { arduinoComms.sendCommand(it) },
                             onIPChange = { updateIP(it) },
-                            onConnectRobotWifi = { ssid, password -> connectRobotToWifi(ssid, password) },
+                            onConnectRobotWifi = { ssid, password ->
+                                try {
+                                    connectRobotToWifi(ssid, password)
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "connectRobotToWifi crashed", e)
+                                    logComm("WIFI", "Error: ${e.message}")
+                                    Toast.makeText(this@MainActivity, "WiFi connect failed: ${e.message}", Toast.LENGTH_LONG).show()
+                                    false
+                                }
+                            },
+                            onSaveWifiPassword = { ssid, password -> saveWifiPassword(ssid, password) },
                             onNetworkPreferenceChange = { applyNetworkPreference(it) },
                             onToggleCommunication = {
                                 val currentMode = _robotState.value.communicationMode
@@ -1928,7 +1944,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         "obstacle ahead", "obstacle detected", "stopping, battery critical",
         "connection lost", "emergency stop", "ready to play",
         "up up up", "down down", "left turn", "right turn",
-        "spinning around", "spinning the other way"
+        "spinning around", "spinning the other way",
+        "connecting to wi-fi", "connecting to wifi"
     )
 
     private fun isOperationalPhrase(text: String): Boolean {
@@ -2200,22 +2217,61 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         }
     }
 
-    private fun connectRobotToWifi(ssid: String, password: String) {
-        val safeSsid = ssid.trim().replace("|", "")
-        val safePass = password.replace("|", "")
-        if (safeSsid.isEmpty()) {
-            logComm("WIFI", "Cannot connect — phone not on WiFi")
-            Toast.makeText(this, "Connect this phone to WiFi first", Toast.LENGTH_SHORT).show()
-            return
+    private fun connectRobotToWifi(ssid: String, password: String): Boolean {
+        return try {
+            val safeSsid = ssid.trim().replace("|", "").replace("\n", "").replace("\r", "")
+            val safePass = password.replace("|", "").replace("\n", "").replace("\r", "")
+            when {
+                safeSsid.isEmpty() -> {
+                    logComm("WIFI", "Cannot connect — phone not on WiFi")
+                    Toast.makeText(this, "Connect this phone to WiFi first", Toast.LENGTH_SHORT).show()
+                    false
+                }
+                safePass.isEmpty() -> {
+                    logComm("WIFI", "Cannot connect — password empty")
+                    Toast.makeText(this, "Enter the WiFi password", Toast.LENGTH_SHORT).show()
+                    false
+                }
+                !::arduinoComms.isInitialized -> {
+                    logComm("WIFI", "Cannot connect — serial comms not ready")
+                    Toast.makeText(this, "Robot communication not ready yet", Toast.LENGTH_SHORT).show()
+                    false
+                }
+                else -> {
+                    WiFiCredentialsStore.validateMegaCommandLength(safeSsid, safePass)?.let { err ->
+                        logComm("WIFI", err)
+                        Toast.makeText(this, err, Toast.LENGTH_LONG).show()
+                        return false
+                    }
+                    logComm("WIFI", "Sending credentials for \"$safeSsid\" to robot")
+                    arduinoComms.sendCommand("WIFI|$safeSsid|$safePass")
+                    WiFiCredentialsStore.save(this, safeSsid, safePass)
+                    Toast.makeText(this, "WiFi credentials sent to robot", Toast.LENGTH_SHORT).show()
+                    true
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "connectRobotToWifi failed", e)
+            logComm("WIFI", "Send failed: ${e.message}")
+            Toast.makeText(this, "Could not send WiFi credentials: ${e.message}", Toast.LENGTH_LONG).show()
+            false
         }
-        if (safePass.isEmpty()) {
-            logComm("WIFI", "Cannot connect — password empty")
-            Toast.makeText(this, "Enter the WiFi password", Toast.LENGTH_SHORT).show()
-            return
+    }
+
+    private fun saveWifiPassword(ssid: String, password: String): Boolean {
+        val safeSsid = ssid.trim()
+        if (safeSsid.isEmpty() || password.isEmpty()) {
+            Toast.makeText(this, "Enter network name and password first", Toast.LENGTH_SHORT).show()
+            return false
         }
-        logComm("WIFI", "Sending credentials for \"$safeSsid\" to robot")
-        arduinoComms.sendCommand("WIFI|$safeSsid|$safePass")
-        speakText("Connecting to WiFi. One moment.")
+        val saved = WiFiCredentialsStore.save(this, safeSsid, password)
+        if (saved) {
+            logComm("WIFI", "Password saved for \"$safeSsid\"")
+            Toast.makeText(this, "WiFi password saved", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Could not save password", Toast.LENGTH_SHORT).show()
+        }
+        return saved
     }
 
     private fun updateIP(ip: String) {
@@ -2231,10 +2287,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     }
 
     private fun logComm(source: String, message: String) {
-        _commLogs.add(
-            0,
-            "[${System.currentTimeMillis() % 100000}] $source: $message"
-        ); if (_commLogs.size > 100) _commLogs.removeAt(100)
+        val entry = "[${System.currentTimeMillis() % 100000}] $source: $message"
+        val append = {
+            _commLogs.add(0, entry)
+            if (_commLogs.size > 100) _commLogs.removeAt(100)
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) append()
+        else runOnUiThread(append)
     }
 
     private fun releaseResources() {

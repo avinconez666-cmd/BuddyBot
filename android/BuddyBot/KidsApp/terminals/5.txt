@@ -1,0 +1,309 @@
+---
+pid: 34296
+cwd: "D:\BuddyBot\android\BuddyBot\KidsApp"
+command: "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\BuddyBot\\android\\BuddyBot\\KidsApp\\deploy-apk.ps1\""
+started_at: 2026-07-03T19:42:02.095Z
+running_for_ms: 1485001  
+---
+Using Java from: D:\MOVED_PROGRAMS\Eclipse Adoptium\jdk-17.0.18+8
+NDK helper tools available (Git uname)
+
+Building debug APK...
+Starting a Gradle Daemon, 1 incompatible and 2 stopped Daemons could not be reused, use --status for details
+
+> Configure project :app
+WARNING: The option setting 'android.ndk.suppressMinSdkVersionError=21' is experimental.
+
+> Configure project :libnative
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+WARNING: [CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+[CXX5106] NDK was located by using ndk.dir property. This method is deprecated and will be removed in a future release. Please delete ndk.dir from local.properties and set android.ndkVersion to [28.2.13676358] in all native modules in the project. https://developer.android.com/r/studio-ui/ndk-dir
+
+> Configure project :libuvc
+executing ndkBuild
+executing ndkBuild clean
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :libausbc:preBuild UP-TO-DATE
+> Task :libausbc:preDebugBuild UP-TO-DATE
+> Task :libausbc:writeDebugAarMetadata UP-TO-DATE
+> Task :libnative:preBuild UP-TO-DATE
+> Task :libnative:preDebugBuild UP-TO-DATE
+> Task :libnative:writeDebugAarMetadata UP-TO-DATE
+> Task :libuvc:preBuild UP-TO-DATE
+> Task :libuvc:preDebugBuild UP-TO-DATE
+> Task :libuvc:writeDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:processDebugGoogleServices UP-TO-DATE
+> Task :libausbc:generateDebugResValues UP-TO-DATE
+> Task :libausbc:generateDebugResources UP-TO-DATE
+> Task :libausbc:packageDebugResources UP-TO-DATE
+> Task :libnative:generateDebugResValues UP-TO-DATE
+> Task :libnative:generateDebugResources UP-TO-DATE
+> Task :libnative:packageDebugResources UP-TO-DATE
+> Task :libuvc:generateDebugResValues UP-TO-DATE
+> Task :libuvc:generateDebugResources UP-TO-DATE
+> Task :libuvc:packageDebugResources UP-TO-DATE
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :libausbc:extractDeepLinksDebug UP-TO-DATE
+> Task :libausbc:processDebugManifest UP-TO-DATE
+> Task :libnative:extractDeepLinksDebug UP-TO-DATE
+> Task :libnative:processDebugManifest UP-TO-DATE
+> Task :libuvc:extractDeepLinksDebug UP-TO-DATE
+> Task :libuvc:processDebugManifest UP-TO-DATE
+
+> Task :app:processDebugMainManifest
+[org.tensorflow:tensorflow-lite:2.14.0] C:\Users\avinr\.gradle\caches\8.10.2\transforms\dc094e289323d1bba7610335e61dff5f\transformed\tensorflow-lite-2.14.0\AndroidManifest.xml Warning:
+Namespace 'org.tensorflow.lite' is used in multiple modules and/or libraries: org.tensorflow:tensorflow-lite:2.14.0, org.tensorflow:tensorflow-lite-api:2.14.0. Please ensure that all modules and libraries have a unique namespace. For more information, See https://developer.android.com/studio/build/configure-app-module#set-namespace
+
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :libausbc:compileDebugLibraryResources UP-TO-DATE
+> Task :libausbc:parseDebugLocalResources UP-TO-DATE
+> Task :libausbc:generateDebugRFile UP-TO-DATE
+> Task :libnative:compileDebugLibraryResources UP-TO-DATE
+> Task :libnative:parseDebugLocalResources UP-TO-DATE
+> Task :libnative:generateDebugRFile UP-TO-DATE
+> Task :libuvc:compileDebugLibraryResources UP-TO-DATE
+> Task :libuvc:parseDebugLocalResources UP-TO-DATE
+> Task :libuvc:generateDebugRFile UP-TO-DATE
+> Task :libausbc:checkKotlinGradlePluginConfigurationErrors
+> Task :libnative:checkKotlinGradlePluginConfigurationErrors
+> Task :app:mergeDebugResources
+> Task :libnative:compileDebugKotlin UP-TO-DATE
+> Task :libnative:javaPreCompileDebug UP-TO-DATE
+> Task :libnative:compileDebugJavaWithJavac NO-SOURCE
+> Task :libnative:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :libuvc:javaPreCompileDebug UP-TO-DATE
+
+> Task :libuvc:ndkBuild
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+Android NDK: WARNING: APP_PLATFORM android-21 is higher than android:minSdkVersion 1 in ./AndroidManifest.xml. NDK binaries will *not* be compatible with devices older than android-21. See https://android.googlesource.com/platform/ndk/+/master/docs/user/common_problems.md for more information.    
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+del /f/q .\libs\arm64-v8a\libUVCCamera.so .\libs\arm64-v8a\libjpeg-turbo1500.so .\libs\arm64-v8a\libusb100.so .\libs\arm64-v8a\libuvc.so .\libs\armeabi-v7a\libUVCCamera.so .\libs\armeabi-v7a\libjpeg-turbo1500.so .\libs\armeabi-v7a\libusb100.so .\libs\armeabi-v7a\libuvc.so >NUL 2>NUL
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+[arm64-v8a] Install        : libusb100.so => libs/arm64-v8a/libusb100.so
+copy /b/y ".\obj\local\arm64-v8a\libusb100.so" ".\libs\arm64-v8a\libusb100.so" > NUL
+D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/arm64-v8a/libusb100.so
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+[arm64-v8a] Install        : libUVCCamera.so => libs/arm64-v8a/libUVCCamera.so
+copy /b/y ".\obj\local\arm64-v8a\libUVCCamera.so" ".\libs\arm64-v8a\libUVCCamera.so" > NUL
+D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/arm64-v8a/libUVCCamera.so
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+[arm64-v8a] Install        : libuvc.so => libs/arm64-v8a/libuvc.so
+copy /b/y ".\obj\local\arm64-v8a\libuvc.so" ".\libs\arm64-v8a\libuvc.so" > NUL
+D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/arm64-v8a/libuvc.so
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+[armeabi-v7a] Install        : libUVCCamera.so => libs/armeabi-v7a/libUVCCamera.so
+copy /b/y ".\obj\local\armeabi-v7a\libUVCCamera.so" ".\libs\armeabi-v7a\libUVCCamera.so" > NUL
+D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/armeabi-v7a/libUVCCamera.so
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+[arm64-v8a] Install        : libjpeg-turbo1500.so => libs/arm64-v8a/libjpeg-turbo1500.so
+copy /b/y ".\obj\local\arm64-v8a\libjpeg-turbo1500.so" ".\libs\arm64-v8a\libjpeg-turbo1500.so" > NUL
+D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/arm64-v8a/libjpeg-turbo1500.so
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+[armeabi-v7a] Install        : libjpeg-turbo1500.so => libs/armeabi-v7a/libjpeg-turbo1500.so
+copy /b/y ".\obj\local\armeabi-v7a\libjpeg-turbo1500.so" ".\libs\armeabi-v7a\libjpeg-turbo1500.so" > NUL
+D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/armeabi-v7a/libjpeg-turbo1500.so
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+[armeabi-v7a] Install        : libusb100.so => libs/armeabi-v7a/libusb100.so
+copy /b/y ".\obj\local\armeabi-v7a\libusb100.so" ".\libs\armeabi-v7a\libusb100.so" > NUL
+D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/armeabi-v7a/libusb100.so
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+[armeabi-v7a] Install        : libuvc.so => libs/armeabi-v7a/libuvc.so
+copy /b/y ".\obj\local\armeabi-v7a\libuvc.so" ".\libs\armeabi-v7a\libuvc.so" > NUL
+D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/armeabi-v7a/libuvc.so
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+
+> Task :libuvc:compileDebugJavaWithJavac UP-TO-DATE
+> Task :libuvc:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :libausbc:compileDebugKotlin UP-TO-DATE
+> Task :libausbc:javaPreCompileDebug UP-TO-DATE
+> Task :libausbc:compileDebugJavaWithJavac NO-SOURCE
+> Task :libausbc:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :libausbc:mergeDebugShaders UP-TO-DATE
+> Task :libausbc:compileDebugShaders NO-SOURCE
+> Task :libausbc:generateDebugAssets UP-TO-DATE
+> Task :libausbc:packageDebugAssets UP-TO-DATE
+> Task :libnative:mergeDebugShaders UP-TO-DATE
+> Task :libnative:compileDebugShaders NO-SOURCE
+> Task :libnative:generateDebugAssets UP-TO-DATE
+> Task :libnative:packageDebugAssets UP-TO-DATE
+> Task :libuvc:mergeDebugShaders UP-TO-DATE
+> Task :libuvc:compileDebugShaders NO-SOURCE
+> Task :libuvc:generateDebugAssets UP-TO-DATE
+> Task :libuvc:packageDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:compressDebugAssets UP-TO-DATE
+> Task :libausbc:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :libnative:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :libuvc:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :app:desugarDebugFileDependencies
+> Task :libausbc:processDebugJavaRes UP-TO-DATE
+> Task :libnative:processDebugJavaRes UP-TO-DATE
+> Task :libuvc:processDebugJavaRes NO-SOURCE
+> Task :app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :libausbc:mergeDebugJniLibFolders UP-TO-DATE
+> Task :libausbc:mergeDebugNativeLibs NO-SOURCE
+> Task :libausbc:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :libnative:configureCMakeDebug[arm64-v8a]
+> Task :libnative:buildCMakeDebug[arm64-v8a]
+> Task :libnative:configureCMakeDebug[armeabi-v7a]
+> Task :libnative:buildCMakeDebug[armeabi-v7a]
+> Task :libnative:configureCMakeDebug[x86]
+> Task :libnative:buildCMakeDebug[x86]
+> Task :libnative:configureCMakeDebug[x86_64]
+> Task :libnative:buildCMakeDebug[x86_64]
+> Task :libnative:mergeDebugJniLibFolders UP-TO-DATE
+> Task :libnative:mergeDebugNativeLibs UP-TO-DATE
+> Task :libnative:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :libuvc:mergeDebugJniLibFolders UP-TO-DATE
+> Task :libuvc:mergeDebugNativeLibs UP-TO-DATE
+> Task :libuvc:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :app:mergeDebugNativeLibs UP-TO-DATE
+> Task :app:stripDebugDebugSymbols UP-TO-DATE
+> Task :app:validateSigningDebug UP-TO-DATE
+> Task :app:writeDebugAppMetadata UP-TO-DATE
+> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
+> Task :libausbc:stripDebugDebugSymbols NO-SOURCE
+> Task :libausbc:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :libausbc:extractDebugAnnotations UP-TO-DATE
+> Task :libausbc:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :libausbc:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :libausbc:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :libausbc:prepareDebugArtProfile UP-TO-DATE
+> Task :libausbc:prepareLintJarForPublish UP-TO-DATE
+> Task :libausbc:mergeDebugJavaResource UP-TO-DATE
+> Task :libausbc:syncDebugLibJars UP-TO-DATE
+> Task :libausbc:bundleDebugAar UP-TO-DATE
+> Task :libausbc:assembleDebug UP-TO-DATE
+> Task :libnative:stripDebugDebugSymbols UP-TO-DATE
+> Task :libnative:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :libnative:extractDebugAnnotations UP-TO-DATE
+> Task :libnative:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :libnative:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :libnative:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :libnative:prepareDebugArtProfile UP-TO-DATE
+> Task :libnative:prepareLintJarForPublish UP-TO-DATE
+> Task :libnative:mergeDebugJavaResource UP-TO-DATE
+> Task :libnative:syncDebugLibJars UP-TO-DATE
+> Task :libnative:bundleDebugAar UP-TO-DATE
+> Task :libnative:assembleDebug UP-TO-DATE
+> Task :libuvc:stripDebugDebugSymbols UP-TO-DATE
+> Task :libuvc:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :libuvc:extractDebugAnnotations UP-TO-DATE
+> Task :libuvc:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :libuvc:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :libuvc:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :libuvc:prepareDebugArtProfile UP-TO-DATE
+> Task :libuvc:prepareLintJarForPublish UP-TO-DATE
+> Task :libuvc:mergeDebugJavaResource UP-TO-DATE
+> Task :libuvc:syncDebugLibJars UP-TO-DATE
+> Task :libuvc:bundleDebugAar UP-TO-DATE
+> Task :libuvc:assembleDebug UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses
+> Task :app:processDebugResources
+> Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :app:mergeExtDexDebug
+> Task :app:compileDebugKotlin
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/EnvironmentMonitoringService.kt:321:41 Parameter 'audioFile' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/EnvironmentMonitoringService.kt:372:58 Parameter 'severity' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/EnvironmentMonitoringService.kt:372:73 Parameter 'urgent' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/FaceCoordinator.kt:85:13 'setter for allowFileAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/FaceCoordinator.kt:86:13 'setter for allowUniversalAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:63:26 'CameraClient' is deprecated. Deprecated since version 3.3.0
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:66:33 'CameraUvcStrategy' is deprecated. Deprecated since version 3.3.0
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:126:34 'CameraClient' is deprecated. Deprecated since version 3.3.0
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1262:28 Parameter 'device' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1265:22 'CameraClient' is deprecated. Deprecated since version 3.3.0
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1268:32 'CameraUvcStrategy' is deprecated. Deprecated since version 3.3.0
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1274:13 Condition 'client == null' is always 'false'
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:2059:25 Variable 'totalMs' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MasterActivity.kt:106:58 'FULL_WAKE_LOCK: Int' is deprecated. Deprecated in Java
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MasterActivity.kt:106:89 'ACQUIRE_CAUSES_WAKEUP: Int' is deprecated. Deprecated in Java
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MasterActivity.kt:123:27 Parameter 'videoState' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MasterActivity.kt:123:47 Parameter 'loop' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MasterActivity.kt:123:70 Parameter 'onComplete' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MasterActivity.kt:125:25 Parameter 'source' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MasterActivity.kt:125:41 Parameter 'message' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/SettingsScreen.kt:46:26 'CameraClient' is deprecated. Deprecated since version 3.3.0
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/SettingsScreen.kt:101:19 'CameraClient' is deprecated. Deprecated since version 3.3.0
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/SettingsScreen.kt:1010:9 Variable 'glowAlpha' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/SettingsScreen.kt:1357:38 'CameraClient' is deprecated. Deprecated since version 3.3.0
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/UIComponents.kt:33:26 'CameraClient' is deprecated. Deprecated since version 3.3.0
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/UIComponents.kt:91:5 Parameter 'onEmergency' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/streaming/MjpegServer.kt:78:46 Unreachable code
+
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:mergeProjectDexDebug
+> Task :app:mergeDebugJavaResource
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect UP-TO-DATE
+> Task :app:assembleDebug
+
+BUILD SUCCESSFUL in 8m 55s
+137 actionable tasks: 25 executed, 112 up-to-date
+
+========================================
+ APK ready for Phone Link (202.4 MB)
+========================================
+ Project:   D:\BuddyBot\android\BuddyBot\KidsApp\dist\BuddyBot-Kids-debug.apk
+ Downloads: C:\Users\avinr\Downloads\BuddyBot-Kids-debug.apk
+
+ Phone Link install:
+   1. Open Phone Link -> Files (or drag from Downloads in Explorer)
+   2. Copy BuddyBot-Kids-debug.apk to the S9 (e.g. Download folder)
+   3. On the S9, tap the APK -> Install
+   4. Allow 'Install unknown apps' if prompted
+
+ Tip: re-run .\deploy-apk.ps1 after code changes to refresh the APK.
+

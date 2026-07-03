@@ -141,6 +141,8 @@ object BuddyBotConfig {
         Manifest.permission.RECORD_AUDIO,
         Manifest.permission.INTERNET,
         Manifest.permission.ACCESS_NETWORK_STATE,
+        Manifest.permission.ACCESS_WIFI_STATE,
+        Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.CALL_PHONE,
         Manifest.permission.VIBRATE,
         Manifest.permission.WAKE_LOCK

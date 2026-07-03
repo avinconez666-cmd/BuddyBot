@@ -1,0 +1,73 @@
+---
+pid: 47828
+cwd: "D:\BuddyBot\firmware"
+command: "Start-Sleep -Seconds 5; python -c \"import serial,time,concurrent.futures
+
+def cap(port,sec=18):
+    try:
+        s=serial.Serial(port,115200,timeout=0.3)
+        end=time.time()+sec
+        lines=[]
+        while time.time()<end:
+            l=s.readline().decode('utf-8','replace').strip()
+            if l: lines.append(l)
+        s.close()
+        print('===',port,'(%d lines)==='%len(lines))
+        for l in lines[:100]: print(l)
+        rx=[l for l in lines if l.startswith('[RX]')]
+        tx=[l for l in lines if 'PING_PICO' in l or l=='STATUS']
+        print('--- summary: rx=%d tx=%d ---'%(len(rx),len(tx)))
+        if rx:
+            print('first RX:',rx[0])
+            print('last RX:',rx[-1])
+    except Exception as e:
+        print('===',port,'ERR:',e)
+
+with concurrent.futures.ThreadPoolExecutor() as ex:
+    ex.submit(cap,'COM18',18).result()
+    ex.submit(cap,'COM25',18).result()
+\""
+started_at: 2026-06-22T23:19:01.899Z
+running_for_ms: 86400001 
+---
+=== COM18 (13 lines)===
+SYSTEM|READY|V33.0|END
+R3 COMM FAIL
+US:-1,19,22,46
+US:-1,19,22,46
+US:-1,19,22,46
+US:-1,19,22,46
+SYSTEM|STANDBY|AWAITING_COMMAND|END
+US:-1,19,22,26
+US:-1,19,22,26
+US:-1,19,22,26
+US:-1,19,22,27
+US:-1,-1,22,26
+US:-1,19,22,27
+--- summary: rx=0 tx=0 ---
+=== COM25 (16 lines)===
+[RX] PING_PICO:6
+PING_PICO:6
+[RX] STATUS
+STATUS
+[RX] PING_PICO:7
+PING_PICO:7
+[RX] STATUS
+STATUS
+[RX] PING_PICO:8
+PING_PICO:8
+[RX] STATUS
+STATUS
+[RX] PING_PICO:9
+PING_PICO:9
+[RX] STATUS
+STATUS
+--- summary: rx=8 tx=12 ---
+first RX: [RX] PING_PICO:6
+last RX: [RX] STATUS
+
+---
+exit_code: -1
+elapsed_ms: 86400001
+ended_at: 2026-06-23T23:19:31.083Z
+---

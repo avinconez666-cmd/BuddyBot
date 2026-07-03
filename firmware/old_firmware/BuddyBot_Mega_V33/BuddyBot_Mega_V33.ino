@@ -107,8 +107,8 @@ const float CURRENT_VREF        = 5.0f;
 #define motorComm Serial2
 
 // ── Analog sensors ───────────────────────────────────────────────────────────
-#define VOLTAGE_SENSOR    A14
-#define TEMP_SENSOR_1     A15
+#define VOLTAGE_SENSOR    A15
+#define TEMP_SENSOR_1     A14
 #define HEAD_TEMP_SENSOR  A13
 #define LDR_AO            A10
 #define SOUND_AO          A12
@@ -124,7 +124,7 @@ const float CURRENT_VREF        = 5.0f;
 // ── Digital outputs ──────────────────────────────────────────────────────────
 #define FAN_BODY_PIN      11
 #define FAN_HEAD_BLOW_PIN 12
-#define FAN_HEAD_EXT_PIN  8
+#define FAN_HEAD_EXT_PIN  37
 #define UV_LIGHT_PIN      2
 #define BUZZER_PIN        22
 
@@ -150,13 +150,13 @@ const float CURRENT_VREF        = 5.0f;
 #define RIGHT_IR  29
 
 // ── Ultrasonic sensors ───────────────────────────────────────────────────────
-#define FRONT_TRIG  45
-#define FRONT_ECHO  47
-#define LEFT_TRIG   35
-#define LEFT_ECHO   37
-#define RIGHT_TRIG  39
-#define RIGHT_ECHO  41
-#define REAR_TRIG   49
+#define FRONT_TRIG  47
+#define FRONT_ECHO  49
+#define LEFT_TRIG   48
+#define LEFT_ECHO   50
+#define RIGHT_TRIG  37
+#define RIGHT_ECHO  39
+#define REAR_TRIG   53
 #define REAR_ECHO   51
 
 // ════════════════════════════════════════════════════════════════════
@@ -314,6 +314,7 @@ const unsigned long BOOT_LOCK_TIME = 5000;
 unsigned long uptimeSec      = 0;
 
 
+bool          lastTiltDetected = false;
 bool          btnPressed = false;
 unsigned long lastBtn    = 0;
 const unsigned long BTN_DEBOUNCE = 200;
@@ -326,7 +327,25 @@ bool wasCharging = false;
 String picoBuf = "";
 String r3Buf = "";
 
-struct MotorCmd { char cmd[24]; bool pending; } mQueue = { "", false };
+#define MTR_QUEUE_LEN 8
+struct MotorCmd { char cmd[24]; };
+MotorCmd mtrQueue[MTR_QUEUE_LEN];
+uint8_t mtrQHead = 0, mtrQTail = 0, mtrQCount = 0;
+
+void mtrQClear() {
+  mtrQHead = mtrQTail = mtrQCount = 0;
+}
+
+void mtrQPush(const char* r3cmd) {
+  if (mtrQCount >= MTR_QUEUE_LEN) {
+    mtrQHead = (mtrQHead + 1) % MTR_QUEUE_LEN;
+    mtrQCount--;
+  }
+  strncpy(mtrQueue[mtrQTail].cmd, r3cmd, sizeof(mtrQueue[0].cmd) - 1);
+  mtrQueue[mtrQTail].cmd[sizeof(mtrQueue[0].cmd) - 1] = '\0';
+  mtrQTail = (mtrQTail + 1) % MTR_QUEUE_LEN;
+  mtrQCount++;
+}
 
 struct NavState {
     bool   isMoving      = false;
@@ -408,7 +427,7 @@ float readThermistor(int pin) {
 }
 
 float readHeadTemp() {
-  return 25.0f;   // placeholder -- sensor not yet installed
+  return readThermistor(HEAD_TEMP_SENSOR);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -420,25 +439,33 @@ void sendMotor(const char* cmd) {
   else if (strcmp(cmd, "BACKWARD") == 0) { nav.isMoving=true;  nav.isReversing=true;  }
   else if (strcmp(cmd, "LEFT")     == 0) { nav.isMoving=true;  nav.isReversing=false; }
   else if (strcmp(cmd, "RIGHT")    == 0) { nav.isMoving=true;  nav.isReversing=false; }
-  else if (strcmp(cmd, "STOP")     == 0) { nav.isMoving=false; nav.isReversing=false; }
+  else if (strcmp(cmd, "STOP")     == 0) {
+    nav.isMoving=false;
+    nav.isReversing=false;
+    mtrQClear();
+    motorCommPrintln(F("MOTOR|S"));
+    return;
+  }
 
-  if      (strcmp(cmd, "FORWARD")  == 0) strncpy(mQueue.cmd, "MOTOR|F",      sizeof(mQueue.cmd));
-  else if (strcmp(cmd, "BACKWARD") == 0) strncpy(mQueue.cmd, "MOTOR|B",      sizeof(mQueue.cmd));
-  else if (strcmp(cmd, "LEFT")     == 0) strncpy(mQueue.cmd, "MOTOR|L",      sizeof(mQueue.cmd));
-  else if (strcmp(cmd, "RIGHT")    == 0) strncpy(mQueue.cmd, "MOTOR|R",      sizeof(mQueue.cmd));
-  else if (strcmp(cmd, "STOP")     == 0) strncpy(mQueue.cmd, "MOTOR|S",      sizeof(mQueue.cmd));
-  else if (strcmp(cmd, "SLOW")     == 0) strncpy(mQueue.cmd, "SPEED:SLOW",   sizeof(mQueue.cmd));
-  else if (strcmp(cmd, "NORMAL")   == 0) strncpy(mQueue.cmd, "SPEED:NORMAL", sizeof(mQueue.cmd));
-  else if (strcmp(cmd, "FAST")     == 0) strncpy(mQueue.cmd, "SPEED:FAST",   sizeof(mQueue.cmd));
-  else                                   strncpy(mQueue.cmd, cmd,             sizeof(mQueue.cmd));
+  char r3cmd[24];
+  if      (strcmp(cmd, "FORWARD")  == 0) strncpy(r3cmd, "MOTOR|F",      sizeof(r3cmd));
+  else if (strcmp(cmd, "BACKWARD") == 0) strncpy(r3cmd, "MOTOR|B",      sizeof(r3cmd));
+  else if (strcmp(cmd, "LEFT")     == 0) strncpy(r3cmd, "MOTOR|L",      sizeof(r3cmd));
+  else if (strcmp(cmd, "RIGHT")    == 0) strncpy(r3cmd, "MOTOR|R",      sizeof(r3cmd));
+  else if (strcmp(cmd, "SLOW")     == 0) strncpy(r3cmd, "SPEED:SLOW",   sizeof(r3cmd));
+  else if (strcmp(cmd, "NORMAL")   == 0) strncpy(r3cmd, "SPEED:NORMAL", sizeof(r3cmd));
+  else if (strcmp(cmd, "FAST")     == 0) strncpy(r3cmd, "SPEED:FAST",   sizeof(r3cmd));
+  else                                   strncpy(r3cmd, cmd,             sizeof(r3cmd));
 
-  mQueue.pending = true;
+  r3cmd[sizeof(r3cmd) - 1] = '\0';
+  mtrQPush(r3cmd);
 }
 
 void drainMotorQueue() {
-  if (!mQueue.pending) return;
-  motorCommPrintln(mQueue.cmd);
-  mQueue.pending = false;
+  if (mtrQCount == 0) return;
+  motorCommPrintln(mtrQueue[mtrQHead].cmd);
+  mtrQHead = (mtrQHead + 1) % MTR_QUEUE_LEN;
+  mtrQCount--;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -450,8 +477,6 @@ void readAllSensors() {
     float h = dht.readHumidity();
     if (!isnan(t)) ambTemp  = t;
     if (!isnan(h)) humidity = h;
-    lc = (dLeft  > SIDE_MIN && dLeft  != -1);
-    rc = (dRight > SIDE_MIN && dRight != -1);
   }
 
   lightLevel = sens.light ? analogRead(LDR_AO)   : -1;
@@ -472,6 +497,8 @@ void readAllSensors() {
     dLeft  = getDist(LEFT_TRIG,  LEFT_ECHO);
     dRight = getDist(RIGHT_TRIG, RIGHT_ECHO);
     dRear  = getDist(REAR_TRIG,  REAR_ECHO);
+    lc = (dLeft  > SIDE_MIN && dLeft  != -1);
+    rc = (dRight > SIDE_MIN && dRight != -1);
   } else {
     dFront = dLeft = dRight = dRear = -1;
   }
@@ -568,6 +595,11 @@ void sendTelemetryToPico() {
   Serial1.println(u);
   toS9(u);
 
+  String ir = F("IR:");
+  ir += (irFront ? "1" : "0"); ir += ',';
+  ir += (irRear  ? "1" : "0");
+  Serial1.println(ir);
+
   String s = F("STATUS|ESTOP:");
   s += (emergencyStop  ? "YES" : "NO");
   s += F("|AUTO:");
@@ -660,12 +692,13 @@ void checkSafety() {
     beep(2500, 1000);
   }
 
-  if (tiltDetected && sens.tilt) {
+  if (tiltDetected && sens.tilt && !lastTiltDetected) {
     sendMotor("STOP");
     toS9("EVENT:TILT");
     Serial1.println(F("SAFETY:TILT"));
     beep(2000, 300);
   }
+  lastTiltDetected = (tiltDetected && sens.tilt);
 
   if (sens.gas && gasLevel > GAS_ALERT_THRESHOLD) {
     toS9("EVENT:GAS_ALERT");
@@ -735,6 +768,7 @@ void processS9Command(String cmd) {
   if (cmd.length() == 0) return;
   picoDbg("S9>" + cmd);
   s9Connected = true;
+  s9LastHB = millis();
 
   if (cmd == "MOTOR:F")     { sendMotor("FORWARD");  toS9("ACK|MOTOR:F|END"); return; }
   if (cmd == "MOTOR:B")     { sendMotor("BACKWARD"); toS9("ACK|MOTOR:B|END"); return; }
@@ -742,13 +776,13 @@ void processS9Command(String cmd) {
   if (cmd == "MOTOR:R")     { sendMotor("RIGHT");    toS9("ACK|MOTOR:R|END"); return; }
   if (cmd == "MOTOR:S")     { sendMotor("STOP");     toS9("ACK|MOTOR:S|END"); return; }
   if (cmd == "MOTOR:DANCE") {
-    mQueue.pending = false;
+    mtrQClear();
     motorCommPrintln(F("MOTOR|DANCE"));
     toS9("ACK|DANCE|END");
     return;
   }
   if (cmd == "DEFENSE") {
-    mQueue.pending = false;
+    mtrQClear();
     motorCommPrintln(F("DEFENSE"));
     toS9("ACK|DEFENSE|END");
     return;
@@ -880,6 +914,7 @@ void processPicoCommand(String cmd) {
     picoPingSeq    = (uint8_t)cmd.substring(10).toInt();
     Serial1.print(F("PONG_PICO:"));
     Serial1.println(picoPingSeq);
+    sendTelemetryToPico();
     return;
   }
 
@@ -893,6 +928,25 @@ void processPicoCommand(String cmd) {
 
   if (cmd == "SENSOR_STATUS") {
     Serial1.println(sensorStatusString());
+    return;
+  }
+
+  if (cmd == "PING") {
+    picoLastPingMs = millis();
+    Serial1.print(F("PONG_PICO:"));
+    Serial1.println(picoPingSeq++);
+    sendTelemetryToPico();
+    return;
+  }
+
+  if (cmd == "STATUS") {
+    sendTelemetryToPico();
+    return;
+  }
+
+  if (cmd == "ESTOP") {
+    emergencyStop = true;
+    sendMotor("STOP");
     return;
   }
 
@@ -916,6 +970,18 @@ void processPicoCommand(String cmd) {
   // Pico W reports its WiFi IP after connecting
   if (cmd.startsWith("WIFI_IP:")) {
     toS9(cmd);
+    return;
+  }
+
+  if (cmd == "AUTODOCK:ON") {
+    selfChargeEnabled = true;
+    Serial1.println(F("AUTODOCK:ON"));
+    return;
+  }
+  if (cmd == "AUTODOCK:OFF") {
+    selfChargeEnabled = false;
+    cancelDocking();
+    Serial1.println(F("AUTODOCK:OFF"));
     return;
   }
 
@@ -946,8 +1012,8 @@ void processR3Response(String resp) {
   if (resp.startsWith("ACK:MOTOR|"))  { toS9(resp); return; }
   if (resp.startsWith("ACK:DEFENSE")) { toS9(resp); return; }
   if (resp.startsWith("ACK:SPEED:"))  { toS9(resp); return; }
-  if (resp == "ACK:DANCE:DONE")      { toS9("ACK|DANCE:DONE|END");   return; }
-  if (resp == "ACK:DEFENSE:DONE")    { toS9("ACK|DEFENSE:DONE|END"); return; }
+  if (resp == "ACK:DANCE:DONE")      { toS9("ACK|DANCE:DONE|END");   Serial1.println(F("ACK:DANCE:DONE"));   return; }
+  if (resp == "ACK:DEFENSE:DONE")    { toS9("ACK|DEFENSE:DONE|END"); Serial1.println(F("ACK:DEFENSE:DONE")); return; }
   if (resp.startsWith("PONG:"))      { toS9("PONG|" + resp.substring(5) + "|END"); return; }
   if (resp.startsWith("ERR:"))       { toS9("ERR|" + resp.substring(4) + "|END");  return; }
 }
@@ -1071,14 +1137,15 @@ void makeAutonomousDecision() {
   if (nav.isMoving && !nav.isAvoiding && !isTurning) {
     if (abs(dFront - nav.lastFrontDist) < 5) {
       if (nav.stuckStart == 0) nav.stuckStart = millis();
-      else if (millis() - nav.stuckStart > 3000) { handleStuck(); return; }
+      else if (millis() - nav.stuckStart > 3000 && stuckState == STUCK_IDLE) { handleStuck(); return; }
     } else { nav.stuckStart=0; nav.stuckDetected=false; }
   }
   nav.lastFrontDist = dFront;
   if (nav.isAvoiding) return;
   if (!nav.isMoving) {
-    if (dFront > OBS_WARN || dFront < 0) sendMotor("FORWARD");
-    else lookAndDecide();
+    if (dFront > OBS_WARN) sendMotor("FORWARD");
+    else if (dFront < 0) sendMotor("STOP");
+    else if (lookState == LOOK_IDLE) lookAndDecide();
   } else {
     if      (dFront > 0 && dFront < OBS_SLOW) sendMotor("SLOW");
     else if (dFront > OBS_SLOW)               sendMotor("NORMAL");
@@ -1645,8 +1712,8 @@ void loop() {
   if (autonomousMode && !emergencyStop && (now - lastNavDec > 200)) {
     lastNavDec = now;
     makeAutonomousDecision();
-    lookAndDecide();
-    handleStuck();
+    if (lookState != LOOK_IDLE) lookAndDecide();
+    if (stuckState != STUCK_IDLE) handleStuck();
     handleRandomTurn();
   }
 

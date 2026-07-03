@@ -1,0 +1,14 @@
+---
+pid: 27452
+cwd: "D:\BuddyBot\firmware"
+command: "Get-Command arduino-cli -ErrorAction SilentlyContinue | Format-List; @('C:\\Program Files\\Arduino CLI\\arduino-cli.exe','C:\\Program Files\\Arduino CLI\\arduino-cli\\arduino-cli.exe',\"$env:LOCALAPPDATA\\Arduino15\\arduino-cli.exe\",\"$env:USERPROFILE\\AppData\\Local\\Arduino15\\arduino-cli.exe\") | ForEach-Object { if (Test-Path $_) { $_ } }; Get-ChildItem -Path 'C:\\Program Files','C:\\Program Files (x86)',\"$env:LOCALAPPDATA\" -Filter 'arduino-cli.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 5 -ExpandProperty FullName"
+started_at: 2026-06-22T20:55:10.930Z
+running_for_ms: 86400001 
+---
+C:\Users\avinr\AppData\Local\Temp\acli2-extract\arduino-cli.exe
+
+---
+exit_code: -1
+elapsed_ms: 86400001
+ended_at: 2026-06-23T20:55:40.146Z
+---

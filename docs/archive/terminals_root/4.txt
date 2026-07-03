@@ -1,0 +1,38 @@
+---
+pid: 59936
+cwd: "D:\BuddyBot"
+command: "python \"D:\\BuddyBot\\firmware\\Ultrasonic_Pin_Scan\\map_sensors.py\""
+started_at: 2026-06-22T14:07:55.146Z
+running_for_ms: 23439999 
+---
+Scanning COM18...
+{"trig":2,"echo":51,"cm":18,"ok":5}
+{"trig":3,"echo":51,"cm":18,"ok":5}
+{"trig":4,"echo":51,"cm":18,"ok":5}
+{"trig":5,"echo":51,"cm":18,"ok":5}
+{"trig":6,"echo":51,"cm":18,"ok":5}
+{"trig":7,"echo":51,"cm":18,"ok":5}
+{"trig":8,"echo":51,"cm":18,"ok":5}
+{"trig":9,"echo":51,"cm":18,"ok":5}
+{"trig":10,"echo":51,"cm":18,"ok":5}
+{"trig":11,"echo":51,"cm":18,"ok":5}
+{"trig":12,"echo":51,"cm":18,"ok":5}
+{"trig":14,"echo":51,"cm":18,"ok":5}
+{"trig":15,"echo":51,"cm":18,"ok":5}
+{"trig":16,"echo":51,"cm":18,"ok":5}
+{"trig":17,"echo":51,"cm":18,"ok":5}
+{"trig":18,"echo":51,"cm":18,"ok":5}
+{"trig":19,"echo":51,"cm":18,"ok":5}
+{"trig":20,"echo":51,"cm":18,"ok":5}
+{"trig":21,"echo":51,"cm":18,"ok":5}
+
+Stable pairs found: 1
+  TRIG  2  ECHO 51  -> 18 cm
+
+WARNING: fewer than 4 stable sensors found.
+
+=== PIN ASSIGNMENT (by distance match) ===
+FRONT : NOT FOUND
+LEFT  : NOT FOUND
+REAR  : NOT FOUND
+RIGHT : TRIG pin  2, ECHO pin 51 (reads 18 cm, expected ~14 cm, off by 4 cm)

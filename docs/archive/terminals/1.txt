@@ -1,0 +1,46 @@
+---
+pid: 54100
+cwd: "D:\BuddyBot\firmware"
+command: "function Test-R3 {
+  $sp=New-Object System.IO.Ports.SerialPort 'COM8',9600,'None',8,'One'
+  $sp.ReadTimeout=500; $sp.DtrEnable=$false; $sp.RtsEnable=$false
+  $sp.Open(); Start-Sleep -Seconds 3
+  while($sp.BytesToRead -gt 0){$null=$sp.ReadExisting()}
+  foreach($cmd in @('PING','MOTOR|S','PING','STATUS')){
+    $sp.WriteLine($cmd)
+    Start-Sleep -Seconds 2
+    $r=''; $t=Get-Date; while(((Get-Date)-$t).TotalSeconds -lt 3){ if($sp.BytesToRead -gt 0){$r+=$sp.ReadExisting()} else {Start-Sleep -Milliseconds 100}}
+    Write-Host \"CMD $cmd =>\"; if($r){$r -replace '[^\\x20-\\x7E\\r\\n]','?' } else {'(none)'}
+    Write-Host ''
+  }
+  $sp.Close()
+}
+Test-R3
+# try find mega
+foreach($p in @('COM18','COM3','COM5')){
+  foreach($b in @(115200,9600)){
+    $sp=New-Object System.IO.Ports.SerialPort $p,$b,'None',8,'One'; $sp.ReadTimeout=300; $sp.DtrEnable=$false; $sp.RtsEnable=$false
+    try{$sp.Open(); Start-Sleep -Seconds 2; $sp.WriteLine('DIAG'); Start-Sleep -Seconds 2; $out=''; while($sp.BytesToRead -gt 0){$out+=$sp.ReadExisting()}; $sp.Close(); if($out -match 'TELE:|SYSTEM|MEGA|STAT:|DIAG\\|'){Write-Host \"MEGA candidate $p @ $b\"; $out -replace '[^\\x20-\\x7E\\r\\n]','?'}}catch{}
+  }
+}"
+started_at: 2026-06-22T20:46:35.881Z
+running_for_ms: 86400016 
+---
+CMD PING =>
+(none)
+
+CMD MOTOR|S =>
+(none)
+
+CMD PING =>
+(none)
+
+CMD STATUS =>
+(none)
+
+
+---
+exit_code: -1
+elapsed_ms: 86400016
+ended_at: 2026-06-23T20:48:05.131Z
+---

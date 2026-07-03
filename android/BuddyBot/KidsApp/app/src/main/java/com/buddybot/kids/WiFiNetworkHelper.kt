@@ -32,13 +32,20 @@ object WiFiNetworkHelper {
             return null
         }
 
-        val wifiManager = context.applicationContext
-            .getSystemService(Context.WIFI_SERVICE) as WifiManager
+        return try {
+            val wifiManager = context.applicationContext
+                .getSystemService(Context.WIFI_SERVICE) as WifiManager
 
-        @Suppress("DEPRECATION")
-        val rawSsid = wifiManager.connectionInfo?.ssid ?: return null
-        val ssid = rawSsid.trim().removeSurrounding("\"")
-        if (ssid.isBlank() || ssid.equals("<unknown ssid>", ignoreCase = true)) return null
-        return ssid
+            @Suppress("DEPRECATION")
+            val rawSsid = wifiManager.connectionInfo?.ssid ?: return null
+            val ssid = rawSsid.trim().removeSurrounding("\"")
+            if (ssid.isBlank() || ssid.equals("<unknown ssid>", ignoreCase = true)) null
+            else ssid
+        } catch (e: SecurityException) {
+            // Location permission granted but system location toggle is off (common on Samsung)
+            null
+        } catch (e: Exception) {
+            null
+        }
     }
 }
