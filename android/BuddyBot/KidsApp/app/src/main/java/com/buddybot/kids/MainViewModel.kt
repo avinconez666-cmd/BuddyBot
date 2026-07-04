@@ -1,171 +1,99 @@
+/*
+ * ═══════════════════════════════════════════════════════════════════════
+ *  MainViewModel — thin binding layer over MessageRouter + ArduinoComms
+ * ═══════════════════════════════════════════════════════════════════════
+ *  V37 REFACTOR
+ *  ─────────────
+ *  All parsing moved to MessageRouter (single source of truth). ViewModel
+ *  subscribes to router flows and exposes RobotState + telemetry to UI.
+ *  MainActivity no longer parses lines directly.
+ * ═══════════════════════════════════════════════════════════════════════
+ */
+
 package com.buddybot.kids
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.jiangdg.ausbc.camera.bean.CameraRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class MainViewModel(
-    private val arduinoComms: ArduinoComms
+    private val arduinoComms: ArduinoComms,
+    val router: MessageRouter = MessageRouter()
 ) : ViewModel() {
 
     private val _robotState = MutableStateFlow(RobotState())
     val robotState: StateFlow<RobotState> = _robotState.asStateFlow()
 
-    private val _telemetry = MutableStateFlow(TelemetryData())
-    val telemetry: StateFlow<TelemetryData> = _telemetry.asStateFlow()
+    /** Telemetry flow proxied from router. */
+    val telemetry: StateFlow<TelemetryData> = router.telemetry
 
     private val _commLogs = MutableStateFlow<List<String>>(emptyList())
     val commLogs: StateFlow<List<String>> = _commLogs.asStateFlow()
 
     init {
+        // Route every raw line from ArduinoComms into the router.
         arduinoComms.onMessageReceived = { msg ->
-            handleArduinoMessage(msg)
+            router.handleLine(msg)
+            logComm("ARDUINO", msg)
         }
-        
+
+        // Track link state
+        arduinoComms.communicationMode
+            .onEach { mode -> _robotState.update { it.copy(communicationMode = mode) } }
+            .launchIn(viewModelScope)
+
+        // Mirror mode changes from router into robotState
+        router.modeChange
+            .onEach { newMode -> _robotState.update { it.copy(currentMode = newMode) } }
+            .launchIn(viewModelScope)
+
+        // Mode requests (from Mega REQ_MODE:) trigger PIN entry
+        router.modeRequest
+            .onEach { req -> _robotState.update { it.copy(showPinEntry = true, requestedMode = req) } }
+            .launchIn(viewModelScope)
+
+        // Log every alert
+        router.alerts
+            .onEach { a -> logComm("ALERT/${a.level}", a.code) }
+            .launchIn(viewModelScope)
+
+        // Auto-populate BuddyBot IP when Pico W broadcasts it
+        router.wifiIps
+            .onEach { ip -> if (ip.isNotEmpty() && ip != "0.0.0.0") updateIP(ip) }
+            .launchIn(viewModelScope)
+
+        // Drain raw log channel to StateFlow
         viewModelScope.launch {
-            arduinoComms.communicationMode.collect { mode ->
-                _robotState.update { it.copy(communicationMode = mode) }
+            for (raw in router.rawLog) {
+                _commLogs.update { (it + "[RX] $raw").takeLast(200) }
             }
         }
     }
 
-    private fun handleArduinoMessage(msg: String) {
-        logComm("ARDUINO", msg)
-        
-        when {
-            msg.startsWith("TELE:") -> parseTele(msg.substring(5))
-            msg.startsWith("US:") -> parseUltrasonic(msg.substring(3))
-            msg.startsWith("STAT:") -> parseStat(msg.substring(5))
-            msg.startsWith("DIAG|") -> parseDiag(msg.substring(5))
-            msg.startsWith("ALERT:") -> handleAlert(msg.substring(6))
-            msg == "PONG" -> logComm("SYS", "Arduino Heartbeat: PONG")
-            msg.startsWith("DIAG:") -> logComm("DIAG", msg.substring(5))
-        }
-    }
-
-    private fun parseTele(data: String) {
-        try {
-            val parts = data.split(",")
-            if (parts.size >= 2) {
-                _telemetry.update { it.copy(
-                    batteryVoltage = parts[0].toFloatOrNull() ?: it.batteryVoltage,
-                    batteryPercent = parts[1].toIntOrNull() ?: it.batteryPercent
-                )}
-            }
-        } catch (e: Exception) {
-            logComm("SYS", "TELE parse error: ${e.message}")
-        }
-    }
-
-    private fun parseUltrasonic(data: String) {
-        try {
-            val parts = data.split(",")
-            if (parts.size >= 4) {
-                _telemetry.update { it.copy(
-                    frontDistance = parts[0].toIntOrNull() ?: it.frontDistance,
-                    rearDistance = parts[1].toIntOrNull() ?: it.rearDistance,
-                    leftDistance = parts[2].toIntOrNull() ?: it.leftDistance,
-                    rightDistance = parts[3].toIntOrNull() ?: it.rightDistance
-                )}
-            }
-        } catch (e: Exception) {
-            logComm("SYS", "US parse error: ${e.message}")
-        }
-    }
-
-    private fun parseStat(data: String) {
-        try {
-            val parts = data.split(":")
-            if (parts.size >= 11) {
-                // STAT:gas:temp:hum:haz:pir:tilt:flame:ir:volt:pct:amps
-                _telemetry.update { it.copy(
-                    gasLevel = parts[0].toIntOrNull() ?: it.gasLevel,
-                    temperature = parts[1].toFloatOrNull() ?: it.temperature,
-                    humidity = parts[2].toFloatOrNull() ?: it.humidity,
-                    hazAlert = parts[3] == "1",
-                    pirAlert = parts[4] == "1",
-                    tiltAlert = parts[5] == "1",
-                    flameAlert = parts[6] == "1",
-                    irAlert = parts[7] == "1",
-                    batteryVoltage = parts[8].toFloatOrNull() ?: it.batteryVoltage,
-                    batteryPercent = parts[9].toIntOrNull() ?: it.batteryPercent,
-                    currentAmps = parts[10].toFloatOrNull() ?: it.currentAmps
-                )}
-            }
-        } catch (e: Exception) {
-            logComm("SYS", "STAT parse error: ${e.message}")
-        }
-    }
-
-    private fun parseDiag(data: String) {
-        // DIAG|BAT:x.xV|PCT:x%|TEMP:x.xC|F:xcm|R:xcm|L:xcm|Ri:xcm|GPS:x.x,x.x|SAT:x|S9:OK|AUTO:OFF|UPT:xs|END
-        // We mainly use it for GPS and uptime which aren't in STAT
-        try {
-            val sections = data.split("|")
-            sections.forEach { section ->
-                when {
-                    section.startsWith("GPS:") -> {
-                        val coords = section.substring(4).split(",")
-                        if (coords.size == 2) {
-                            _telemetry.update { it.copy(
-                                gpsLat = coords[0].toDoubleOrNull() ?: it.gpsLat,
-                                gpsLon = coords[1].toDoubleOrNull() ?: it.gpsLon
-                            )}
-                        }
-                    }
-                    section.startsWith("UPT:") -> {
-                        val uptimeStr = section.substring(4).replace("s", "")
-                        _telemetry.update { it.copy(
-                            uptimeSec = uptimeStr.toLongOrNull() ?: it.uptimeSec
-                        )}
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            logComm("SYS", "DIAG parse error: ${e.message}")
-        }
-    }
-
-    private fun handleAlert(alert: String) {
-        logComm("ALERT", alert)
-        // Handle specific alerts like "LOW_BATTERY", "OVERHEAT", etc.
-    }
-
+    // ─── Motor commands (V37 processS9Command format) ───────────────────
     fun sendMotorCommand(dir: String) {
-        val cmd = when(dir.uppercase()) {
-            "F", "FORWARD" -> "MOTOR:F"
+        val cmd = when (dir.uppercase()) {
+            "F", "FORWARD"  -> "MOTOR:F"
             "B", "BACKWARD" -> "MOTOR:B"
-            "L", "LEFT" -> "MOTOR:L"
-            "R", "RIGHT" -> "MOTOR:R"
-            "S", "STOP" -> "MOTOR:S"
-            "DANCE" -> "MOTOR:DANCE"
-            else -> "MOTOR:S"
+            "L", "LEFT"     -> "MOTOR:L"
+            "R", "RIGHT"    -> "MOTOR:R"
+            "S", "STOP"     -> "MOTOR:S"
+            "DANCE"         -> "MOTOR:DANCE"
+            else            -> "MOTOR:S"
         }
         sendArduinoCommand(cmd)
     }
 
-    fun setSpeed(level: String) {
-        // level can be SLOW, NORMAL, FAST or a number
-        sendArduinoCommand("SPEED:$level")
-    }
-
-    fun toggleAuto(on: Boolean) {
-        sendArduinoCommand(if (on) "AUTO:ON" else "AUTO:OFF")
-    }
-
-    fun triggerEstop() {
-        sendArduinoCommand("EMERGENCY_STOP")
-    }
-
-    fun clearEstop() {
-        sendArduinoCommand("ESTOP_CLEAR")
-    }
+    fun setSpeed(level: String) = sendArduinoCommand("SPEED:$level")
+    fun toggleAuto(on: Boolean) = sendArduinoCommand(if (on) "AUTO:ON" else "AUTO:OFF")
+    fun triggerEstop()          = sendArduinoCommand("EMERGENCY_STOP")
+    fun clearEstop()            = sendArduinoCommand("ESTOP_CLEAR")
 
     fun sendArduinoCommand(command: String) {
         arduinoComms.sendCommand(command)
@@ -173,8 +101,7 @@ class MainViewModel(
     }
 
     fun logComm(source: String, message: String) {
-        val entry = "[$source] $message"
-        _commLogs.update { (it + entry).takeLast(100) }
+        _commLogs.update { (it + "[$source] $message").takeLast(200) }
     }
 
     fun setRobotMode(newMode: RobotMode) {
@@ -187,10 +114,6 @@ class MainViewModel(
 
     fun setSpeaking(speaking: Boolean) {
         _robotState.update { it.copy(isSpeaking = speaking) }
-    }
-
-    fun updateTelemetry(newData: TelemetryData) {
-        _telemetry.value = newData
     }
 
     fun updateIP(ip: String) {

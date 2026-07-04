@@ -63,6 +63,11 @@
 #define BRIDGE_UART_RX  5   // GP5 ← Mega D18 (TX1)
 #define BRIDGE_BAUD  115200
 
+// Set to 1 to echo every bridged line on USB Serial (PC diagnostics on COM port).
+#ifndef BRIDGE_USB_DEBUG
+#define BRIDGE_USB_DEBUG 1
+#endif
+
 // ── Forward declarations (implement these in your main sketch) ────────────────
 void onMegaLine(const String& line);
 void onS9Line(const String& line);
@@ -78,13 +83,29 @@ static String _stripCRC(const String& s) {
   return (idx > 0) ? s.substring(0, idx) : s;
 }
 
+// S9 Android app wraps commands as "CMD:<payload>". Mega processS9Command()
+// accepts both forms, but processPicoCommand() used to drop CMD:MOTOR:F lines.
+// Strip the wrapper before forwarding so Mega always receives clean payloads.
+static String _normalizeS9ToMega(const String& s) {
+  String out = s;
+  out.trim();
+  if (out.startsWith("CMD:")) {
+    out = out.substring(4);
+    out.trim();
+  }
+  return out;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 // Call once from setup().
 void bridgeSetup() {
   Serial2.setTX(BRIDGE_UART_TX);
   Serial2.setRX(BRIDGE_UART_RX);
+  Serial2.setFIFOSize(256);
   Serial2.begin(BRIDGE_BAUD);
+  // USB CDC to S9 — must be started before bridgeLoop() reads Serial.
+  Serial.begin(BRIDGE_BAUD);
 }
 
 // Send a line from the Pico itself to the Mega (e.g. PING_PICO, dashboard ACKs).
@@ -112,8 +133,15 @@ void bridgeLoop() {
         if (_bridgeS9Buf.startsWith("PICO:")) {
           onS9Line(_bridgeS9Buf);   // let main sketch handle it
         } else {
-          // Forward to Mega unconditionally
-          Serial2.println(_bridgeS9Buf);
+          // Forward to Mega — strip CMD: wrapper from S9 app payloads
+          String fwd = _normalizeS9ToMega(_bridgeS9Buf);
+          if (fwd.length() > 0) {
+            Serial2.println(fwd);
+#if BRIDGE_USB_DEBUG
+            Serial.print(F("[S9->M] "));
+            Serial.println(fwd);
+#endif
+          }
           // Also let main sketch snoop (audio triggers, display commands, etc.)
           onS9Line(_bridgeS9Buf);
         }
@@ -135,6 +163,10 @@ void bridgeLoop() {
         String clean = _stripCRC(_bridgeMegaBuf);
         // Forward to S9
         Serial.println(clean);
+#if BRIDGE_USB_DEBUG
+        Serial.print(F("[M->S9] "));
+        Serial.println(clean);
+#endif
         // Let main sketch process for dashboard / audio
         onMegaLine(clean);
       }

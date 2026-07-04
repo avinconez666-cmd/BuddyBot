@@ -45,8 +45,9 @@
  *
  *  SERIAL CHANNEL MAP (authoritative -- do not change)
  *  ──────────────────────────────────────────────────
- *  Serial   (USB, pins 0/1)      115200  <-> Samsung S9 Android app
+ *  Serial   (USB, pins 0/1)      115200  debug / PC serial monitor only
  *  Serial1  (pins 18 TX / 19 RX) 115200  <-> Pico W GP5(RX)/GP4(TX)
+ *                                        Pico USB bridge <-> Samsung S9 app
  *  Serial2  (pins 16 TX / 17 RX)          FREE (was R3 motor link)
  *  Serial3  (pins 14 TX / 15 RX)   9600  <-> GPS NEO-6M (hardware UART3)
  *
@@ -119,17 +120,17 @@ const float CURRENT_VREF        = 5.0f;
 // ════════════════════════════════════════════════════════════════════
 
 // ── Analog sensors ───────────────────────────────────────────────────────────
-#define VOLTAGE_SENSOR    A15
-#define TEMP_SENSOR_1     A14
+#define VOLTAGE_SENSOR    A9
+#define TEMP_SENSOR_1     A7
 #define HEAD_TEMP_SENSOR  A13
 #define LDR_AO            A10
 #define SOUND_AO          A12
-#define GAS_AO            A0    // MQ2 smoke sensor -- analog output only
+#define GAS_AO            A5    // MQ2 smoke sensor -- analog output only
 #define GESTURE_INT       -1
 
 // ── RGBW interior lighting (all PWM-capable) ─────────────────────────────────
-#define LED_R_PIN         4
-#define LED_G_PIN         5
+#define LED_R_PIN         5
+#define LED_G_PIN         4
 #define LED_B_PIN         3
 #define LED_W_PIN         -1
 
@@ -141,35 +142,35 @@ const float CURRENT_VREF        = 5.0f;
 #define BUZZER_PIN        -1   // RETIRED V37 — audio via Pico W SC8002B amp on GP14
 
 // ── Digital inputs ───────────────────────────────────────────────────────────
-#define MOMENTARY_BTN     8
-#define UNHINGED_SW       40
-#define TILT_SENSOR       3
+#define MOMENTARY_BTN     40
+#define UNHINGED_SW       A4
+#define TILT_SENSOR       48
 #define PIR_PIN           23    // moved from 10
 #define DHT_PIN           44
 #define GAS_DO            -1
-#define CURRENT_SENSOR    A9
+#define CURRENT_SENSOR    A3
 #define CHARGE_DETECT_PIN -1
-#define TSOP_LEFT         41    // moved from 34
-#define TSOP_CENTRE       36
-#define TSOP_RIGHT        38
+#define TSOP_LEFT         42    // moved from 34
+#define TSOP_CENTRE       43
+#define TSOP_RIGHT        47
 #define HALL_DOCK         -1
 #define RELAY_MOTORS      -1
 
 // ── IR obstacle sensors (LOW = obstacle detected) ────────────────────────────
-#define REAR_IR   25
+#define REAR_IR   41
 #define FRONT_IR  A4
-#define LEFT_IR   27    // moved from 30
+#define LEFT_IR   A2    // moved from 30
 #define RIGHT_IR  26    // moved from 29
 
 // ── Ultrasonic sensors ───────────────────────────────────────────────────────
-#define FRONT_TRIG  47
-#define FRONT_ECHO  49
-#define LEFT_TRIG   48
-#define LEFT_ECHO   50
-#define RIGHT_TRIG  42    // moved from 37 (bug fix -- was double-assigned with FAN_HEAD_EXT_PIN)
+#define FRONT_TRIG  24
+#define FRONT_ECHO  25
+#define LEFT_TRIG   36
+#define LEFT_ECHO   37
+#define RIGHT_TRIG  38    // moved from 37 (bug fix -- was double-assigned with FAN_HEAD_EXT_PIN)
 #define RIGHT_ECHO  39
-#define REAR_TRIG   53
-#define REAR_ECHO   51
+#define REAR_TRIG   26
+#define REAR_ECHO   27
 
 // ── KS0509 integrated TB6612 motor drivers (hardwired on PCB) ────────────────
 #define MTR_A_IN1  35   // Front Left  direction A
@@ -248,7 +249,6 @@ void applyToggle(const String& cmd) {
   toS9("ACK|" + cmd + "|END");
   String st = sensorStatusString();
   toS9(st);
-  Serial1.println(st);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -394,9 +394,10 @@ unsigned long navTimer  = 0;
 // ════════════════════════════════════════════════════════════════════
 //  UTILITY
 // ════════════════════════════════════════════════════════════════════
+// V37: S9 connects via Pico W USB bridge — all phone-bound traffic uses Serial1.
 void toS9(const String& msg) {
-  if (debugVerbose) { Serial.print(F("[SEND] ")); Serial.println(msg); }
-  else              { Serial.println(msg); }
+  Serial1.println(msg);
+  if (debugVerbose) { Serial.print(F("[S9←] ")); Serial.println(msg); }
 }
 void dbg(const char* msg)   { if (debugVerbose) Serial.println(msg); }
 // ─── Audio alerts (V37) ──────────────────────────────────────────────────────
@@ -661,7 +662,6 @@ void updateUV() {
     digitalWrite(UV_LIGHT_PIN, uvActive ? HIGH : LOW);
     String reason = uvActive ? "ACTIVE" : (pirSafe ? "OFF" : "BLOCKED_PIR");
     toS9("UV:" + reason);
-    Serial1.println("UV:" + reason);
   }
 }
 
@@ -677,7 +677,7 @@ void sendTelemetryToPico() {
   t+=String(battVolt,2);t+=':';t+=String((int)battPct);t+=':';t+=String(currentAmps,2);
   Serial1.println(t);
   String u=F("US:");u+=String(dFront);u+=',';u+=String(dRear);u+=',';u+=String(dLeft);u+=',';u+=String(dRight);
-  Serial1.println(u);toS9(u);
+  toS9(u);
   String ir=F("IR:");ir+=(irFront?"1":"0");ir+=',';ir+=(irRear?"1":"0");
   Serial1.println(ir);
   String s=F("STATUS|ESTOP:");s+=(emergencyStop?"YES":"NO");
@@ -874,7 +874,7 @@ void processS9Command(String cmd) {
     Serial1.print(F("MODE:")); Serial1.println(mode); return;
   }
   if (cmd.startsWith("TOGGLE_SENSOR:")) { applyToggle(cmd); return; }
-  if (cmd=="SENSOR_STATUS") { String ss=sensorStatusString(); toS9(ss); Serial1.println(ss); return; }
+  if (cmd=="SENSOR_STATUS") { toS9(sensorStatusString()); return; }
   if (cmd.startsWith("FACE:")) { lastFace=cmd.substring(5); return; }
   if (cmd.startsWith("OBJ:"))  { Serial1.println(cmd); return; }
   if (cmd.startsWith("SENS|")) { Serial1.println(cmd); return; }
@@ -938,6 +938,8 @@ void processPicoCommand(String cmd) {
     else if (sub.startsWith("LED:"))  { setLedMode(sub.substring(4)); return; }
     else if (sub.startsWith("COB:"))  { processS9Command(sub); return; }
     else if (sub=="UV:ON"||sub=="UV:OFF"||sub=="UV:AUTO") { processS9Command(sub); return; }
+    // S9 app sends CMD:MOTOR:F etc. through the Pico bridge — handle as S9 command.
+    processS9Command(cmd);
     return;
   }
   if (cmd.startsWith("PING_PICO:")) {
@@ -1020,7 +1022,7 @@ void checkGestures() {
   else if (data==GES_RIGHT_FLAG)     { g="RIGHT"; sendMotor("RIGHT");    }
   else if (data==GES_FORWARD_FLAG)   { g="NEAR";  sendMotor("STOP");     }
   else if (data==GES_CLOCKWISE_FLAG) { g="CW";    startDance(); }
-  if (g) { Serial1.print(F("GESTURE:")); Serial1.println(g); toS9("GESTURE:"+String(g)); }
+  if (g) { toS9("GESTURE:"+String(g)); }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1265,7 +1267,7 @@ void announceLed(){
   }
   const char* w=(whiteMode==WHITE_M_ON)?"ON":(whiteMode==WHITE_M_AUTO)?"AUTO":"OFF";
   String msg=String("LED|MODE:")+m+"|WHITE:"+w+"|BR:"+String(ledBright)+"|END";
-  toS9(msg); Serial1.println(msg);
+  toS9(msg);
 }
 
 void setSolid(uint8_t r,uint8_t g,uint8_t b){ledR=r;ledG=g;ledB=b;ledMode=LED_SOLID;}
@@ -1452,7 +1454,7 @@ void setup(){
 
   // V34: TB6612 on-board -- no R3 serial comm test needed
   {
-    String cs=F("CONN_STATUS|R3:N/A|MEGA:OK|FW:");
+    String cs=F("CONN_STATUS|PICO:UART|MEGA:OK|FW:");
     cs+=FW_VERSION;cs+=F("|END");
     Serial1.println(cs);
   }
@@ -1497,12 +1499,12 @@ void loop(){
   if(millis()-lastGPSTx>15000&&gps.location.isValid()){
     lastGPSTx=millis();
     String gm=F("GPS:");gm+=String(gps_lat,6);gm+=",";gm+=String(gps_lon,6);gm+=",";gm+=String(gps_sats);
-    toS9(gm);Serial1.println(gm);
+    toS9(gm);
   }
   if(magOk&&millis()-lastHDGTx>500){
     lastHDGTx=millis();
     String hm=F("HDG:");hm+=String(magHeading,1);
-    toS9(hm);Serial1.println(hm);
+    toS9(hm);
   }
 
   updateLeds();

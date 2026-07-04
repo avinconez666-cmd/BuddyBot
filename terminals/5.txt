@@ -1,0 +1,85 @@
+---
+pid: 33464
+cwd: "D:\BuddyBot"
+command: "python -c \"
+import serial, time
+
+def arduino_reset(ser):
+    ser.dtr = False
+    time.sleep(0.1)
+    ser.dtr = True
+    time.sleep(2.0)
+
+def probe(port, baud=115200, reset=False):
+    print(f'\\n### PROBE {port} @ {baud} reset={reset}')
+    try:
+        ser = serial.Serial(port, baud, timeout=0.25)
+        if reset:
+            arduino_reset(ser)
+        else:
+            time.sleep(1.0)
+        ser.reset_input_buffer()
+        for cmd in ['', 'DIAG:RUN\\n', 'CMD:DIAG:RUN\\n', 'MOTOR:S\\n']:
+            if cmd:
+                ser.write(cmd.encode())
+                ser.flush()
+                time.sleep(0.6)
+            t0 = time.time()
+            while time.time() - t0 < 2.0:
+                line = ser.readline().decode('utf-8', errors='replace').strip()
+                if line:
+                    print(f'  << {line}')
+        ser.close()
+    except Exception as e:
+        print(f'  ERR {e}')
+
+for baud in [115200, 57600, 9600]:
+    probe('COM9', baud, reset=False)
+probe('COM9', 115200, reset=True)
+
+print('\\n### BRIDGE TEST via Pico COM25 (Mega must be on UART GP4/GP5)')
+try:
+    ser = serial.Serial('COM25', 115200, timeout=0.25)
+    ser.dtr = True; ser.rts = True
+    time.sleep(0.5)
+    ser.reset_input_buffer()
+    cmds = ['CMD:DIAG:RUN\\n', 'DIAG:RUN\\n', 'MOTOR:S\\n', 'PING\\n']
+    for cmd in cmds:
+        print(f'  >> {cmd.strip()}')
+        ser.write(cmd.encode()); ser.flush()
+        time.sleep(0.8)
+        t0 = time.time()
+        while time.time() - t0 < 3.0:
+            line = ser.readline().decode('utf-8', errors='replace').strip()
+            if line:
+                print(f'  << {line}')
+    print('  passive 8s...')
+    t0 = time.time(); n=0
+    while time.time()-t0 < 8:
+        line = ser.readline().decode('utf-8', errors='replace').strip()
+        if line:
+            n+=1; print(f'  << [{n}] {line}')
+    ser.close()
+    print(f'  passive total {n}')
+except Exception as e:
+    print(f'  ERR {e}')
+\""
+started_at: 2026-07-03T23:38:33.477Z
+running_for_ms: 18579999 
+---
+
+### PROBE COM9 @ 115200 reset=False
+
+### PROBE COM9 @ 57600 reset=False
+
+### PROBE COM9 @ 9600 reset=False
+
+### PROBE COM9 @ 115200 reset=True
+
+### BRIDGE TEST via Pico COM25 (Mega must be on UART GP4/GP5)
+  >> CMD:DIAG:RUN
+  >> DIAG:RUN
+  >> MOTOR:S
+  >> PING
+  passive 8s...
+  passive total 0

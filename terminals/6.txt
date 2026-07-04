@@ -1,0 +1,30 @@
+---
+pid: 11472
+cwd: "D:\BuddyBot"
+command: "python -c \"
+import serial, time
+# Quick Pico reopen - catch boot messages
+for attempt in range(3):
+    try:
+        ser = serial.Serial('COM25', 115200, timeout=0.1)
+        ser.dtr = False; time.sleep(0.05); ser.dtr = True
+        time.sleep(0.3)
+        ser.close()
+        time.sleep(0.5)
+        ser = serial.Serial('COM25', 115200, timeout=0.15)
+        t0=time.time(); n=0
+        while time.time()-t0<4:
+            line=ser.readline().decode('utf-8',errors='replace').strip()
+            if line:
+                n+=1; print(f'attempt{attempt+1}: {line}')
+        ser.close()
+        print(f'attempt{attempt+1} lines={n}')
+    except Exception as e:
+        print(f'attempt{attempt+1} err: {e}')
+\""
+started_at: 2026-07-03T23:41:48.603Z
+running_for_ms: 18384999 
+---
+attempt1 lines=0
+attempt2 lines=0
+attempt3 lines=0

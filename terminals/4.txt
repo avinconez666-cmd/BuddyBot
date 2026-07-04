@@ -1,0 +1,74 @@
+---
+pid: 4740
+cwd: "D:\BuddyBot"
+command: "python -c \"
+import serial, time
+
+def listen(port, sec, dtr=None, rts=None, label=''):
+    print(f'--- {label} {port} listen {sec}s ---')
+    try:
+        ser = serial.Serial(port, 115200, timeout=0.2)
+        if dtr is not None: ser.dtr = dtr
+        if rts is not None: ser.rts = rts
+        time.sleep(1)
+        ser.reset_input_buffer()
+        t0 = time.time()
+        n = 0
+        while time.time() - t0 < sec:
+            raw = ser.readline()
+            if raw:
+                txt = raw.decode('utf-8', errors='replace').rstrip()
+                if txt:
+                    n += 1
+                    print(f'  [{n}] {txt}')
+        ser.close()
+        print(f'  total: {n}')
+    except Exception as e:
+        print(f'  ERROR: {e}')
+
+def send_listen(port, cmd, sec=3, dtr=True, rts=True):
+    print(f'--- {port} send {cmd!r} ---')
+    try:
+        ser = serial.Serial(port, 115200, timeout=0.2)
+        ser.dtr = dtr
+        ser.rts = rts
+        time.sleep(0.8)
+        ser.reset_input_buffer()
+        for ending in ['\\n', '\\r\\n']:
+            payload = (cmd + ending).encode()
+            ser.write(payload)
+            ser.flush()
+            time.sleep(0.5)
+        t0 = time.time()
+        n = 0
+        while time.time() - t0 < sec:
+            raw = ser.readline()
+            if raw:
+                txt = raw.decode('utf-8', errors='replace').rstrip()
+                if txt:
+                    n += 1
+                    print(f'  << {txt}')
+        ser.close()
+        print(f'  rx: {n}')
+    except Exception as e:
+        print(f'  ERROR: {e}')
+
+listen('COM9', 8, dtr=True, rts=True, label='MEGA passive')
+send_listen('COM9', 'DIAG:RUN')
+send_listen('COM9', 'CMD:DIAG:RUN')
+listen('COM25', 8, dtr=True, rts=True, label='PICO passive')
+send_listen('COM25', 'DIAG:RUN')
+\""
+started_at: 2026-07-03T23:34:25.545Z
+running_for_ms: 18825000 
+---
+--- MEGA passive COM9 listen 8s ---
+  total: 0
+--- COM9 send 'DIAG:RUN' ---
+  rx: 0
+--- COM9 send 'CMD:DIAG:RUN' ---
+  rx: 0
+--- PICO passive COM25 listen 8s ---
+  total: 0
+--- COM25 send 'DIAG:RUN' ---
+  rx: 0

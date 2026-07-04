@@ -1,14 +1,10 @@
 ---
-pid: 34296
-cwd: "D:\BuddyBot\android\BuddyBot\KidsApp"
-command: "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\\BuddyBot\\android\\BuddyBot\\KidsApp\\deploy-apk.ps1\""
-started_at: 2026-07-03T19:42:02.095Z
-running_for_ms: 1485001  
+pid: 1708
+cwd: "D:\BuddyBot"
+command: "cd \"D:\\BuddyBot\\android\\BuddyBot\\KidsApp\" && .\\gradlew.bat assembleDebug 2>&1"
+started_at: 2026-07-03T23:29:09.006Z
+running_for_ms: 19144999 
 ---
-Using Java from: D:\MOVED_PROGRAMS\Eclipse Adoptium\jdk-17.0.18+8
-NDK helper tools available (Git uname)
-
-Building debug APK...
 Starting a Gradle Daemon, 1 incompatible and 2 stopped Daemons could not be reused, use --status for details
 
 > Configure project :app
@@ -60,6 +56,7 @@ executing ndkBuild clean
 > Task :libuvc:preBuild UP-TO-DATE
 > Task :libuvc:preDebugBuild UP-TO-DATE
 > Task :libuvc:writeDebugAarMetadata UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
 > Task :app:generateDebugResValues UP-TO-DATE
 > Task :app:processDebugGoogleServices UP-TO-DATE
 > Task :libausbc:generateDebugResValues UP-TO-DATE
@@ -71,11 +68,9 @@ executing ndkBuild clean
 > Task :libuvc:generateDebugResValues UP-TO-DATE
 > Task :libuvc:generateDebugResources UP-TO-DATE
 > Task :libuvc:packageDebugResources UP-TO-DATE
-> Task :app:checkDebugAarMetadata
 > Task :app:mapDebugSourceSetPaths
-> Task :app:generateDebugResources UP-TO-DATE
-> Task :app:packageDebugResources UP-TO-DATE
-> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
 > Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
 > Task :app:extractDeepLinksDebug UP-TO-DATE
 > Task :libausbc:extractDeepLinksDebug UP-TO-DATE
@@ -84,11 +79,8 @@ executing ndkBuild clean
 > Task :libnative:processDebugManifest UP-TO-DATE
 > Task :libuvc:extractDeepLinksDebug UP-TO-DATE
 > Task :libuvc:processDebugManifest UP-TO-DATE
-
-> Task :app:processDebugMainManifest
-[org.tensorflow:tensorflow-lite:2.14.0] C:\Users\avinr\.gradle\caches\8.10.2\transforms\dc094e289323d1bba7610335e61dff5f\transformed\tensorflow-lite-2.14.0\AndroidManifest.xml Warning:
-Namespace 'org.tensorflow.lite' is used in multiple modules and/or libraries: org.tensorflow:tensorflow-lite:2.14.0, org.tensorflow:tensorflow-lite-api:2.14.0. Please ensure that all modules and libraries have a unique namespace. For more information, See https://developer.android.com/studio/build/configure-app-module#set-namespace
-
+> Task :app:mergeDebugResources
+> Task :app:processDebugMainManifest UP-TO-DATE
 > Task :app:processDebugManifest UP-TO-DATE
 > Task :app:processDebugManifestForPackage UP-TO-DATE
 > Task :libausbc:compileDebugLibraryResources UP-TO-DATE
@@ -102,7 +94,7 @@ Namespace 'org.tensorflow.lite' is used in multiple modules and/or libraries: or
 > Task :libuvc:generateDebugRFile UP-TO-DATE
 > Task :libausbc:checkKotlinGradlePluginConfigurationErrors
 > Task :libnative:checkKotlinGradlePluginConfigurationErrors
-> Task :app:mergeDebugResources
+> Task :app:parseDebugLocalResources
 > Task :libnative:compileDebugKotlin UP-TO-DATE
 > Task :libnative:javaPreCompileDebug UP-TO-DATE
 > Task :libnative:compileDebugJavaWithJavac NO-SOURCE
@@ -122,14 +114,14 @@ copy /b/y ".\obj\local\arm64-v8a\libusb100.so" ".\libs\arm64-v8a\libusb100.so" >
 D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/arm64-v8a/libusb100.so
 make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
 make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
-[arm64-v8a] Install        : libUVCCamera.so => libs/arm64-v8a/libUVCCamera.so
-copy /b/y ".\obj\local\arm64-v8a\libUVCCamera.so" ".\libs\arm64-v8a\libUVCCamera.so" > NUL
-D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/arm64-v8a/libUVCCamera.so
-make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
-make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
 [arm64-v8a] Install        : libuvc.so => libs/arm64-v8a/libuvc.so
 copy /b/y ".\obj\local\arm64-v8a\libuvc.so" ".\libs\arm64-v8a\libuvc.so" > NUL
 D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/arm64-v8a/libuvc.so
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+[armeabi-v7a] Install        : libjpeg-turbo1500.so => libs/armeabi-v7a/libjpeg-turbo1500.so
+copy /b/y ".\obj\local\armeabi-v7a\libjpeg-turbo1500.so" ".\libs\armeabi-v7a\libjpeg-turbo1500.so" > NUL
+D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/armeabi-v7a/libjpeg-turbo1500.so
 make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
 make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
 [armeabi-v7a] Install        : libUVCCamera.so => libs/armeabi-v7a/libUVCCamera.so
@@ -142,19 +134,19 @@ copy /b/y ".\obj\local\arm64-v8a\libjpeg-turbo1500.so" ".\libs\arm64-v8a\libjpeg
 D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/arm64-v8a/libjpeg-turbo1500.so
 make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
 make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
-[armeabi-v7a] Install        : libjpeg-turbo1500.so => libs/armeabi-v7a/libjpeg-turbo1500.so
-copy /b/y ".\obj\local\armeabi-v7a\libjpeg-turbo1500.so" ".\libs\armeabi-v7a\libjpeg-turbo1500.so" > NUL
-D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/armeabi-v7a/libjpeg-turbo1500.so
+[armeabi-v7a] Install        : libuvc.so => libs/armeabi-v7a/libuvc.so
+copy /b/y ".\obj\local\armeabi-v7a\libuvc.so" ".\libs\armeabi-v7a\libuvc.so" > NUL
+D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/armeabi-v7a/libuvc.so
+make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
+[arm64-v8a] Install        : libUVCCamera.so => libs/arm64-v8a/libUVCCamera.so
+copy /b/y ".\obj\local\arm64-v8a\libUVCCamera.so" ".\libs\arm64-v8a\libUVCCamera.so" > NUL
+D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/arm64-v8a/libUVCCamera.so
 make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
 make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
 [armeabi-v7a] Install        : libusb100.so => libs/armeabi-v7a/libusb100.so
 copy /b/y ".\obj\local\armeabi-v7a\libusb100.so" ".\libs\armeabi-v7a\libusb100.so" > NUL
 D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/armeabi-v7a/libusb100.so
-make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
-make: Entering directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
-[armeabi-v7a] Install        : libuvc.so => libs/armeabi-v7a/libuvc.so
-copy /b/y ".\obj\local\armeabi-v7a\libuvc.so" ".\libs\armeabi-v7a\libuvc.so" > NUL
-D:/AppData/Local/Android/Sdk/ndk/28.2.13676358/build/../toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe --strip-unneeded  ./libs/armeabi-v7a/libuvc.so
 make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
 
 > Task :libuvc:compileDebugJavaWithJavac UP-TO-DATE
@@ -184,10 +176,13 @@ make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
 > Task :libausbc:bundleLibRuntimeToJarDebug UP-TO-DATE
 > Task :libnative:bundleLibRuntimeToJarDebug UP-TO-DATE
 > Task :libuvc:bundleLibRuntimeToJarDebug UP-TO-DATE
-> Task :app:desugarDebugFileDependencies
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
 > Task :libausbc:processDebugJavaRes UP-TO-DATE
 > Task :libnative:processDebugJavaRes UP-TO-DATE
 > Task :libuvc:processDebugJavaRes NO-SOURCE
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :app:mergeLibDexDebug UP-TO-DATE
 > Task :app:mergeDebugJniLibFolders UP-TO-DATE
 > Task :libausbc:mergeDebugJniLibFolders UP-TO-DATE
 > Task :libausbc:mergeDebugNativeLibs NO-SOURCE
@@ -247,10 +242,7 @@ make: Leaving directory 'D:/BuddyBot/android/BuddyBot/KidsApp/libuvc/src/main'
 > Task :libuvc:syncDebugLibJars UP-TO-DATE
 > Task :libuvc:bundleDebugAar UP-TO-DATE
 > Task :libuvc:assembleDebug UP-TO-DATE
-> Task :app:checkDebugDuplicateClasses
 > Task :app:processDebugResources
-> Task :app:mergeLibDexDebug UP-TO-DATE
-> Task :app:mergeExtDexDebug
 > Task :app:compileDebugKotlin
 w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/EnvironmentMonitoringService.kt:321:41 Parameter 'audioFile' is never used
 w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/EnvironmentMonitoringService.kt:372:58 Parameter 'severity' is never used
@@ -260,11 +252,11 @@ w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/k
 w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:63:26 'CameraClient' is deprecated. Deprecated since version 3.3.0
 w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:66:33 'CameraUvcStrategy' is deprecated. Deprecated since version 3.3.0
 w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:126:34 'CameraClient' is deprecated. Deprecated since version 3.3.0
-w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1262:28 Parameter 'device' is never used
-w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1265:22 'CameraClient' is deprecated. Deprecated since version 3.3.0
-w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1268:32 'CameraUvcStrategy' is deprecated. Deprecated since version 3.3.0
-w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1274:13 Condition 'client == null' is always 'false'
-w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:2059:25 Variable 'totalMs' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1324:28 Parameter 'device' is never used
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1327:22 'CameraClient' is deprecated. Deprecated since version 3.3.0
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1330:32 'CameraUvcStrategy' is deprecated. Deprecated since version 3.3.0
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:1336:13 Condition 'client == null' is always 'false'
+w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MainActivity.kt:2119:25 Variable 'totalMs' is never used
 w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MasterActivity.kt:106:58 'FULL_WAKE_LOCK: Int' is deprecated. Deprecated in Java
 w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MasterActivity.kt:106:89 'ACQUIRE_CAUSES_WAKEUP: Int' is deprecated. Deprecated in Java
 w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/kids/MasterActivity.kt:123:27 Parameter 'videoState' is never used
@@ -284,26 +276,11 @@ w: file:///D:/BuddyBot/android/BuddyBot/KidsApp/app/src/main/java/com/buddybot/k
 > Task :app:dexBuilderDebug
 > Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
 > Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:mergeDebugJavaResource UP-TO-DATE
 > Task :app:mergeProjectDexDebug
-> Task :app:mergeDebugJavaResource
 > Task :app:packageDebug
 > Task :app:createDebugApkListingFileRedirect UP-TO-DATE
 > Task :app:assembleDebug
 
-BUILD SUCCESSFUL in 8m 55s
-137 actionable tasks: 25 executed, 112 up-to-date
-
-========================================
- APK ready for Phone Link (202.4 MB)
-========================================
- Project:   D:\BuddyBot\android\BuddyBot\KidsApp\dist\BuddyBot-Kids-debug.apk
- Downloads: C:\Users\avinr\Downloads\BuddyBot-Kids-debug.apk
-
- Phone Link install:
-   1. Open Phone Link -> Files (or drag from Downloads in Explorer)
-   2. Copy BuddyBot-Kids-debug.apk to the S9 (e.g. Download folder)
-   3. On the S9, tap the APK -> Install
-   4. Allow 'Install unknown apps' if prompted
-
- Tip: re-run .\deploy-apk.ps1 after code changes to refresh the APK.
-
+BUILD SUCCESSFUL in 1m 34s
+137 actionable tasks: 22 executed, 115 up-to-date

@@ -29,7 +29,13 @@ object BuddyBotConfig {
 
     // ── Hardware ─────────────────────────────────────────────────────────
     const val SERIAL_BAUD_RATE = 115200
-    const val WEBSOCKET_PORT   = 81
+    /** HTTP fallback port — Pico W web server on port 80 (was ESP32 :81). */
+    const val PICO_W_HTTP_PORT = 80
+    @Deprecated("Use PICO_W_HTTP_PORT", ReplaceWith("PICO_W_HTTP_PORT"))
+    const val WEBSOCKET_PORT   = 80
+
+    // Mega V37 firmware version this app is validated against.
+    const val EXPECTED_FW_VERSION = "V37.0"
 
     // ── Voice / AI ───────────────────────────────────────────────────────
     const val WAKE_WORD            = "hey buddy"
@@ -45,7 +51,7 @@ object BuddyBotConfig {
     }
 
     // Model strings
-    const val CLAUDE_MODEL     = "claude-3-haiku-20240307"   // cheapest Claude tier
+    const val CLAUDE_MODEL     = "claude-sonnet-4-6"         // current Sonnet tier
     const val GROQ_MODEL_FAST  = "llama-3.1-8b-instant"     // fastest Groq model
     const val GROQ_MODEL_SMART = "llama-3.3-70b-versatile"  // smarter Groq model
     const val GEMINI_URL       = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"

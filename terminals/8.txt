@@ -1,0 +1,27 @@
+---
+pid: 41172
+cwd: "D:\BuddyBot"
+command: "python D:\\BuddyBot\\tools\\serial_comm_test.py --bridge COM25"
+started_at: 2026-07-03T23:46:30.234Z
+running_for_ms: 18104999 
+---
+
+=== Bridge test via Pico USB: COM25 ===
+  Expect with new Pico firmware:
+    PICO_ALIVE|Mega=Y|...  every 5s
+    [S9->M] DIAG:RUN       when you send CMD:DIAG:RUN
+    [M->S9] TELE:...       when Mega UART is wired and responding
+
+=== Passive listen: COM25 (6s) ===
+  Received 0 line(s)
+
+=== Command test: COM25 ===
+  >> CMD:DIAG:RUN
+  >> DIAG:RUN
+  >> MOTOR:S
+  >> PING
+  >> STATUS
+  Received 0 line(s)
+
+=== Passive listen: COM25 (8s) ===
+  Received 0 line(s)

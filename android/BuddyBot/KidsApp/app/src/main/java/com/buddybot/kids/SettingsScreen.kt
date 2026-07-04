@@ -1,4 +1,4 @@
-package com.buddybot.kids
+﻿package com.buddybot.kids
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SettingsScreen.kt  –  PHASE 2: Futuristic Settings Menu
@@ -100,7 +100,7 @@ fun SettingsMenu(
     onSaveWifiPassword: (ssid: String, password: String) -> Boolean = { _, _ -> false },
     webcamClient: CameraClient? = null,
     onTestSerial: (() -> Unit)? = null,
-    onTestWebSocket: (() -> Unit)? = null
+    onTestHttp: (() -> Unit)? = null
 ) {
     // Slide-in animation
     AnimatedVisibility(
@@ -137,7 +137,7 @@ fun SettingsMenu(
                             robotState = robotState,
                             telemetry = telemetry,
                             onTestSerial = onTestSerial,
-                            onTestWebSocket = onTestWebSocket,
+                            onTestHttp = onTestHttp,
                             // Phase 3: pass live mic state for glowing indicator
                             isListening = robotState.isListening,
                             isSpeaking = robotState.isSpeaking
@@ -342,14 +342,14 @@ private fun CardHeader(title: String, icon: ImageVector, accentColor: Color = Ne
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// STATUS CARD  (Serial + WebSocket status + Test buttons)
+// STATUS CARD  (Serial + HTTP status + Test buttons)
 // ═══════════════════════════════════════════════════════════════════════════════
 @Composable
 private fun StatusCard(
     robotState: RobotState,
     telemetry: TelemetryData,
     onTestSerial: (() -> Unit)?,
-    onTestWebSocket: (() -> Unit)?,
+    onTestHttp: (() -> Unit)?,
     // Phase 3: mic state for glowing indicator
     isListening: Boolean = false,
     isSpeaking: Boolean = false
@@ -364,7 +364,7 @@ private fun StatusCard(
         // Communication mode pill
         val (modeLabel, modeColor) = when (robotState.communicationMode) {
             CommunicationMode.USB_SERIAL  -> "USB SERIAL" to NeonGreen
-            CommunicationMode.WEBSOCKET   -> "WEBSOCKET"  to NeonCyan
+            CommunicationMode.HTTP_PICO_W   -> "WEBSOCKET"  to NeonCyan
             CommunicationMode.DISCONNECTED -> "OFFLINE"   to NeonRed
         }
         val pulse by rememberInfiniteTransition(label = "modePulse").animateFloat(
@@ -429,7 +429,7 @@ private fun StatusCard(
                     // Auto-clear feedback after 3s
                 }
             )
-            // Test WebSocket
+            // test HTTP
             NeonTestButton(
                 label = "TEST WS",
                 icon = Icons.Default.Wifi,
@@ -438,7 +438,7 @@ private fun StatusCard(
                 modifier = Modifier.weight(1f),
                 onClick = {
                     wsFeedback = "⏳ Testing..."
-                    onTestWebSocket?.invoke()
+                    onTestHttp?.invoke()
                 }
             )
         }
@@ -461,7 +461,7 @@ private fun StatusCard(
                 CommunicationMode.USB_SERIAL -> {
                     if (serialFeedback == "⏳ Testing...") serialFeedback = "✅ Serial LIVE"
                 }
-                CommunicationMode.WEBSOCKET -> {
+                CommunicationMode.HTTP_PICO_W -> {
                     if (wsFeedback == "⏳ Testing...") wsFeedback = "✅ WebSocket LIVE"
                 }
                 CommunicationMode.DISCONNECTED -> {
@@ -706,7 +706,7 @@ private fun ConnectionCard(
         NeonToggleRow(
             icon = Icons.Default.Usb,
             label = "USB Serial",
-            sublabel = "115200 baud · Mega 2560",
+            sublabel = "115200 baud · Pico W USB bridge",
             isActive = robotState.communicationMode == CommunicationMode.USB_SERIAL,
             accentColor = NeonGreen,
             onClick = onToggleCommunication
@@ -717,9 +717,9 @@ private fun ConnectionCard(
         // WebSocket toggle
         NeonToggleRow(
             icon = Icons.Default.Wifi,
-            label = "WebSocket",
-            sublabel = "Port ${BuddyBotConfig.WEBSOCKET_PORT} · ESP32 bridge",
-            isActive = robotState.communicationMode == CommunicationMode.WEBSOCKET,
+            label = "WiFi HTTP",
+            sublabel = "Pico W fallback · /status /cmd",
+            isActive = robotState.communicationMode == CommunicationMode.HTTP_PICO_W,
             accentColor = NeonCyan,
             onClick = onToggleCommunication
         )

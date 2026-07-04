@@ -1,4 +1,4 @@
-package com.buddybot.kids
+﻿package com.buddybot.kids
 
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -16,6 +16,8 @@ import com.felhr.usbserial.UsbSerialInterface
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
@@ -34,10 +36,31 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
         // Serial health: no data in 15 s = reconnect
         private const val SERIAL_SILENCE_THRESHOLD_MS = 15_000L
         private const val SERIAL_HEALTH_CHECK_INTERVAL_MS = 10_000L
+
+        // V37: S9 connects to Pico W USB CDC bridge (not Mega CH340 directly)
+        private const val VID_RASPBERRY_PI = 0x2E8A   // Pico / Pico W
+        private const val VID_ARDUINO      = 0x2341
+        private const val VID_ARDUINO_ORG  = 0x2A03
+        private const val VID_CH340        = 0x1A86
+        private const val VID_CP210X       = 0x10C4
+        private const val PID_CP210X       = 0xEA60
+        private const val VID_FTDI         = 0x0403
+        private const val PID_FTDI         = 0x6001
+        private const val VID_PROLIFIC     = 0x067B
+        private const val PID_PROLIFIC     = 0x2303
     }
 
     private var usbSerial: UsbSerialDevice? = null
     private var httpIp: String = ""
+
+    // ── Serial write queue — prevents byte loss under burst commands ─────
+    // Capacity 32: enough for a full guardian approach sequence.
+    // DROP_OLDEST on overflow so fresh commands (STOP, ESTOP) always get through.
+    private val writeQueue = Channel<String>(
+        capacity = 32,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    private var writeQueueJob: Job? = null
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -47,6 +70,10 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
 
     val communicationMode = MutableStateFlow(CommunicationMode.DISCONNECTED)
     var onMessageReceived: ((String) -> Unit)? = null
+    /** Fired when Android shows the USB permission dialog for the serial bridge. */
+    var onUsbPermissionRequested: (() -> Unit)? = null
+    /** Fired when the user denies USB permission for the serial bridge. */
+    var onUsbPermissionDenied: (() -> Unit)? = null
 
     private val serialBuffer = StringBuilder()
 
@@ -76,8 +103,8 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
                     val device: UsbDevice? = IntentCompat.getParcelableExtra(
                         intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
                     device?.let {
-                        if (isArduino(it)) {
-                            log("Arduino detached")
+                        if (isSerialBridgeDevice(it)) {
+                            log("Serial bridge detached")
                             communicationMode.value = CommunicationMode.DISCONNECTED
                             serialHealthJob?.cancel()
                             close()
@@ -88,9 +115,9 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
                     val device: UsbDevice? = IntentCompat.getParcelableExtra(
                         intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
                     device?.let {
-                        if (isArduino(it) &&
+                        if (isSerialBridgeDevice(it) &&
                             communicationMode.value == CommunicationMode.DISCONNECTED) {
-                            log("Arduino reattached — auto-reconnecting…")
+                            log("Serial bridge reattached — auto-reconnecting…")
                             initializeUSBSerial()
                         }
                     }
@@ -101,8 +128,12 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
                             intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
                         val granted = intent.getBooleanExtra(
                             UsbManager.EXTRA_PERMISSION_GRANTED, false)
-                        log("Arduino USB permission result: $granted for ${device?.deviceName}")
-                        if (granted && device != null) connectToArduino(device)
+                        log("Serial USB permission result: $granted for ${device?.deviceName}")
+                        if (granted && device != null) {
+                            connectToArduino(device)
+                        } else {
+                            onUsbPermissionDenied?.invoke()
+                        }
                     }
                 }
             }
@@ -139,20 +170,56 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    //  DEVICE DETECTION — supports all CH340 variants (Keyestudio Mega)
+    //  DEVICE DETECTION — Pico W USB bridge (V37) + legacy Mega USB adapters
     // ────────────────────────────────────────────────────────────────────────
-    fun isArduino(device: UsbDevice): Boolean {
+    private fun isUvcCamera(device: UsbDevice): Boolean {
+        return device.deviceClass == 14 ||
+            (device.deviceClass == 239 && device.deviceSubclass == 2) ||
+            device.vendorId == 0x046D
+    }
+
+    private fun serialBridgePriority(device: UsbDevice): Int = when (device.vendorId) {
+        VID_RASPBERRY_PI -> 100   // Pico W — primary path in V37 firmware
+        VID_CH340        -> 50    // Legacy direct Mega USB
+        VID_ARDUINO      -> 40
+        VID_ARDUINO_ORG  -> 40
+        else             -> 10
+    }
+
+    fun isSerialBridgeDevice(device: UsbDevice): Boolean {
+        if (isUvcCamera(device)) return false
         val vid = device.vendorId
         val pid = device.productId
-        return when {
-            vid == 0x2341 -> true                           // All genuine Arduino
-            vid == 0x2A03 -> true                           // Arduino.org
-            vid == 0x1A86 -> true                           // ALL CH340 variants (Keyestudio, etc.)
-            vid == 0x10C4 && pid == 0xEA60 -> true          // CP210x
-            vid == 0x0403 && pid == 0x6001 -> true          // FTDI
-            vid == 0x067B && pid == 0x2303 -> true          // Prolific
+        if (when {
+            vid == VID_RASPBERRY_PI -> true
+            vid == VID_ARDUINO      -> true
+            vid == VID_ARDUINO_ORG  -> true
+            vid == VID_CH340        -> true
+            vid == VID_CP210X && pid == PID_CP210X -> true
+            vid == VID_FTDI && pid == PID_FTDI     -> true
+            vid == VID_PROLIFIC && pid == PID_PROLIFIC -> true
             else -> false
+        }) return true
+
+        // Pico W CDC ACM can appear as a generic communications interface
+        for (i in 0 until device.interfaceCount) {
+            val iface = device.getInterface(i)
+            if (iface.interfaceClass == 2 && iface.interfaceSubclass == 2) {
+                return true
+            }
         }
+        return false
+    }
+
+    /** @deprecated Use [isSerialBridgeDevice]; kept for callers that still use the old name. */
+    fun isArduino(device: UsbDevice): Boolean = isSerialBridgeDevice(device)
+
+    private fun normalizeIncomingLine(raw: String): String {
+        var msg = raw.trim()
+        val crcIdx = msg.indexOf("|CRC:")
+        if (crcIdx > 0) msg = msg.substring(0, crcIdx)
+        if (msg.endsWith("|END")) msg = msg.removeSuffix("|END")
+        return msg.trim()
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -192,35 +259,43 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
         try {
             val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
             val deviceList = usbManager.deviceList
-            log("Scanning ${deviceList.size} USB device(s) for Arduino…")
+            log("Scanning ${deviceList.size} USB device(s) for serial bridge…")
 
             deviceList.values.forEach { d ->
                 log("  USB: VID=0x${d.vendorId.toString(16)} PID=0x${d.productId.toString(16)} " +
                     "class=${d.deviceClass} name=${d.deviceName}")
             }
 
-            val arduinoDevice = deviceList.values.find { isArduino(it) }
+            val bridgeDevice = deviceList.values
+                .filter { isSerialBridgeDevice(it) }
+                .maxByOrNull { serialBridgePriority(it) }
 
-            if (arduinoDevice == null) {
-                log("No Arduino device found (will retry)")
+            if (bridgeDevice == null) {
+                log("No serial bridge found (Pico W / Mega USB) — will retry")
                 return
             }
 
-            log("Found Arduino: ${arduinoDevice.deviceName} " +
-                "(0x${arduinoDevice.vendorId.toString(16)}:" +
-                "0x${arduinoDevice.productId.toString(16)})")
+            val bridgeLabel = when (bridgeDevice.vendorId) {
+                VID_RASPBERRY_PI -> "Pico W"
+                VID_CH340        -> "Mega CH340"
+                else             -> "Serial bridge"
+            }
+            log("Found $bridgeLabel: ${bridgeDevice.deviceName} " +
+                "(0x${bridgeDevice.vendorId.toString(16)}:" +
+                "0x${bridgeDevice.productId.toString(16)})")
 
-            if (!usbManager.hasPermission(arduinoDevice)) {
-                log("Requesting USB permission for Arduino…")
+            if (!usbManager.hasPermission(bridgeDevice)) {
+                log("Requesting USB permission for $bridgeLabel…")
+                onUsbPermissionRequested?.invoke()
                 val permIntent = PendingIntent.getBroadcast(
                     context, 0,
                     Intent(ACTION_USB_PERMISSION_ARDUINO).setPackage(context.packageName),
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
                         PendingIntent.FLAG_MUTABLE else 0)
-                usbManager.requestPermission(arduinoDevice, permIntent)
+                usbManager.requestPermission(bridgeDevice, permIntent)
                 return
             }
-            connectToArduino(arduinoDevice)
+            connectToArduino(bridgeDevice)
         } catch (e: Exception) {
             Log.e(TAG, "USB init error", e)
         }
@@ -252,6 +327,15 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
                     serial.setStopBits(UsbSerialInterface.STOP_BITS_1)
                     serial.setParity(UsbSerialInterface.PARITY_NONE)
                     serial.setFlowControl(UsbSerialInterface.FLOW_CONTROL_OFF)
+                    // Pico W USB CDC needs DTR/RTS asserted for reliable line RX
+                    if (device.vendorId == VID_RASPBERRY_PI) {
+                        try {
+                            serial.setDTR(true)
+                            serial.setRTS(true)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "CDC DTR/RTS set failed (non-fatal): ${e.message}")
+                        }
+                    }
                     serial.read { data ->
                         lastSerialRxMs = System.currentTimeMillis()
                         val str = String(data)
@@ -259,9 +343,9 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
                         if (serialBuffer.contains("\n")) {
                             val messages = serialBuffer.toString().split("\n")
                             for (i in 0 until messages.size - 1) {
-                                val msg = messages[i].trim()
+                                val msg = normalizeIncomingLine(messages[i])
                                 if (msg.isNotEmpty()) {
-                                    log("[RECV] USB ← Mega: $msg")
+                                    log("[RECV] USB ← Robot: $msg")
                                     onMessageReceived?.invoke(msg)
                                 }
                             }
@@ -272,8 +356,9 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
                     }
                     communicationMode.value = CommunicationMode.USB_SERIAL
                     lastSerialRxMs = System.currentTimeMillis()
-                    log("✅ Serial connected successfully at ${BuddyBotConfig.SERIAL_BAUD_RATE} baud")
+                    log("✅ Serial connected at ${BuddyBotConfig.SERIAL_BAUD_RATE} baud")
                     startSerialHealthCheck()
+                    startWriteQueuePump()
                     delay(500)
                     sendCommand("DIAG:RUN")
                 } else {
@@ -282,6 +367,24 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "USB connect error", e)
+            }
+        }
+    }
+
+    // ── Write queue pump — serialises all USB writes on IO dispatcher ────
+    // Gives each command a 20 ms gap so the Mega's 50 Hz parse loop
+    // never sees two commands jammed into the same read tick.
+    private fun startWriteQueuePump() {
+        writeQueueJob?.cancel()
+        writeQueueJob = scope.launch(Dispatchers.IO) {
+            for (payload in writeQueue) {
+                if (communicationMode.value != CommunicationMode.USB_SERIAL) break
+                try {
+                    usbSerial?.write(payload.toByteArray(Charsets.UTF_8))
+                    delay(20)
+                } catch (e: Exception) {
+                    log("Write pump error: ${e.message}")
+                }
             }
         }
     }
@@ -333,7 +436,7 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
                 val response = httpClient.newCall(request).execute()
                 if (response.isSuccessful) {
                     log("✅ HTTP CONNECTED to $ip")
-                    communicationMode.value = CommunicationMode.WEBSOCKET
+                    communicationMode.value = CommunicationMode.HTTP_PICO_W
                     httpRetryCount = 0
                     startHttpPolling(ip)
                 } else {
@@ -352,7 +455,7 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
     private fun startHttpPolling(ip: String) {
         httpPollJob?.cancel()
         httpPollJob = scope.launch(Dispatchers.IO) {
-            while (isActive && communicationMode.value == CommunicationMode.WEBSOCKET) {
+            while (isActive && communicationMode.value == CommunicationMode.HTTP_PICO_W) {
                 try {
                     val request = Request.Builder()
                         .url("http://$ip/status")
@@ -447,37 +550,27 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
     fun sendCommand(command: String) {
         val clean = command.trimEnd('\r', '\n')
         if (clean.isEmpty()) return
-        val payload = "CMD:$clean\n"
+        val payload = "$clean\n"
         when (communicationMode.value) {
             CommunicationMode.USB_SERIAL -> {
                 if (usbSerial?.isOpen() != true) {
-                    Log.w(TAG, "Serial not open — dropping command: $clean")
-                    return
+                    Log.w(TAG, "Serial not open — dropping: $clean"); return
                 }
-                try {
-                    usbSerial?.write(payload.toByteArray(Charsets.UTF_8))
+                // Route through write queue. Pump drains at 20 ms interval
+                // so the Mega parse loop never receives simultaneous bytes.
+                if (!writeQueue.trySend(payload).isSuccess)
+                    Log.w(TAG, "Write queue full — dropped: $clean")
+                else
                     log("[SEND] USB → Mega: $clean")
-                } catch (e: IOException) {
-                    Log.e(TAG, "Serial write failed: ${e.message}")
-                } catch (e: NullPointerException) {
-                    Log.e(TAG, "Serial null during write")
-                }
             }
-            CommunicationMode.WEBSOCKET -> {
+            CommunicationMode.HTTP_PICO_W -> {
                 scope.launch(Dispatchers.IO) {
                     try {
-                        val cmdParam = if (payload.startsWith("CMD:")) payload.substring(4).trim() else payload.trim()
-                        val url = "http://$httpIp/cmd?c=${java.net.URLEncoder.encode(cmdParam, "UTF-8")}"
-                        val request = Request.Builder().url(url).build()
-                        val response = httpClient.newCall(request).execute()
-                        if (response.isSuccessful) {
-                            log("[SEND] HTTP → ESP32: $clean")
-                        } else {
-                            log("[SEND] HTTP error: ${response.code}")
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "HTTP send failed: ${e.message}")
-                    }
+                        val url = "http://$httpIp/cmd?c=${java.net.URLEncoder.encode(clean, "UTF-8")}"
+                        val resp = httpClient.newCall(Request.Builder().url(url).build()).execute()
+                        if (resp.isSuccessful) log("[SEND] HTTP → PicoW: $clean")
+                        else log("[SEND] HTTP error ${resp.code}: $clean")
+                    } catch (e: Exception) { Log.e(TAG, "HTTP send failed: ${e.message}") }
                 }
             }
             CommunicationMode.DISCONNECTED ->
@@ -495,6 +588,7 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
 
     fun close() {
         serialHealthJob?.cancel()
+        writeQueueJob?.cancel()
         httpRetryJob?.cancel()
         httpPollJob?.cancel()
         communicationMode.value = CommunicationMode.DISCONNECTED

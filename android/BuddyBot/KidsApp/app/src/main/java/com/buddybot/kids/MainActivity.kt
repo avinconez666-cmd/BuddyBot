@@ -1,4 +1,4 @@
-package com.buddybot.kids
+﻿package com.buddybot.kids
 
 import android.annotation.SuppressLint
 import android.app.PendingIntent
@@ -37,6 +37,9 @@ import android.view.View
 import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.Toast
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import androidx.core.app.NotificationCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
@@ -57,8 +60,6 @@ import androidx.core.content.IntentCompat
 import androidx.core.content.edit
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
-import com.buddybot.kids.ml.FaceRecognitionManager
-import com.buddybot.kids.ml.ObjectDetectionManager
 import com.google.mlkit.vision.common.InputImage
 import com.jiangdg.ausbc.CameraClient
 import com.jiangdg.ausbc.callback.ICaptureCallBack
@@ -112,14 +113,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         "BARK" to "bark.mp3"
     )
 
+    private val _robotState = MutableStateFlow(RobotState())
+    val robotState: StateFlow<RobotState> get() = _robotState
+
     private lateinit var faceCoordinator: FaceCoordinator
     private lateinit var securityGatekeeper: SecurityGatekeeper
-    
-    private val _robotState = MutableStateFlow(RobotState())
-    val robotState: StateFlow<RobotState> = _robotState
+    private lateinit var viewModel: MainViewModel
+    private lateinit var aiRouter: AIRouter
+    private var guardianEngine: GuardianEngine? = null
 
-    private val _telemetry = MutableStateFlow(TelemetryData())
-    val telemetry: StateFlow<TelemetryData> = _telemetry
+    // V37: telemetry is owned by MessageRouter via MainViewModel.
+    // These StateFlows delegate to the ViewModel so all UI observers stay compatible.
+    private val telemetry: StateFlow<TelemetryData> get() = viewModel.telemetry
 
     private val _commLogs = mutableStateListOf<String>()
 
@@ -265,8 +270,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     private var lastSensorSentMs = 0L
     private val SENSOR_SEND_INTERVAL_MS = 500L
 
-    // Phase 3E: ESP32 HTTP status connection
-    private var esp32ConnectJob: Job? = null
+    // HTTP fallback to Pico W WiFi (when USB serial unavailable)
+    private var httpConnectJob: Job? = null
 
     // Permissions required for core function — app cannot run without these
     private val CRITICAL_PERMISSIONS = setOf(
@@ -460,7 +465,59 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing ArduinoComms", e)
             }
-            
+
+            // V37: Build the ViewModel now that ArduinoComms exists.
+            // The ViewModel wires MessageRouter → ArduinoComms.onMessageReceived.
+            try {
+                viewModel = MainViewModel(arduinoComms)
+                // Mirror ViewModel's robotState (kept authoritative for MessageRouter's
+                // mode-change / mode-request emissions) into MainActivity's local _robotState.
+                lifecycleScope.launch {
+                    viewModel.robotState.collect { vmState ->
+                        // Only mirror the fields the ViewModel owns; keep local activity fields intact.
+                        _robotState.value = _robotState.value.copy(
+                            currentMode         = vmState.currentMode,
+                            communicationMode   = vmState.communicationMode,
+                            showPinEntry        = vmState.showPinEntry,
+                            requestedMode       = vmState.requestedMode
+                        )
+                    }
+                }
+                // Also register the local handleArduinoMessage for Activity-side side effects
+                // (banners, TTS, phone-call escalation). This is additive — the ViewModel's
+                // router callback is set inside MainViewModel.init and stays the primary hook.
+                Log.d(TAG, "initializeApp: MainViewModel + MessageRouter initialized")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing MainViewModel", e)
+            }
+
+            // ── AIRouter — factored AI fallback chain ─────────────────────────
+            try {
+                aiRouter = AIRouter { service ->
+                    runOnUiThread {
+                        _robotState.value = _robotState.value.copy(aiService = service)
+                    }
+                }
+                Log.d(TAG, "initializeApp: AIRouter ready (Groq→Gemini→Claude→Offline)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing AIRouter", e)
+            }
+
+            // ── GuardianEngine — behavioural monitoring pipeline ───────────────
+            try {
+                guardianEngine = GuardianEngine(
+                    context         = this@MainActivity,
+                    scope           = lifecycleScope,
+                    arduinoComms    = arduinoComms,
+                    speak           = { text -> speakText(text) },
+                    notifyParentApp = { event -> sendGuardianAlert(event) }
+                )
+                // Register with EnvironmentMonitoringService so audio samples feed in
+                EnvironmentMonitoringService.guardianEngine = guardianEngine
+                Log.d(TAG, "initializeApp: GuardianEngine active")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing GuardianEngine", e)
+            }            
             try {
                 securityGatekeeper = SecurityGatekeeper(arduinoComms::sendCommand) { mode ->
                     setRobotMode(mode)
@@ -493,9 +550,32 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                     Log.d(TAG, "Loaded saved IP: $savedIP")
                     logComm("COMM", "✅ Loaded saved IP: $savedIP")
                 }
+                arduinoComms.onUsbPermissionRequested = {
+                    runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            "Allow USB access so BuddyBot can talk to the robot",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        logComm("COMM", "USB permission requested — tap OK on the dialog")
+                    }
+                }
+                arduinoComms.onUsbPermissionDenied = {
+                    runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            "USB permission denied — serial control won't work",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        logComm("COMM", "USB permission denied by user")
+                    }
+                }
+                // V37: MessageRouter (owned by ViewModel) is the primary parser.
+                // Chain the Activity-side side-effect delegator AFTER the router.
                 arduinoComms.onMessageReceived = { msg ->
-                    // Serial read callback runs on a background thread; all Compose
-                    // state (_commLogs) and UI handlers must run on the main thread.
+                    // First: let the ViewModel's router parse the line (owns telemetry state).
+                    viewModel.router.handleLine(msg)
+                    // Then: run Activity-side side effects (banners, TTS, phone-call).
                     if (Looper.myLooper() == Looper.getMainLooper()) {
                         handleArduinoMessage(msg)
                     } else {
@@ -513,7 +593,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                             _robotState.value = _robotState.value.copy(communicationMode = mode)
                             when (mode) {
                                 CommunicationMode.USB_SERIAL -> logComm("COMM", "USB Serial CONNECTED")
-                                CommunicationMode.WEBSOCKET -> logComm("COMM", "WebSocket CONNECTED")
+                                CommunicationMode.HTTP_PICO_W -> logComm("COMM", "HTTP (PicoW) CONNECTED")
                                 CommunicationMode.DISCONNECTED -> logComm("COMM", "Communication DISCONNECTED")
                             }
                         }
@@ -556,79 +636,28 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         }
     }
 
+    /**
+     * V37: parsing lives in MessageRouter (single source of truth).
+     * This delegator is kept only for Activity-side side effects:
+     * banners, TTS triggers, phone-call escalation, security gatekeeper.
+     */
     private fun handleArduinoMessage(msg: String) {
         logComm("ARD", msg)
         try {
-            if (msg.startsWith("TELE:")) {
-                // FIX #4a: Mega sends TELE:volt,pct,moving (3 fields, indices 0-2).
-                // Old code required size >= 4 and read data[3] — both wrong.
-                val data = msg.substring(5).split(",")
-                if (data.size >= 3) {
-                    val batteryPercent = data[1].toIntOrNull() ?: 0
-                    _telemetry.value = _telemetry.value.copy(
-                        batteryVoltage = data[0].toFloatOrNull() ?: 0f,
-                        batteryPercent = batteryPercent,
-                        isMoving = data[2] == "1"   // index 2, not 3
-                    )
-
-                    if (batteryPercent < 15 && batteryPercent > 0) {
-                        speakText("My battery is getting very low. Please plug me in soon!")
-                    }
-                }
-            } else if (msg.startsWith("EVENT:")) {
-                val event = msg.substring(6)
-                handleEvent(event)
-            } else if (msg.startsWith("ACK|")) {
-                // FIX #4c: handle ACK|COMMAND|END acknowledgement frames from the Mega.
-                // Format: ACK|<cmd>|END  e.g. ACK|MOTOR:F|END
-                val inner = msg.removePrefix("ACK|").removeSuffix("|END")
-                Log.d(TAG, "[ACK] Mega acknowledged command: $inner")
-                logComm("ACK", inner)
-                // Update isAutoMode state based on ACK from Mega so the UI reflects
-                // the confirmed hardware state rather than the optimistic sent state.
-                when (inner) {
-                    "AUTO:ON"  -> _robotState.value = _robotState.value.copy(isAutoMode = true)
-                    "AUTO:OFF" -> _robotState.value = _robotState.value.copy(isAutoMode = false)
-                    "WIFI_CONNECTING" -> logComm("WIFI", "Robot acknowledged — joining WiFi...")
-                }
-            } else if (msg.startsWith("US:")) {
-                parseUltrasonicData(msg)
-            } else if (msg.startsWith("GESTURE:")) {
-                handleGesture(msg)
-            } else if (msg.startsWith("MODE:")) {
-                parseMode(msg.substring(5))?.let {
-                    _robotState.value = _robotState.value.copy(currentMode = it)
-                }
-            } else if (msg.startsWith("REQ_MODE:")) {
-                parseMode(msg.substring(9))?.let {
-                    _robotState.value = _robotState.value.copy(showPinEntry = true, requestedMode = it)
-                }
-            } else if (msg.startsWith("WIFI_IP:")) {
-                // ESP32 broadcasts its IP to Mega which relays it here.
-                // Auto-populate buddybotIP so the user never has to type it manually.
-                val ip = msg.substring(8).trim()
-                if (ip.isNotEmpty() && ip != "0.0.0.0") {
-                    Log.d(TAG, "Auto-detected BuddyBot WiFi IP: $ip")
-                    logComm("WIFI", "ESP32 IP auto-detected: $ip")
-                    updateIP(ip)
-                    if (arduinoComms.communicationMode.value != CommunicationMode.WEBSOCKET) {
-                        lifecycleScope.launch {
-                            delay(500)
-                            arduinoComms.initializeHttp(ip)
-                        }
-                    }
+            when {
+                msg.startsWith("EVENT:")           -> handleEvent(msg.substring(6))
+                msg.startsWith("ALERT:")           -> handleEvent(msg.substring(6))
+                msg.startsWith("GESTURE:")         -> handleGesture(msg)
+                msg.startsWith("REQ_MODE_CHANGE:") -> securityGatekeeper.processCommand(msg)
+                msg.startsWith("ESTOP|") -> {
+                    logComm("ESTOP", msg.substring(6))
+                    _robotState.value = _robotState.value.copy(isEmergency = true)
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse Arduino msg: $msg", e)
+            Log.e(TAG, "handleArduinoMessage error on: $msg", e)
         }
     }
-    
-    /**
-     * Handles EVENT:<code> messages from the Mega.
-     * Shows a colour-coded banner in the UI and plays audio/TTS where appropriate.
-     * Banner auto-clears after [durationMs] milliseconds.
-     */
     private fun handleEvent(event: String, durationMs: Long = 4000) {
         Log.d(TAG, "[EVENT] $event")
         logComm("EVENT", event)
@@ -729,58 +758,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         }
     }
     
-
-    // ── Fix 1: Parse Mega V31 STAT: packet ─────────────────────────────────
-    // Format: STAT:gas:temp:hum:haz:pir:tilt:ir:volt:pct:amps
-    private fun parseStatPacket(msg: String) {
-        try {
-            val fields = msg.substring(5).split(":")
-            if (fields.size < 10) return
-            val gas     = fields[0].toIntOrNull()   ?: 0
-            val temp    = fields[1].toFloatOrNull() ?: 0f
-            val hum     = fields[2].toFloatOrNull() ?: 0f
-            val haz     = fields[3].toIntOrNull()   ?: 0
-            val pir     = fields[4].toIntOrNull()   ?: 0
-            val tilt    = fields[5].toIntOrNull()   ?: 0
-            val ir      = fields[6].toIntOrNull()   ?: 0
-            val volt    = fields[7].toFloatOrNull() ?: 0f
-            val pct     = fields[8].toIntOrNull()   ?: 0
-            val amps    = fields[9].toFloatOrNull() ?: 0f
-
-            _telemetry.value = _telemetry.value.copy(
-                gasLevel        = gas,
-                temperature     = temp,
-                humidity        = hum,
-                hazardDetected  = haz == 1,
-                pirAlert        = pir == 1,
-                tiltAlert       = tilt == 1,
-                irAlert         = ir == 1,
-                batteryVoltage  = volt,
-                batteryPercent  = pct,
-                currentAmps     = amps,
-            )
-
-            // Low battery warning
-            if (pct in 1..14) {
-                speakText("My battery is getting very low. Please plug me in soon!")
-            }
-
-            // Tilt alert
-            if (tilt == 1) {
-                handleEvent("TILT")
-            }
-
-            // Hazard alert
-            if (haz == 1) {
-                handleEvent("HAZARD")
-            }
-
-            Log.d(TAG, "STAT parsed: gas=$gas temp=$temp hum=$hum volt=$volt pct=$pct")
-        } catch (e: Exception) {
-            Log.e(TAG, "parseStatPacket error: ${e.message}")
-        }
-    }
-
     // ── Fix 5: Handle SAFETY: messages from Mega ────────────────────────────
     private fun handleSafetyMessage(code: String) {
         Log.d(TAG, "[SAFETY] $code")
@@ -794,16 +771,15 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         }
     }
 
-    // ── Fix 8: Parse STATUS| pipe-delimited status packet ───────────────────
-    // Format: STATUS|ESTOP:YES|AUTO:ON|R3:OK|ESP:OK|S9:OK|FW:V31.0
+    // V37 STATUS| packet from sendTelemetryToPico()
+    // Format: STATUS|ESTOP:YES|AUTO:ON|BAT:12.4|PCT:80|...|S9:OK|FW:V37.0|...
     private fun parseStatusPipe(msg: String) {
         try {
-            val isEstop  = msg.contains("ESTOP:YES")
-            val isAuto   = msg.contains("AUTO:ON")
-            val r3ok     = msg.contains("R3:OK")
-            val espOk    = msg.contains("ESP:OK")
-            val fwIdx    = msg.indexOf("FW:")
-            val fw       = if (fwIdx >= 0) msg.substring(fwIdx + 3).substringBefore("|") else "--"
+            val isEstop = msg.contains("ESTOP:YES")
+            val isAuto  = msg.contains("AUTO:ON")
+            val s9Ok    = msg.contains("S9:OK")
+            val fwIdx   = msg.indexOf("FW:")
+            val fw      = if (fwIdx >= 0) msg.substring(fwIdx + 3).substringBefore("|") else "--"
 
             _robotState.value = _robotState.value.copy(isAutoMode = isAuto)
 
@@ -811,59 +787,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 arduinoComms.sendCommand("MOTOR:S")
                 handleEvent("OBSTACLE", 8000)
             }
-
-            logComm("STATUS", "Auto=$isAuto R3=$r3ok ESP=$espOk FW=$fw ESTOP=$isEstop")
-        } catch (e: Exception) {
-            Log.e(TAG, "parseStatusPipe error: ${e.message}")
-        }
+        } catch (e: Exception) { Log.e(TAG, "parseStatusPipe error: ${e.message}") }
     }
-    private fun parseUltrasonicData(msg: String) {
-        val parts = msg.substring(3).split(',')
-        if (parts.size == 4) {
-            val f = parts[0].toIntOrNull() ?: -1
-            val r = parts[1].toIntOrNull() ?: -1
-            val l = parts[2].toIntOrNull() ?: -1
-            val ri = parts[3].toIntOrNull() ?: -1
-            
-            if (_robotState.value.currentMode == RobotMode.DOG && isPatrolling) {
-                val fDelta = if(lastFrontDistance != -1) abs(f - lastFrontDistance) else 0
-                if (fDelta > SENSOR_DELTA_THRESHOLD) {
-                    activateEmergencyMode()
-                    usbCameraClient?.captureVideoStart(object : ICaptureCallBack {
-                        override fun onBegin() {}
-                        override fun onComplete(path: String?) { logComm("REC", "Emergency video saved: $path") }
-                        override fun onError(error: String?) { logComm("REC", "Emergency video failed: $error") }
-                    })
-                }
-            }
-            
-            if (_robotState.value.currentMode == RobotMode.BODYGUARD && f < PROXIMITY_THRESHOLD && f != -1) {
-                val person = _robotState.value.recognizedPerson
-                if (person != "AJ" && person != "Parent") {
-                    faceCoordinator.triggerWarning()
-                    arduinoComms.sendCommand("KEEP_DISTANCE")
-                }
-            }
-
-            // NOTE: HEAD servo commands removed — no servo hardware on Mega
-            if (!_robotState.value.isSpeaking && !isMlProcessing.get()) {
-                // Proximity detection logged; head movement not available
-            }
-
-            lastFrontDistance = f
-            lastRearDistance = r
-            lastLeftDistance = l
-            lastRightDistance = ri
-            
-            _telemetry.value = _telemetry.value.copy(
-                frontDistance = f,
-                rearDistance = r,
-                leftDistance = l,
-                rightDistance = ri
-            )
-        }
-    }
-    
     private fun onPinValidated(pin: String) {
         val requestedMode = _robotState.value.requestedMode
         if (requestedMode != null) {
@@ -1153,14 +1078,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                             onToggleCommunication = {
                                 val currentMode = _robotState.value.communicationMode
                                 val newMode = when (currentMode) {
-                                    CommunicationMode.USB_SERIAL -> CommunicationMode.WEBSOCKET
-                                    CommunicationMode.WEBSOCKET -> CommunicationMode.USB_SERIAL
+                                    CommunicationMode.USB_SERIAL  -> CommunicationMode.HTTP_PICO_W
+                                    CommunicationMode.HTTP_PICO_W -> CommunicationMode.USB_SERIAL
                                     CommunicationMode.DISCONNECTED -> CommunicationMode.USB_SERIAL
                                 }
                                 _robotState.value = _robotState.value.copy(communicationMode = newMode)
                                 logComm("COMM", "Toggling: $currentMode -> $newMode")
                                 when (newMode) {
-                                    CommunicationMode.WEBSOCKET -> {
+                                    CommunicationMode.HTTP_PICO_W -> {
                                         val ip = _robotState.value.buddybotIP
                                         if (ip.isNotEmpty()) {
                                             logComm("COMM", "Connecting HTTP to $ip")
@@ -1182,8 +1107,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                                 logComm("TEST", "Testing USB Serial...")
                                 arduinoComms.initializeUSBSerial()
                             },
-                            // Phase 2: Test WebSocket – re-runs WS connection and logs result
-                            onTestWebSocket = {
+                            // Phase 2: Test HTTP to PicoW – re-runs WS connection and logs result
+                            onTestHttp = {
                                 val ip = _robotState.value.buddybotIP
                                 if (ip.isNotEmpty()) {
                                     logComm("TEST", "Testing HTTP to $ip...")
@@ -1386,7 +1311,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
 
                 // Phase 5: detect objects and map to DetectedObjectResult for overlay
                 val mlKitObjects = objectDetectionManager.detectObjects(image)
-                val objectResults = mlKitObjects.mapNotNull { obj ->
+                val objectResults = mlKitObjects.mapNotNull { obj: com.google.mlkit.vision.objects.DetectedObject ->
                     val label = obj.labels.firstOrNull()?.text ?: return@mapNotNull null
                     val conf  = obj.labels.firstOrNull()?.confidence ?: 0f
                     val box   = obj.boundingBox
@@ -1397,7 +1322,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                     if (nowObj - lastObjSentMs >= VISION_THROTTLE_MS) {
                         lastObjSentMs = nowObj
                         val safeLabel = label.replace(",", "").replace(" ", "_")
-                        arduinoComms.sendCommand("OBJ:$safeLabel,${"%.2f".format(conf)}")
+                        arduinoComms.sendCommand("OBJ:$safeLabel," + String.format("%.2f", conf))
                     }
                     DetectedObjectResult(
                         bounds = RectF(box),
@@ -1418,15 +1343,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             }
         }
     }
-
-    private fun parseMode(modeStr: String): RobotMode? {
-        val normalized = when (modeStr.trim().uppercase()) {
-            "GUARD DOG" -> "DOG"
-            else -> modeStr.trim().uppercase()
-        }
-        return RobotMode.values().find { it.name == normalized }
-    }
-
     private fun setRobotMode(newMode: RobotMode) {
         if (_robotState.value.currentMode == newMode) return
         val oldMode = _robotState.value.currentMode
@@ -1508,7 +1424,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         if (event?.sensor?.type == Sensor.TYPE_ROTATION_VECTOR) {
             // [Phase 5 FIX] Throttle sensor writes to Mega — SENSOR_DELAY_UI fires
             // every ~60ms. Without throttling this floods the Mega's Serial buffer
-            // at ~16 writes/sec, starving handleESP32Communication().
+            // at ~16 writes/sec, starving Mega serial command handling.
             // Minimum interval: 500ms (2 writes/sec maximum).
             val now = System.currentTimeMillis()
             if (now - lastSensorSentMs < SENSOR_SEND_INTERVAL_MS) return
@@ -1668,9 +1584,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         _robotState.value = _robotState.value.copy(isProcessing = true)
         lifecycleScope.launch {
             try {
-                // NOTE: The Mega's processS9Command() uses COLON separators (MOTOR:F, MOTOR:B …).
-                // PIPE separators (MOTOR|F) are only understood by processMotorOrModeCmd() which
-                // is called from the ESP32/BT bridge — NOT from the S9 USB-serial path.
+                // Mega V37 processS9Command() uses colon separators (MOTOR:F, AUTO:ON, …).
                 when {
                     command.contains("forward", true) -> {
                         arduinoComms.sendCommand("MOTOR:F"); speakText("Moving forward")
@@ -1705,11 +1619,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                     }
 
                     command.contains("speed up", true) || command.contains("faster", true) -> {
-                        arduinoComms.sendCommand("MOTOR:SPEED_UP"); speakText("Speeding up")
+                        arduinoComms.sendCommand("FAST"); speakText("Speeding up")
                     }
 
                     command.contains("slow down", true) || command.contains("slower", true) -> {
-                        arduinoComms.sendCommand("MOTOR:SPEED_DOWN"); speakText("Slowing down")
+                        arduinoComms.sendCommand("SLOW"); speakText("Slowing down")
                     }
 
                     else -> speakText(getAIResponse(command))
@@ -1722,50 +1636,20 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         }
     }
 
-    private suspend fun getAIResponse(userInput: String): String = withContext(Dispatchers.IO) {
-        // 1. Groq — free, fastest
-        if (BuddyBotConfig.isGroqConfigured) {
-            try {
-                val response = callGroqAPI(userInput)
-                if (response.isNotEmpty()) {
-                    withContext(Dispatchers.Main) {
-                        _robotState.value = _robotState.value.copy(aiService = AIService.GROQ)
-                    }
-                    return@withContext limitWords(response, 15)
-                }
-            } catch (e: Exception) { Log.w(TAG, "Groq failed: ${e.message}") }
-        } else {
-            Log.w(TAG, "Groq not configured — get free key at console.groq.com")
-        }
-        // 2. Gemini — free fallback
-        if (BuddyBotConfig.isGeminiConfigured) {
-            try {
-                val response = callGeminiAPI(userInput)
-                if (response.isNotEmpty()) {
-                    withContext(Dispatchers.Main) {
-                        _robotState.value = _robotState.value.copy(aiService = AIService.GEMINI)
-                    }
-                    return@withContext limitWords(response, 15)
-                }
-            } catch (e: Exception) { Log.w(TAG, "Gemini failed: ${e.message}") }
-        }
-        // 3. Claude — paid last resort
-        if (BuddyBotConfig.isClaudeConfigured) {
-            try {
-                val response = callClaudeAPI(userInput)
-                if (response.isNotEmpty()) {
-                    withContext(Dispatchers.Main) {
-                        _robotState.value = _robotState.value.copy(aiService = AIService.CLAUDE)
-                    }
-                    return@withContext limitWords(response, 15)
-                }
-            } catch (e: Exception) { Log.w(TAG, "Claude failed: ${e.message}") }
-        }
-        // 4. Offline fallback
+    /** V37: AI fallback chain delegated to AIRouter (single source of truth). */
+    private suspend fun getAIResponse(userInput: String): String {
+        val response = aiRouter.getResponse(userInput)
         withContext(Dispatchers.Main) {
-            _robotState.value = _robotState.value.copy(aiService = AIService.OFFLINE)
+            _robotState.value = _robotState.value.copy(
+                aiService = when {
+                    BuddyBotConfig.isGroqConfigured   -> AIService.GROQ
+                    BuddyBotConfig.isGeminiConfigured -> AIService.GEMINI
+                    BuddyBotConfig.isClaudeConfigured -> AIService.CLAUDE
+                    else                              -> AIService.OFFLINE
+                }
+            )
         }
-        return@withContext getOfflineFallbackResponse(userInput)
+        return response
     }
 
     private fun getOfflineFallbackResponse(input: String): String {
@@ -1817,120 +1701,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         } else {
             text
         }
-    }
-
-    private suspend fun callGroqAPI(userInput: String): String = withContext(Dispatchers.IO) {
-        val systemPrompt = """
-            You are BuddyBot, a friendly robot companion for AJ, a 3-year-old child.
-            Respond in simple words a toddler understands.
-            Keep ALL responses under 15 words maximum.
-            Be encouraging, fun, and positive.
-            Never use complex words or concepts.
-        """.trimIndent()
-
-        val requestBody = JSONObject().apply {
-            put("model", "llama-3.1-8b-instant")
-            put("max_tokens", 60)
-            put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "system")
-                    put("content", systemPrompt)
-                })
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", userInput)
-                })
-            })
-        }.toString().toRequestBody("application/json".toMediaType())
-
-        val request = Request.Builder()
-            .url("https://api.groq.com/openai/v1/chat/completions")
-            .addHeader("Authorization", "Bearer ${BuildConfig.GROQ_API_KEY}")
-            .addHeader("Content-Type", "application/json")
-            .post(requestBody)
-            .build()
-
-        val response = httpClient.newCall(request).execute()
-        if (!response.isSuccessful) throw Exception("Groq error: ${response.code}")
-        val body = response.body?.string() ?: throw Exception("Empty response")
-        val json = JSONObject(body)
-        return@withContext json.getJSONArray("choices")
-            .getJSONObject(0)
-            .getJSONObject("message")
-            .getString("content")
-            .trim()
-    }
-
-    private fun callClaudeAPI(userInput: String): String {
-        val systemPrompt = """
-            You are BuddyBot, a friendly robot companion for AJ, a 3-year-old.
-            - Use ONLY simple words that a toddler understands
-            - Keep responses under 15 words maximum
-            - Be encouraging, fun, and positive
-            - Use simple sentences
-            - Avoid complex concepts
-            Example: "That's great, AJ! You're so smart and brave!"
-        """.trimIndent()
-        
-        val requestBody = JSONObject().apply {
-            put("model", BuddyBotConfig.CLAUDE_MODEL)
-            put("max_tokens", 100)
-            put("system", systemPrompt)
-            put(
-                "messages",
-                JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "user"); put(
-                        "content",
-                        userInput
-                    )
-                    })
-                })
-        }
-        val request = Request.Builder().url("https://api.anthropic.com/v1/messages")
-            .addHeader("x-api-key", BuildConfig.CLAUDE_API_KEY)
-            .addHeader("anthropic-version", "2023-06-01")
-            .post(requestBody.toString().toRequestBody("application/json".toMediaType())).build()
-        val response = httpClient.newCall(request).execute()
-        return if (response.isSuccessful) JSONObject(
-            response.body?.string() ?: ""
-        ).getJSONArray("content").getJSONObject(0).getString("text") else ""
-    }
-
-    private fun callGeminiAPI(userInput: String): String {
-        val systemPrompt = """
-            You are BuddyBot, a friendly robot companion for AJ, a 3-year-old.
-            - Use ONLY simple words that a toddler understands
-            - Keep responses under 15 words maximum
-            - Be encouraging, fun, and positive
-            - Use simple sentences
-            - Avoid complex concepts
-            Example: "That's great, AJ! You're so smart and brave!"
-        """.trimIndent()
-        
-        val requestBody = JSONObject().apply {
-            put(
-                "contents",
-                JSONArray().apply {
-                    put(JSONObject().apply {
-                        put(
-                            "parts",
-                            JSONArray().apply { 
-                                put(JSONObject().apply { put("text", systemPrompt) })
-                                put(JSONObject().apply { put("text", userInput) }) 
-                            })
-                    })
-                })
-        }
-        val request =
-            Request.Builder().url("${BuddyBotConfig.GEMINI_URL}?key=${BuildConfig.GEMINI_API_KEY}")
-                .post(requestBody.toString().toRequestBody("application/json".toMediaType())).build()
-        val response = httpClient.newCall(request).execute()
-        return if (response.isSuccessful) {
-            val json = JSONObject(response.body?.string() ?: "")
-            json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content")
-                .getJSONArray("parts").getJSONObject(0).getString("text")
-        } else ""
     }
 
     // Operational phrases that use local TTS to save ElevenLabs quota
@@ -2152,6 +1922,51 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
      * The overlay monitors Messenger foreground state every 2s and auto-dismisses
      * when the call ends, then brings BuddyBot back to the front automatically.
      */
+    // ─── GuardianEngine parent notification ─────────────────────────────────────
+    /**
+     * Fires when GuardianEngine detects aggression above threshold.
+     * Sends a local high-priority notification and forwards to BuddyBotMessagingService
+     * for FCM push to the companion Parent App.
+     */
+    private fun sendGuardianAlert(event: GuardianEvent) {
+        Log.i(TAG, "Guardian alert: conf=" + event.confidence + " text=" + event.recognizedText)
+
+        // Local notification — visible even if Parent App is backgrounded
+        val nm = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val ch = NotificationChannel("guardian_alerts", "Guardian Alerts",
+                NotificationManager.IMPORTANCE_HIGH)
+            nm?.createNotificationChannel(ch)
+        }
+        val pct = (event.confidence * 100).toInt()
+        val notif = NotificationCompat.Builder(this, "guardian_alerts")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("BuddyBot Guardian Alert")
+            .setContentText("Concerning behaviour detected ($pct% confidence)")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(
+                "Heard: \"" + event.recognizedText + "\"\n" +
+                "Confidence: $pct%\n" +
+                "Audio level: " + (event.audioRms * 100).toInt() + "%"
+            ))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .build()
+        nm?.notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), notif)
+
+        // FCM push to companion Parent App via BuddyBotMessagingService
+        try {
+            val intent = Intent(this, BuddyBotMessagingService::class.java).apply {
+                action = "GUARDIAN_ALERT"
+                putExtra("confidence",  event.confidence)
+                putExtra("text",        event.recognizedText)
+                putExtra("timestamp",   event.timestamp)
+                putExtra("audioRms",    event.audioRms)
+            }
+            startService(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to forward guardian alert to MessagingService", e)
+        }
+    }
     private fun callDaddy() {
         // Step 1: Check overlay permission
         if (!Settings.canDrawOverlays(this)) {
@@ -2384,8 +2199,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         // Phase 4: dismiss Call Daddy overlay so it doesn't leak after activity is destroyed
         callOverlayManager?.dismiss()
         callOverlayManager = null
-        // Phase 3E: cancel ESP32 connect job
-        esp32ConnectJob?.cancel()
+        httpConnectJob?.cancel()
         super.onDestroy()
         releaseResources()
         faceCoordinator.release()

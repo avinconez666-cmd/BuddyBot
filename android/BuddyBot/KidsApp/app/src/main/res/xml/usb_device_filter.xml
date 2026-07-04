@@ -11,4 +11,7 @@
     
     <!-- CH340 USB to Serial -->
     <usb-device vendor-id="6790" />
+
+    <!-- Raspberry Pi Pico / Pico W USB CDC bridge (V37) -->
+    <usb-device vendor-id="11914" />
 </resources>

@@ -36,32 +36,37 @@ class EnvironmentMonitoringService : Service() {
         private const val TAG = "EnvironmentMonitor"
         private const val CHANNEL_ID = "buddybot_monitoring"
         private const val NOTIFICATION_ID = 100
-        
+
         // Audio recording constants
         private const val SAMPLE_RATE = 16000
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        
+
         // Analysis thresholds
         private const val VOLUME_THRESHOLD_YELLING = 0.7 // 70% of max volume
         private const val SILENCE_THRESHOLD = 0.05 // 5% of max
         private const val SILENCE_DURATION_MS = 300000L // 5 minutes
-        
+
         // Detection keywords
         private val SWEAR_WORDS = setOf(
             "damn", "hell", "crap", "shit", "fuck", "ass", "bitch",
             "stupid", "idiot", "hate", "shut up"
         )
-        
+
         private val DISTRESS_PHRASES = setOf(
             "help", "stop", "no", "don't", "scared", "hurt", "pain",
             "mommy", "daddy", "emergency"
         )
-        
+
         private val ARGUMENT_PHRASES = setOf(
             "you always", "you never", "shut up", "leave me alone",
             "i hate you", "go away", "stop it", "fighting"
         )
+
+        // ── GuardianEngine hook ─────────────────────────────────────────────
+        // Set by MainActivity after GuardianEngine is constructed. Nullable so
+        // the service degrades gracefully if guardian isn't initialised yet.
+        @Volatile var guardianEngine: GuardianEngine? = null
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -192,7 +197,11 @@ class EnvironmentMonitoringService : Service() {
                 if (volume > SILENCE_THRESHOLD) {
                     lastSoundTime = System.currentTimeMillis()
                 }
-                
+
+                // Feed raw RMS into GuardianEngine on every tick (no transcript yet —
+                // transcript arrives later via analyzeTranscript).
+                guardianEngine?.onAudioSample(null, volume)
+
                 if (volume > VOLUME_THRESHOLD_YELLING) {
                     handleYelling(volume)
                 }
@@ -324,12 +333,17 @@ class EnvironmentMonitoringService : Service() {
 
     private fun analyzeTranscript(transcript: String) {
         val lowerTranscript = transcript.lowercase()
+
+        // Feed transcript + current volume into GuardianEngine for fused detection.
+        val currentVolume = synchronized(recentVolumes) { recentVolumes.lastOrNull() ?: 0f }
+        guardianEngine?.onAudioSample(lowerTranscript, currentVolume)
+
         val swearWords = SWEAR_WORDS.filter { lowerTranscript.contains(it) }
         if (swearWords.isNotEmpty()) handleSwearing()
-        
+
         val distressWords = DISTRESS_PHRASES.filter { lowerTranscript.contains(it) }
         if (distressWords.isNotEmpty()) handleDistress(distressWords)
-        
+
         val argumentPhrases = ARGUMENT_PHRASES.filter { lowerTranscript.contains(it) }
         if (argumentPhrases.isNotEmpty() && isVolumeSpiking()) handleArgument()
     }

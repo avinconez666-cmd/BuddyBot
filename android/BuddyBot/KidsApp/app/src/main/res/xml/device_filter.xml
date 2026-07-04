@@ -22,6 +22,16 @@
 -->
 <resources>
 
+    <!-- ── Raspberry Pi Pico / Pico W (V37 USB serial bridge) ─────────── -->
+    <!-- VID=0x2E8A (11914) — S9 connects here via USB-C in production -->
+    <usb-device vendor-id="11914" />
+    <!-- Pico CDC (PID 0x000A=10), Pico W CDC (PID 0x000C=12), SDK variants -->
+    <usb-device vendor-id="11914" product-id="10" />
+    <usb-device vendor-id="11914" product-id="12" />
+    <usb-device vendor-id="11914" product-id="15" />
+    <!-- Generic USB CDC ACM (class 2, subclass 2) — catches unlisted Pico builds -->
+    <usb-device class="2" subclass="2" />
+
     <!-- ── Genuine Arduino boards ────────────────────────────────────── -->
     <!-- Arduino Mega 2560, Uno, Leonardo etc (ATmega16U2 USB chip) -->
     <usb-device vendor-id="9025" />

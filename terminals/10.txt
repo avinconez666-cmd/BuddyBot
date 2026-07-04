@@ -1,0 +1,51 @@
+---
+pid: 8408
+cwd: "D:\BuddyBot"
+command: "python D:\\BuddyBot\\tools\\serial_comm_test.py --list && python D:\\BuddyBot\\tools\\serial_comm_test.py --bridge COM25"
+started_at: 2026-07-03T23:57:12.513Z
+running_for_ms: 17459999 
+---
+Available serial ports:
+  COM9    0x10C4:0xEA60  CP210x UART
+           manufacturer: Silicon Labs
+  COM5    ----:----  Standard Serial over Bluetooth link (COM5)
+           manufacturer: Microsoft
+  COM25   0x2E8A:0xF00A  Raspberry Pi Pico/W
+           manufacturer: Microsoft
+  COM3    ----:----  Standard Serial over Bluetooth link (COM3)
+           manufacturer: Microsoft
+
+Tip: Mega native USB should appear as CH340 (0x1A86) or Arduino (0x2341).
+     Pico W appears as 0x2E8A. Bridge test uses the Pico COM port.
+
+=== Bridge test via Pico USB: COM25 ===
+  Expect with new Pico firmware:
+    PICO_ALIVE|Mega=Y|...  every 5s
+    [S9->M] DIAG:RUN       when you send CMD:DIAG:RUN
+    [M->S9] TELE:...       when Mega UART is wired and responding
+
+=== Passive listen: COM25 (6s) ===
+  << PICO_ALIVE|Mega=N|LastRx=503s
+  Received 1 line(s)
+
+=== Command test: COM25 ===
+  >> CMD:DIAG:RUN
+  << [S9->M] DIAG:RUN
+  << PICO_ALIVE|Mega=N|LastRx=508s
+  >> DIAG:RUN
+  << [S9->M] DIAG:RUN
+  << PICO_ALIVE|Mega=N|LastRx=513s
+  >> MOTOR:S
+  << [S9->M] MOTOR:S
+  << PICO_ALIVE|Mega=N|LastRx=518s
+  >> PING
+  << [S9->M] PING
+  << PICO_ALIVE|Mega=N|LastRx=523s
+  >> STATUS
+  << [S9->M] STATUS
+  << PICO_ALIVE|Mega=N|LastRx=528s
+  Received 10 line(s)
+
+=== Passive listen: COM25 (8s) ===
+  << PICO_ALIVE|Mega=N|LastRx=533s
+  Received 1 line(s)

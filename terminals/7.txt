@@ -1,0 +1,17 @@
+---
+pid: 16104
+cwd: "D:\BuddyBot"
+command: "Get-ChildItem -Path \"C:\\Users\\avinr\\AppData\\Local\\Arduino15\",\"C:\\Users\\avinr\\Documents\\Arduino\",\"C:\\Program Files\\Arduino*\" -ErrorAction SilentlyContinue -Recurse -Filter \"arduino-cli.exe\" | Select-Object -First 5 FullName; Get-ChildItem -Path \"C:\\Users\\avinr\\AppData\\Local\\Arduino15\\packages\" -ErrorAction SilentlyContinue | Select-Object Name"
+started_at: 2026-07-03T23:42:32.059Z
+running_for_ms: 18339999 
+---
+
+Name
+----
+arduino
+builtin
+esp32
+esp8266
+rp2040
+Seeeduino
+

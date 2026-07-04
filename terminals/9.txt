@@ -1,0 +1,67 @@
+---
+pid: 40056
+cwd: "D:\BuddyBot"
+command: "python -c \"
+import serial, time, sys
+port='COM25'
+print('Waiting for COM25 (close Arduino Serial Monitor)...')
+for i in range(20):
+    try:
+        ser=serial.Serial(port,115200,timeout=0.3)
+        ser.dtr=True; ser.rts=True
+        time.sleep(0.5)
+        ser.reset_input_buffer()
+        print('OPEN OK - listening 12s...')
+        t0=time.time(); n=0
+        while time.time()-t0<12:
+            line=ser.readline().decode('utf-8',errors='replace').strip()
+            if line:
+                n+=1; print(f'  << {line}')
+        print('Sending CMD:DIAG:RUN...')
+        ser.write(b'CMD:DIAG:RUN\\n'); ser.flush()
+        t0=time.time()
+        while time.time()-t0<6:
+            line=ser.readline().decode('utf-8',errors='replace').strip()
+            if line:
+                n+=1; print(f'  << {line}')
+        ser.close()
+        print(f'Done ({n} lines)')
+        sys.exit(0)
+    except serial.SerialException as e:
+        if 'Access is denied' in str(e):
+            print(f'  [{i+1}/20] port locked - retry...')
+            time.sleep(2)
+        else:
+            print(f'ERROR: {e}'); sys.exit(1)
+print('Port still locked after 40s')
+sys.exit(1)
+\""
+started_at: 2026-07-03T23:50:13.084Z
+running_for_ms: 17880000 
+---
+Waiting for COM25 (close Arduino Serial Monitor)...
+  [1/20] port locked - retry...
+  [2/20] port locked - retry...
+  [3/20] port locked - retry...
+  [4/20] port locked - retry...
+  [5/20] port locked - retry...
+  [6/20] port locked - retry...
+  [7/20] port locked - retry...
+  [8/20] port locked - retry...
+  [9/20] port locked - retry...
+  [10/20] port locked - retry...
+  [11/20] port locked - retry...
+  [12/20] port locked - retry...
+  [13/20] port locked - retry...
+  [14/20] port locked - retry...
+  [15/20] port locked - retry...
+  [16/20] port locked - retry...
+  [17/20] port locked - retry...
+OPEN OK - listening 12s...
+  << PICO_ALIVE|Mega=N|LastRx=115s
+  << PICO_ALIVE|Mega=N|LastRx=120s
+  << PICO_ALIVE|Mega=N|LastRx=125s
+Sending CMD:DIAG:RUN...
+  << [S9->M] DIAG:RUN
+  << PICO_ALIVE|Mega=N|LastRx=130s
+Done (5 lines)

@@ -1,0 +1,92 @@
+---
+pid: 34992
+cwd: "D:\BuddyBot"
+command: "python -c \"
+import serial, time, sys
+
+def test_port(port, sends, listen_sec=4, label=''):
+    print(f'\\n===== {label} ({port}) =====')
+    try:
+        ser = serial.Serial(port, 115200, timeout=0.3)
+        time.sleep(0.5)
+        ser.reset_input_buffer()
+        for cmd in sends:
+            line = cmd if cmd.endswith('\\n') else cmd + '\\n'
+            print(f'  >> {line.strip()}')
+            ser.write(line.encode())
+            ser.flush()
+            time.sleep(0.4)
+        deadline = time.time() + listen_sec
+        lines = []
+        while time.time() < deadline:
+            raw = ser.readline()
+            if raw:
+                try:
+                    txt = raw.decode('utf-8', errors='replace').strip()
+                except:
+                    txt = repr(raw)
+                if txt:
+                    lines.append(txt)
+                    print(f'  << {txt}')
+        ser.close()
+        print(f'  ({len(lines)} lines received)')
+        return lines
+    except Exception as e:
+        print(f'  ERROR: {e}')
+        return []
+
+# Mega CP210x on COM9
+mega_lines = test_port('COM9', [
+    'DIAG:RUN',
+    'CMD:DIAG:RUN',
+    'MOTOR:S',
+    'PING',
+], listen_sec=5, label='MEGA (CP210x)')
+
+# Pico W USB on COM25
+pico_lines = test_port('COM25', [
+    'CMD:DIAG:RUN',
+    'CMD:MOTOR:S',
+    'PICO:STATUS',
+], listen_sec=5, label='PICO W (USB CDC)')
+
+# Passive listen on Pico for bridge-forwarded telemetry
+print('\\n===== PICO W passive listen (6s) =====')
+try:
+    ser = serial.Serial('COM25', 115200, timeout=0.3)
+    time.sleep(0.3)
+    ser.reset_input_buffer()
+    t0 = time.time()
+    n = 0
+    while time.time() - t0 < 6:
+        raw = ser.readline()
+        if raw:
+            txt = raw.decode('utf-8', errors='replace').strip()
+            if txt:
+                n += 1
+                print(f'  << {txt}')
+    ser.close()
+    print(f'  ({n} lines)')
+except Exception as e:
+    print(f'  ERROR: {e}')
+\""
+started_at: 2026-07-03T23:31:41.497Z
+running_for_ms: 18990000 
+---
+
+===== MEGA (CP210x) (COM9) =====
+  >> DIAG:RUN
+  >> CMD:DIAG:RUN
+  >> MOTOR:S
+  >> PING
+  (0 lines received)
+
+===== PICO W (USB CDC) (COM25) =====
+  >> CMD:DIAG:RUN
+  >> CMD:MOTOR:S
+  >> PICO:STATUS
+  << STATUS
+  (1 lines received)
+
+===== PICO W passive listen (6s) =====
+  (0 lines)

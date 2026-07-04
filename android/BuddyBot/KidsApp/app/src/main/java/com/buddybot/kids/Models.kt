@@ -7,7 +7,18 @@ enum class RobotMode {
 }
 
 enum class CommunicationMode {
-    USB_SERIAL, WEBSOCKET, DISCONNECTED
+    /** USB serial to Pico W bridge → Mega (primary path, V37). */
+    USB_SERIAL,
+    /** HTTP polling to Pico W web server (fallback when USB unavailable). */
+    HTTP_PICO_W,
+    /** No link. */
+    DISCONNECTED;
+
+    companion object {
+        /** Legacy alias for any external code that still references WEBSOCKET. */
+        @Deprecated("Use HTTP_PICO_W", ReplaceWith("HTTP_PICO_W"))
+        val WEBSOCKET: CommunicationMode get() = HTTP_PICO_W
+    }
 }
 
 /**
@@ -132,7 +143,30 @@ data class TelemetryData(
     val gpsLat: Double = 0.0,
     val gpsLon: Double = 0.0,
     val satellites: Int = 0,
-    val uptimeSec: Long = 0
+    val uptimeSec: Long = 0,
+    // ─── V37 additions ───────────────────────────────────────────────────
+    /** Compass heading in degrees, 0–360, from Mega HDG: telemetry. */
+    val headingDeg: Float = 0f,
+    /** Mega V37 emergency stop state — motors disabled when true. */
+    val estopActive: Boolean = false,
+    /** Head blower fan PWM level 0-255, from STATUS|FANS:HB:x,HE:x,BD:x */
+    val fanHeadBlow: Int = 0,
+    /** Head exhaust fan PWM level 0-255. */
+    val fanHeadExhaust: Int = 0,
+    /** Body fan PWM level 0-255. */
+    val fanBody: Int = 0,
+    /** Head temperature in °C — critical for S9 thermal management. */
+    val headTemp: Float = 0f,
+    /** Charging state: "NO", "MANUAL", "DOCK". */
+    val chargeState: String = "NO",
+    /** Auto-dock state: "IDLE", "SEARCHING", "APPROACHING", "DOCKED". */
+    val dockState: String = "IDLE",
+    /** UV light state — true when guardian sterilization mode active. */
+    val uvActive: Boolean = false,
+    /** S9 link handshake state as reported by Mega — "OK", "WAIT", "TIMEOUT". */
+    val s9LinkState: String = "WAIT",
+    /** Firmware version reported by Mega — sanity check against EXPECTED_FW_VERSION. */
+    val firmwareVersion: String = ""
 )
 
 data class EnvironmentAlert(val type: String, val message: String, val severity: Int)

@@ -113,7 +113,7 @@ bool touchReady() { return (millis() - lastTouchMs > 100); }
 struct Telem {
   int   gas=0; float temp=0,hum=0,volt=0,amps=0; int pct=0;
   long  dFront=-1,dRear=-1,dLeft=-1,dRight=-1;
-  bool  r3ok=false,espok=false,s9ok=false,estop=false,autoM=false;
+  bool  megaUartOk=false,wifiOk=false,s9ok=false,estop=false,autoM=false;
   bool  irFront=false,irRear=false,pir=false,tilt=false;
   char  fw[16]=""; char mode[16]="NORMAL";
   bool  autodock=false; char dockSt[10]="IDLE";
@@ -135,6 +135,7 @@ const char* brainLabels[6]={"TEMP","GAS","VOLTAGE","ULTRASONICS","STATUS","MOTOR
 #define MEGA_USB_ECHO 1
 char megaBuf[MEGA_BUF_LEN]; uint16_t megaBufLen=0;
 unsigned long lastMegaRx=0;
+unsigned long lastS9Rx=0;
 unsigned long lastPingTx=0;
 uint8_t pingSeq=0;
 bool megaLinked=false;
@@ -310,8 +311,12 @@ void parseUS(const char* s){
   markTelemDirty(); updateShared();
 }
 void parseStatus(const char* s){
-  const char* tags[]={"R3:","ESP:","S9:","ESTOP:","AUTO:"};
-  bool* vals[]={&T.r3ok,&T.espok,&T.s9ok,&T.estop,&T.autoM};
+  // V37 STATUS| — no R3/ESP fields; motors are on-board TB6612 on the Mega.
+  T.megaUartOk = megaLinked;
+  T.wifiOk     = wifiOK;
+  const char* tags[]={"S9:","ESTOP:","AUTO:"};
+  bool* vals[]={&T.s9ok,&T.estop,&T.autoM};
+  char trueChars[]={'O','Y','O'};
   T.autodock=(strstr(s,"ADOCK:ON")!=NULL);
   const char* ds=strstr(s,"DOCKST:");
   if(ds){
@@ -337,8 +342,7 @@ void parseStatus(const char* s){
     char* nl2=strchr(nfw,'|'); if(nl2) *nl2=0;
     if(strncmp(nfw,T.fw,15)) strncpy(T.fw,nfw,16);
   }
-  char trueChars[]={'O','O','O','Y','O'};
-  for(int i=0;i<5;i++){
+  for(int i=0;i<3;i++){
     const char* pp=strstr(s,tags[i]);
     if(pp) *(vals[i])=(*(pp+strlen(tags[i]))==trueChars[i]);
   }
@@ -376,8 +380,10 @@ void parseLed(const char* s){
   markTelemDirty(); updateShared();
 }
 void handleMegaLine(const char* line){
-  if(!megaLinked){megaLinked=true;markTelemDirty();dbgPush("[PICO] Mega link established");}
-  lastMegaRx=millis(); T.espok=(bool)wifiOK;
+  if(!megaLinked){megaLinked=true;markTelemDirty();dbgPush("[PICO] Mega UART link OK");}
+  lastMegaRx=millis();
+  T.megaUartOk=true;
+  T.wifiOk=(bool)wifiOK;
 #if MEGA_USB_ECHO
   Serial.print(F("[RX] ")); Serial.println(line);
 #endif
@@ -423,13 +429,17 @@ void onMegaLine(const String& line){
 }
 
 void onS9Line(const String& line){
-  // PICO:-prefixed messages are for us only (bridge never forwards them).
-  // Add local handlers here as needed. For now, just log to dbg ring buffer.
+  // Any USB traffic from the S9 means the phone link is alive.
+  T.s9ok = true;
+  lastS9Rx = millis();
+  updateShared();
+
   if (line.startsWith("PICO:")) {
     dbgPush(line.c_str() + 5);
     // Future: PICO:BEEP:..., PICO:DISPLAY:..., PICO:AUDIO:... etc.
+    return;
   }
-  // Everything else has already been forwarded to Mega by the bridge.
+  // Non-PICO: lines are forwarded to Mega by bridgeLoop() before this callback.
 }
 
 void waitMs(unsigned ms){
@@ -883,8 +893,8 @@ void drawSensBrain(bool fullLayout=true) {
   }
   if(brainToggle[4]) {
     uint16_t sc=T.estop?C_RED:C_GREEN;
-    snprintf(buf,32,"R3:%s ESP:%s S9:%s AUTO:%s",
-      T.r3ok?"Y":"N", T.espok?"Y":"N", T.s9ok?"Y":"N", T.autoM?"ON":"OFF");
+    snprintf(buf,32,"MEGA:%s WIFI:%s S9:%s AUTO:%s",
+      T.megaUartOk?"Y":"N", T.wifiOk?"Y":"N", T.s9ok?"Y":"N", T.autoM?"ON":"OFF");
     statPill(8,y,SCR_W-16,buf,"",sc); y+=28;
   }
   if(brainToggle[5]) {
@@ -994,8 +1004,8 @@ void refreshMainBody(){
 
 void refreshCommsBody(){
   int y=84;
-  const char* labels[]={"MEGA LINK","R3 MOTOR","WIFI (PICO W)","S9 ANDROID"};
-  bool states[]={megaLinked,T.r3ok,T.espok,T.s9ok};
+  const char* labels[]={"MEGA UART","MEGA MOTORS","WIFI (PICO W)","S9 ANDROID"};
+  bool states[]={megaLinked, megaLinked && !T.estop, T.wifiOk, T.s9ok};
   uint16_t cols[]={C_CYAN,C_GREEN,C_ORANGE,C_PURPLE};
   for(int i=0;i<4;i++){
     bool ok=states[i]; uint16_t c=ok?cols[i]:C_DGRAY;
@@ -1043,11 +1053,12 @@ void drawComms() {
   glowText(SCR_W/2-30,55,"COMMS",C_PURPLE,2);
   hRule(72,C_PURPLE);
   char buf[40]; int y=84;
-  const char* labels[]={"MEGA LINK","R3 MOTOR","WIFI (PICO W)","S9 ANDROID"};
-  bool* states[]={&megaLinked,&T.r3ok,&T.espok,&T.s9ok};
+  const char* labels[]={"MEGA UART","MEGA MOTORS","WIFI (PICO W)","S9 ANDROID"};
+  bool motorOk = megaLinked && !T.estop;
+  bool states[]={megaLinked, motorOk, T.wifiOk, T.s9ok};
   uint16_t cols[]={C_CYAN,C_GREEN,C_ORANGE,C_PURPLE};
   for(int i=0;i<4;i++){
-    bool ok=*(states[i]);
+    bool ok=states[i];
     uint16_t c=ok?cols[i]:C_DGRAY;
     neonBox(8,y,SCR_W-16,76,c,C_SURF);
     tft.fillCircle(24,y+22,8,ok?c:C_DGRAY);
@@ -1072,7 +1083,7 @@ void drawSettings() {
   glowText(SCR_W/2-36,55,"SETTINGS",C_ORANGE,2);
   hRule(72,C_ORANGE);
   tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG);
-  tft.setCursor(8,84); tft.print("BuddyBot PicoW Dash v1.0");
+  tft.setCursor(8,84); tft.print("BuddyBot PicoW Dash v1.1");
   tft.setCursor(8,98); tft.print("Mega UART: GP4/GP5 @ 115200 (UART1)");
   tft.setCursor(8,112); tft.print("Touch: FT6336U I2C @ 400kHz");
   tft.setCursor(8,126); tft.print("Display: ST7796S SPI 320x480");
@@ -1108,7 +1119,7 @@ void handleSettingsTouch(TouchPt& t) {
 }
 
 // LIGHTS CONTROL SCREEN
-void sendLed(const char* a){ MEGA_SERIAL.print("CMD:LED:"); MEGA_SERIAL.println(a); }
+void sendLed(const char* a){ MEGA_SERIAL.print("LED:"); MEGA_SERIAL.println(a); }
 bool isLedMode(const char* m){ return strcmp((const char*)T.ledMode,m)==0; }
 
 void litCell(int x,int y,int w,int h,const char* label,uint16_t col,bool active){
@@ -2069,12 +2080,10 @@ void handleTouch(TouchPt& t) {
 }
 
 void setup() {
-  Serial.begin(115200);
   delay(200);
-  Serial.println("[PICO] BuddyBot Dash booting...");
-  // V1.1: bridgeSetup() owns Serial2 init (GP4/GP5 @ 115200).
-  // Also enables Mega↔S9 line forwarding via bridgeLoop().
+  // bridgeSetup() initialises USB CDC (S9) + Serial2 UART1 (Mega GP4/GP5).
   bridgeSetup();
+  Serial.println("[PICO] BuddyBot Dash booting...");
   tft.init();
   tft.setRotation(ROTATION);
   tft.invertDisplay(false);
@@ -2133,6 +2142,16 @@ bool handleGameBack(const TouchPt& t) {
 void loop() {
   sndUpdate();
   bridgeLoop();               // V1.1: S9↔Mega bidirectional line forwarding
+  // USB heartbeat — visible on PC serial monitor to confirm Pico firmware is alive
+  static unsigned long lastUsbHb = 0;
+  if (millis() - lastUsbHb > 5000) {
+    lastUsbHb = millis();
+    Serial.print(F("PICO_ALIVE|Mega="));
+    Serial.print(megaLinked ? 'Y' : 'N');
+    Serial.print(F("|LastRx="));
+    Serial.print((millis() - lastMegaRx) / 1000);
+    Serial.println('s');
+  }
   sendMegaHeartbeat();
   if (wifiIpReady) {
     wifiIpReady = false;
@@ -2141,12 +2160,16 @@ void loop() {
   }
   if (webCmdReady) {
     char wc[64]; strncpy(wc,(char*)webCmd,63); wc[63]=0; webCmdReady=false;
-    picoToMega(String(F("CMD:")) + wc);
+    picoToMega(String(wc));
   }
   bridgeLoop();
   if (megaLinked && millis()-lastMegaRx > 12000) {
     megaLinked = false;
+    T.megaUartOk = false;
     if (!isGameScreen()) markDirty();
+  }
+  if (millis() - lastS9Rx > 30000) {
+    T.s9ok = false;
   }
   if (isGameScreen()) {
     if      (curScreen==GAME_MARIO)      updateMario();
@@ -2207,7 +2230,7 @@ volatile uint32_t sharedSeq = 0;
 volatile int   sh_gas=0,  sh_pct=0;
 volatile float sh_temp=0,sh_hum=0,sh_volt=0,sh_amps=0;
 volatile long  sh_dFront=-1,sh_dRear=-1,sh_dLeft=-1,sh_dRight=-1;
-volatile bool  sh_estop=false,sh_autoM=false,sh_r3ok=false,sh_s9ok=false;
+volatile bool  sh_estop=false,sh_autoM=false,sh_megaOk=false,sh_s9ok=false;
 volatile bool  sh_pir=false,sh_irFront=false,sh_irRear=false,sh_tilt=false;
 volatile char  sh_mode[16]="NORMAL";
 volatile char  sh_fw[16]="";
@@ -2223,7 +2246,7 @@ void updateShared(){
   sh_gas=T.gas; sh_pct=T.pct; sh_temp=T.temp; sh_hum=T.hum;
   sh_volt=T.volt; sh_amps=T.amps;
   sh_dFront=T.dFront; sh_dRear=T.dRear; sh_dLeft=T.dLeft; sh_dRight=T.dRight;
-  sh_estop=T.estop; sh_autoM=T.autoM; sh_r3ok=T.r3ok; sh_s9ok=T.s9ok;
+  sh_estop=T.estop; sh_autoM=T.autoM; sh_megaOk=T.megaUartOk; sh_s9ok=T.s9ok;
   sh_pir=T.pir; sh_irFront=T.irFront; sh_irRear=T.irRear; sh_tilt=T.tilt;
   strncpy((char*)sh_mode,T.mode,15); ((char*)sh_mode)[15]=0;
   strncpy((char*)sh_fw,  T.fw,  15); ((char*)sh_fw  )[15]=0;
@@ -2391,7 +2414,7 @@ void serveStatus(WiFiClient& cl) {
     "\"temp\":\"%.1f\",\"gas\":\"%d\","
     "\"wip\":\"%s\",\"fw\":\"%s\","
     "\"led\":\"%s\",\"white\":\"%s\",\"lbr\":%d}",
-    sh_estop?"ESTOP":sh_autoM?"AUTO":sh_r3ok?"IDLE":"WAIT",
+    sh_estop?"ESTOP":sh_autoM?"AUTO":sh_megaOk?"IDLE":"WAIT",
     sh_volt,sh_pct,batTierStr(),(char*)sh_mode,
     sh_dFront<0?0L:sh_dFront, sh_dRear<0?0L:sh_dRear,
     sh_temp,sh_gas,ipBuf,(char*)sh_fw,

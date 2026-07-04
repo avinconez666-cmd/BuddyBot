@@ -7,7 +7,7 @@ class SecurityGatekeeper(
     private val MASTER_PIN = "1234"
 
     fun processCommand(input: String) {
-        // Expected format from Mega/R4: "REQ_MODE_CHANGE:BODYGUARD:1234"
+        // Expected format from Mega V37: "REQ_MODE_CHANGE:BODYGUARD:1234"
         val parts = input.split(":")
         if (parts.size == 3 && parts[0] == "REQ_MODE_CHANGE") {
             val targetModeStr = parts[1]
