@@ -1,4 +1,4 @@
-/*
+﻿/*
  * ═══════════════════════════════════════════════════════════════════════
  *  BuddyBot — Head Temperature Sensor Pin Finder
  * ═══════════════════════════════════════════════════════════════════════
@@ -134,8 +134,15 @@ void loop() {
     else if (spread <= 30)  snprintf(stableStr, sizeof(stableStr), "noisy");
     else                    snprintf(stableStr, sizeof(stableStr), "float?");
 
-    if (temp <= -999.0f)    snprintf(tempStr, sizeof(tempStr), "  ---   ");
-    else                    snprintf(tempStr, sizeof(tempStr), "%6.1f  ", temp);
+    // NOTE: AVR snprintf does NOT support %f without special linker flags.
+    // Use dtostrf() — the standard AVR float-to-string function.
+    if (temp <= -999.0f) {
+      strncpy(tempStr, "   ---  ", sizeof(tempStr));
+    } else {
+      char tmp[10];
+      dtostrf(temp, 6, 1, tmp);
+      snprintf(tempStr, sizeof(tempStr), "%s", tmp);
+    }
 
     if      (avg <= 5)      snprintf(assessStr, sizeof(assessStr), "OPEN CIRCUIT");
     else if (avg >= 1018)   snprintf(assessStr, sizeof(assessStr), "SHORT TO GND");

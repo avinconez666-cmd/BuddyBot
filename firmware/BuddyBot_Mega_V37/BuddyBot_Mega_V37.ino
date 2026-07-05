@@ -132,7 +132,7 @@ const float CURRENT_VREF        = 5.0f;
 // ── Analog sensors ───────────────────────────────────────────────────────────
 #define VOLTAGE_SENSOR    A9
 #define TEMP_SENSOR_1     A7
-#define HEAD_TEMP_SENSOR  A13
+#define HEAD_TEMP_SENSOR  A8    // confirmed via HeadTempPinFinder: 41.8°C stable ±11 counts
 #define LDR_AO            A10
 #define SOUND_AO          A12
 #define GAS_AO            A5    // MQ2 smoke sensor -- analog output only
