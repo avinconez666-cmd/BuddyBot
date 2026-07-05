@@ -449,6 +449,8 @@ long getDist(int trig, int echo) {
 }
 
 float readThermistor(int pin) {
+  // Generic NTC: 10kΩ nominal, B=3950, 10kΩ pull-up to 5V.
+  // Used for the head temperature sensor (bare NTC with external 10kΩ pull-up).
   int raw = analogRead(pin);
   if (raw <= 0) return 25.0f;
   float v = (raw / 1023.0f) * 5.0f;
@@ -456,6 +458,25 @@ float readThermistor(int pin) {
   float s = logf(r / 10000.0f) / 3950.0f + 1.0f / 298.15f;
   float c = (1.0f / s) - 273.15f;
   return (c < -50 || c > 120) ? 25.0f : c;
+}
+
+float readKS0033Temp(int pin) {
+  // Keyestudio KS0033 Analog Temperature Sensor.
+  // Module has a 4.7kΩ onboard pull-up to 5V (NOT 10kΩ).
+  // NTC: 10kΩ nominal at 25°C, B=3950.
+  // Formula from official KS0033 datasheet:
+  //   r = (5 - V) / V * 4700
+  //   T = 1 / (ln(r/10000)/3950 + 1/298.15) - 273.15
+  // Expected raw at room temperature (~25°C): ~695  (V_ADC ≈ 3.40V)
+  // If reading is far below this, check GND/SIG wiring on the module.
+  int raw = analogRead(pin);
+  if (raw <= 0) return 25.0f;
+  float v = (raw / 1023.0f) * 5.0f;
+  float r = (5.0f - v) / v * 4700.0f;  // 4.7kΩ onboard pull-up
+  if (r <= 0.0f) return 25.0f;
+  float s = logf(r / 10000.0f) / 3950.0f + 1.0f / 298.15f;
+  float c = (1.0f / s) - 273.15f;
+  return (c < -55.0f || c > 315.0f) ? 25.0f : c;  // clamp to KS0033 rated range
 }
 
 float readHeadTemp() {
@@ -620,7 +641,7 @@ void readAllSensors() {
 
   int rawV = analogRead(VOLTAGE_SENSOR);
   battVolt = (rawV / 1023.0f) * 5.0f * BAT_VDIV;
-  battTemp = readThermistor(TEMP_SENSOR_1);
+  battTemp = readKS0033Temp(TEMP_SENSOR_1);   // KS0033: 4.7kΩ pullup, not 10kΩ
   battPct  = constrain(((battVolt - BAT_MIN) / (BAT_MAX - BAT_MIN)) * 100.0f, 0.0f, 100.0f);
   headTemp = readHeadTemp();
 
