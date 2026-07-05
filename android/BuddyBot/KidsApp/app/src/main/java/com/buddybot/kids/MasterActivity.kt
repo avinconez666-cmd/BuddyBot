@@ -36,7 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.felhr.usbserial.UsbSerialDevice
+import com.hoho.android.usbserial.driver.UsbSerialPort
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,7 +64,7 @@ class MasterActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var mediaPlayer: MediaPlayer? = null
     private var tts: TextToSpeech? = null
     private var speechRecognizer: SpeechRecognizer? = null
-    private var usbSerial: UsbSerialDevice? = null
+    private var usbSerial: UsbSerialPort? = null
     private var webSocket: WebSocket? = null
     private val httpClient = OkHttpClient.Builder().build()
     private var wakeLock: PowerManager.WakeLock? = null

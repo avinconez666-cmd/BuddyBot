@@ -79,7 +79,8 @@ android {
 dependencies {
     // ── AndroidX Core ────────────────────────────────────────
     implementation 'androidx.core:core-ktx:1.12.0'
-    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+    // security-crypto alpha06 crashes on Samsung TEE — using plain SharedPreferences instead
+    // implementation 'androidx.security:security-crypto:1.1.0-alpha06'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
     implementation 'androidx.activity:activity-compose:1.8.2'
 
@@ -117,7 +118,8 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
     // ── Arduino USB Serial ───────────────────────────────────
-    implementation 'com.github.felHR85:UsbSerial:6.1.0'
+    // ── USB Serial — mik3y (explicit Pico W CDC ACM, actively maintained) ──
+    implementation 'com.github.mik3y:usb-serial-for-android:3.7.0'
 
     // MJPEG streaming server
     implementation 'org.nanohttpd:nanohttpd:2.3.1'

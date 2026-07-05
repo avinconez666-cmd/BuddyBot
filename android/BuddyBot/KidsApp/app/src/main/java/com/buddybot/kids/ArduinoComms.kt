@@ -1,4 +1,4 @@
-﻿package com.buddybot.kids
+package com.buddybot.kids
 
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -11,444 +11,300 @@ import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
-import com.felhr.usbserial.UsbSerialDevice
-import com.felhr.usbserial.UsbSerialInterface
+import com.hoho.android.usbserial.driver.CdcAcmSerialDriver
+import com.hoho.android.usbserial.driver.Ch34xSerialDriver
+import com.hoho.android.usbserial.driver.Cp21xxSerialDriver
+import com.hoho.android.usbserial.driver.FtdiSerialDriver
+import com.hoho.android.usbserial.driver.ProbeTable
+import com.hoho.android.usbserial.driver.ProlificSerialDriver
+import com.hoho.android.usbserial.driver.UsbSerialDriver
+import com.hoho.android.usbserial.driver.UsbSerialPort
+import com.hoho.android.usbserial.driver.UsbSerialProber
+import com.hoho.android.usbserial.util.SerialInputOutputManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import okhttp3.*
-import java.io.IOException
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
-
 class ArduinoComms(private val context: Context, private val scope: CoroutineScope) {
 
     companion object {
         private const val TAG = "ArduinoComms"
-        private const val ACTION_USB_PERMISSION_ARDUINO = "com.buddybot.USB_PERMISSION_ARDUINO"
-        private const val ACTION_USB_PERMISSION_WEBCAM  = "com.buddybot.USB_PERMISSION_WEBCAM"
-        // Serial health: no data in 15 s = reconnect
-        private const val SERIAL_SILENCE_THRESHOLD_MS = 15_000L
-        private const val SERIAL_HEALTH_CHECK_INTERVAL_MS = 10_000L
-
-        // V37: S9 connects to Pico W USB CDC bridge (not Mega CH340 directly)
-        private const val VID_RASPBERRY_PI = 0x2E8A   // Pico / Pico W
-        private const val VID_ARDUINO      = 0x2341
-        private const val VID_ARDUINO_ORG  = 0x2A03
-        private const val VID_CH340        = 0x1A86
-        private const val VID_CP210X       = 0x10C4
-        private const val PID_CP210X       = 0xEA60
-        private const val VID_FTDI         = 0x0403
-        private const val PID_FTDI         = 0x6001
-        private const val VID_PROLIFIC     = 0x067B
-        private const val PID_PROLIFIC     = 0x2303
+        private const val ACTION_USB_PERM = "com.buddybot.USB_PERMISSION_ARDUINO"
+        private const val ACTION_CAM_PERM = "com.buddybot.USB_PERMISSION_WEBCAM"
+        private const val VID_PICO = 0x2E8A
+        private val PICO_PIDS = listOf(0x0009, 0x000A, 0x000B, 0x000C, 0x000F, 0xFEED)
+        private const val BAUD = BuddyBotConfig.SERIAL_BAUD_RATE
+        private const val READ_TIMEOUT  = 200
+        private const val WRITE_TIMEOUT = 500
+        private const val HEALTH_MS   = 10_000L
+        private const val SILENCE_MS  = 15_000L
     }
-
-    private var usbSerial: UsbSerialDevice? = null
-    private var httpIp: String = ""
-
-    // ── Serial write queue — prevents byte loss under burst commands ─────
-    // Capacity 32: enough for a full guardian approach sequence.
-    // DROP_OLDEST on overflow so fresh commands (STOP, ESTOP) always get through.
-    private val writeQueue = Channel<String>(
-        capacity = 32,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
-    private var writeQueueJob: Job? = null
-
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .build()
 
     val communicationMode = MutableStateFlow(CommunicationMode.DISCONNECTED)
     var onMessageReceived: ((String) -> Unit)? = null
-    /** Fired when Android shows the USB permission dialog for the serial bridge. */
     var onUsbPermissionRequested: (() -> Unit)? = null
-    /** Fired when the user denies USB permission for the serial bridge. */
     var onUsbPermissionDenied: (() -> Unit)? = null
 
-    private val serialBuffer = StringBuilder()
+    @Volatile private var serialPort: UsbSerialPort? = null
+    private var ioManager: SerialInputOutputManager? = null
+    private val ioExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "usb-serial-io").also { it.isDaemon = true }
+    }
+    private var ioFuture: Future<*>? = null
+    private val lineBuf = StringBuilder(256)
 
-    // HTTP retry backoff
-    private var httpRetryCount = 0
+    private val writeQueue = Channel<String>(32, BufferOverflow.DROP_OLDEST)
+    private var writeJob: Job? = null
+
+    private var httpIp = ""
+    private var httpRetry = 0
     private var httpRetryJob: Job? = null
-    private val MAX_HTTP_RETRIES = 10
-    private val INITIAL_RETRY_DELAY_MS = 1000L
-    private val MAX_RETRY_DELAY_MS = 30_000L
-
     private var httpPollJob: Job? = null
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS).build()
 
-    // Serial health
-    @Volatile private var lastSerialRxMs = System.currentTimeMillis()
-    private var serialHealthJob: Job? = null
+    @Volatile private var lastRxMs = System.currentTimeMillis()
+    private var healthJob: Job? = null
+    private var onCamPerm: ((UsbDevice) -> Unit)? = null
 
-    // Webcam callback
-    private var onUsbPermissionForWebcam: ((UsbDevice) -> Unit)? = null
+    // Custom prober: adds Pico W VID/PIDs that mik3y may not include by default
+    private val prober: UsbSerialProber by lazy {
+        val t = ProbeTable()
+        PICO_PIDS.forEach { pid -> t.addProduct(VID_PICO, pid, CdcAcmSerialDriver::class.java) }
+        t.addProduct(0x1A86, 0x7523, Ch34xSerialDriver::class.java)
+        t.addProduct(0x1A86, 0x55D3, Ch34xSerialDriver::class.java)
+        t.addProduct(0x10C4, 0xEA60, Cp21xxSerialDriver::class.java)
+        t.addProduct(0x0403, 0x6001, FtdiSerialDriver::class.java)
+        t.addProduct(0x067B, 0x2303, ProlificSerialDriver::class.java)
+        t.addProduct(0x2341, 0x0042, CdcAcmSerialDriver::class.java)
+        UsbSerialProber(t)
+    }
 
-    // ────────────────────────────────────────────────────────────────────────
-    //  BROADCAST RECEIVERS
-    // ────────────────────────────────────────────────────────────────────────
     private val usbReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
+        override fun onReceive(ctx: Context, intent: Intent) {
             when (intent.action) {
-                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    val device: UsbDevice? = IntentCompat.getParcelableExtra(
-                        intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-                    device?.let {
-                        if (isSerialBridgeDevice(it)) {
-                            log("Serial bridge detached")
-                            communicationMode.value = CommunicationMode.DISCONNECTED
-                            serialHealthJob?.cancel()
-                            close()
-                        }
-                    }
+                ACTION_USB_PERM -> {
+                    val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+                    val dev: UsbDevice? = IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    log("USB permission: granted=$granted dev=${dev?.deviceName}")
+                    if (granted && dev != null) openDevice(dev) else onUsbPermissionDenied?.invoke()
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                    val device: UsbDevice? = IntentCompat.getParcelableExtra(
-                        intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-                    device?.let {
-                        if (isSerialBridgeDevice(it) &&
-                            communicationMode.value == CommunicationMode.DISCONNECTED) {
-                            log("Serial bridge reattached — auto-reconnecting…")
-                            initializeUSBSerial()
-                        }
-                    }
+                    val dev: UsbDevice? = IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    if (dev != null && isSerialDevice(dev) && communicationMode.value == CommunicationMode.DISCONNECTED) initializeUSBSerial()
                 }
-                ACTION_USB_PERMISSION_ARDUINO -> {
-                    synchronized(this) {
-                        val device: UsbDevice? = IntentCompat.getParcelableExtra(
-                            intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-                        val granted = intent.getBooleanExtra(
-                            UsbManager.EXTRA_PERMISSION_GRANTED, false)
-                        log("Serial USB permission result: $granted for ${device?.deviceName}")
-                        if (granted && device != null) {
-                            connectToArduino(device)
-                        } else {
-                            onUsbPermissionDenied?.invoke()
-                        }
-                    }
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                    val dev: UsbDevice? = IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    if (dev != null && isSerialDevice(dev)) { log("USB detached"); closeSerial() }
                 }
             }
         }
     }
 
-    private val webcamReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (ACTION_USB_PERMISSION_WEBCAM == intent.action) {
-                synchronized(this) {
-                    val device: UsbDevice? = IntentCompat.getParcelableExtra(
-                        intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-                    if (intent.getBooleanExtra(
-                            UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                        device?.let { onUsbPermissionForWebcam?.invoke(it) }
-                    }
-                }
+    private val camReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            if (intent.action == ACTION_CAM_PERM) {
+                val dev: UsbDevice? = IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) dev?.let { onCamPerm?.invoke(it) }
             }
         }
     }
 
     init {
-        val filter = IntentFilter().apply {
-            addAction(ACTION_USB_PERMISSION_ARDUINO)
-            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        val f = IntentFilter().apply {
+            addAction(ACTION_USB_PERM)
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
-        ContextCompat.registerReceiver(
-            context, usbReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-
-        val webcamFilter = IntentFilter(ACTION_USB_PERMISSION_WEBCAM)
-        ContextCompat.registerReceiver(
-            context, webcamReceiver, webcamFilter, ContextCompat.RECEIVER_EXPORTED)
+        ContextCompat.registerReceiver(context, usbReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED)
+        ContextCompat.registerReceiver(context, camReceiver, IntentFilter(ACTION_CAM_PERM), ContextCompat.RECEIVER_EXPORTED)
+        log("ArduinoComms init — mik3y USB serial")
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    //  DEVICE DETECTION — Pico W USB bridge (V37) + legacy Mega USB adapters
-    // ────────────────────────────────────────────────────────────────────────
-    private fun isUvcCamera(device: UsbDevice): Boolean {
-        return device.deviceClass == 14 ||
-            (device.deviceClass == 239 && device.deviceSubclass == 2) ||
-            device.vendorId == 0x046D
-    }
-
-    private fun serialBridgePriority(device: UsbDevice): Int = when (device.vendorId) {
-        VID_RASPBERRY_PI -> 100   // Pico W — primary path in V37 firmware
-        VID_CH340        -> 50    // Legacy direct Mega USB
-        VID_ARDUINO      -> 40
-        VID_ARDUINO_ORG  -> 40
-        else             -> 10
-    }
-
-    fun isSerialBridgeDevice(device: UsbDevice): Boolean {
-        if (isUvcCamera(device)) return false
-        val vid = device.vendorId
-        val pid = device.productId
-        if (when {
-            vid == VID_RASPBERRY_PI -> true
-            vid == VID_ARDUINO      -> true
-            vid == VID_ARDUINO_ORG  -> true
-            vid == VID_CH340        -> true
-            vid == VID_CP210X && pid == PID_CP210X -> true
-            vid == VID_FTDI && pid == PID_FTDI     -> true
-            vid == VID_PROLIFIC && pid == PID_PROLIFIC -> true
-            else -> false
-        }) return true
-
-        // Pico W CDC ACM can appear as a generic communications interface
+    fun isSerialDevice(device: UsbDevice): Boolean {
+        if (isCamera(device)) return false
+        val vid = device.vendorId; val pid = device.productId
+        if (vid == VID_PICO) return true
+        if (vid == 0x2341 || vid == 0x2A03) return true
+        if (vid == 0x1A86) return true
+        if (vid == 0x10C4 && pid == 0xEA60) return true
+        if (vid == 0x0403 && pid == 0x6001) return true
+        if (vid == 0x067B && pid == 0x2303) return true
         for (i in 0 until device.interfaceCount) {
             val iface = device.getInterface(i)
-            if (iface.interfaceClass == 2 && iface.interfaceSubclass == 2) {
-                return true
-            }
+            if (iface.interfaceClass == 2 && iface.interfaceSubclass == 2) return true
         }
         return false
     }
 
-    /** @deprecated Use [isSerialBridgeDevice]; kept for callers that still use the old name. */
-    fun isArduino(device: UsbDevice): Boolean = isSerialBridgeDevice(device)
+    fun isArduino(device: UsbDevice): Boolean = isSerialDevice(device)
 
-    private fun normalizeIncomingLine(raw: String): String {
-        var msg = raw.trim()
-        val crcIdx = msg.indexOf("|CRC:")
-        if (crcIdx > 0) msg = msg.substring(0, crcIdx)
-        if (msg.endsWith("|END")) msg = msg.removeSuffix("|END")
-        return msg.trim()
-    }
-
-    // ────────────────────────────────────────────────────────────────────────
-    //  INITIALIZATION
-    // ────────────────────────────────────────────────────────────────────────
-    fun initialize(buddybotIP: String) {
-        log("Initializing communications (IP=$buddybotIP)")
+    private fun isCamera(d: UsbDevice): Boolean =
+        d.deviceClass == 14 || (d.deviceClass == 239 && d.deviceSubclass == 2) || d.vendorId == 0x046D
+    fun initialize(ip: String) {
+        log("initialize(ip=$ip)")
         initializeUSBSerial()
-
         scope.launch {
-            // First retry at 3 s if USB not found immediately
-            delay(3000)
+            delay(3_000); if (communicationMode.value == CommunicationMode.DISCONNECTED) initializeUSBSerial()
+            delay(3_000)
             if (communicationMode.value == CommunicationMode.DISCONNECTED) {
-                log("USB serial not found after 3s — retry #1")
                 initializeUSBSerial()
-            }
-            // Second retry at 6 s
-            delay(3000)
-            if (communicationMode.value == CommunicationMode.DISCONNECTED) {
-                log("USB serial not found after 6s — retry #2")
-                initializeUSBSerial()
-                // Try HTTP fallback if IP is configured
-                delay(2000)
-                if (communicationMode.value == CommunicationMode.DISCONNECTED &&
-                    buddybotIP.isNotEmpty()) {
-                    log("Starting HTTP fallback to $buddybotIP")
-                    initializeHttp(buddybotIP)
+                delay(2_000)
+                if (communicationMode.value == CommunicationMode.DISCONNECTED && ip.isNotEmpty()) {
+                    log("USB not found — HTTP fallback to $ip"); initializeHttp(ip)
                 }
             }
         }
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    //  USB SERIAL
-    // ────────────────────────────────────────────────────────────────────────
     fun initializeUSBSerial() {
-        try {
-            val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-            val deviceList = usbManager.deviceList
-            log("Scanning ${deviceList.size} USB device(s) for serial bridge…")
-
-            deviceList.values.forEach { d ->
-                log("  USB: VID=0x${d.vendorId.toString(16)} PID=0x${d.productId.toString(16)} " +
-                    "class=${d.deviceClass} name=${d.deviceName}")
-            }
-
-            val bridgeDevice = deviceList.values
-                .filter { isSerialBridgeDevice(it) }
-                .maxByOrNull { serialBridgePriority(it) }
-
-            if (bridgeDevice == null) {
-                log("No serial bridge found (Pico W / Mega USB) — will retry")
-                return
-            }
-
-            val bridgeLabel = when (bridgeDevice.vendorId) {
-                VID_RASPBERRY_PI -> "Pico W"
-                VID_CH340        -> "Mega CH340"
-                else             -> "Serial bridge"
-            }
-            log("Found $bridgeLabel: ${bridgeDevice.deviceName} " +
-                "(0x${bridgeDevice.vendorId.toString(16)}:" +
-                "0x${bridgeDevice.productId.toString(16)})")
-
-            if (!usbManager.hasPermission(bridgeDevice)) {
-                log("Requesting USB permission for $bridgeLabel…")
-                onUsbPermissionRequested?.invoke()
-                val permIntent = PendingIntent.getBroadcast(
-                    context, 0,
-                    Intent(ACTION_USB_PERMISSION_ARDUINO).setPackage(context.packageName),
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                        PendingIntent.FLAG_MUTABLE else 0)
-                usbManager.requestPermission(bridgeDevice, permIntent)
-                return
-            }
-            connectToArduino(bridgeDevice)
-        } catch (e: Exception) {
-            Log.e(TAG, "USB init error", e)
+        val mgr = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val devList = mgr.deviceList
+        log("USB scan: ${devList.size} device(s)")
+        devList.values.forEach { d ->
+            log("  VID=0x${d.vendorId.toString(16).uppercase()} PID=0x${d.productId.toString(16).uppercase()} class=${d.deviceClass} name=${d.deviceName}")
         }
+        val drivers = mutableListOf<UsbSerialDriver>()
+        devList.values.forEach { d ->
+            if (isCamera(d)) return@forEach
+            (prober.probeDevice(d) ?: UsbSerialProber.getDefaultProber().probeDevice(d))?.let { drivers.add(it) }
+        }
+        if (drivers.isEmpty()) { log("No serial device found"); return }
+        val driver = drivers.maxByOrNull { when (it.device.vendorId) { VID_PICO -> 100; 0x2341, 0x2A03 -> 50; 0x1A86 -> 40; else -> 10 } }!!
+        val device = driver.device
+        log("Selected: VID=0x${device.vendorId.toString(16).uppercase()} PID=0x${device.productId.toString(16).uppercase()} ports=${driver.ports.size}")
+        if (!mgr.hasPermission(device)) {
+            log("Requesting USB permission")
+            onUsbPermissionRequested?.invoke()
+            val pi = PendingIntent.getBroadcast(context, 0, Intent(ACTION_USB_PERM).setPackage(context.packageName),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+            mgr.requestPermission(device, pi); return
+        }
+        openDevice(device)
     }
 
-    private fun connectToArduino(device: UsbDevice) {
-        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                log("Connecting to Arduino on background thread…")
-                val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-                val connection = usbManager.openDevice(device) ?: run {
-                    log("ERROR: Could not open USB device connection")
-                    return@launch
-                }
-
-                val serial = UsbSerialDevice.createUsbSerialDevice(device, connection)
-                if (serial == null) {
-                    log("ERROR: No serial driver for " +
-                        "VID=0x${device.vendorId.toString(16)} " +
-                        "PID=0x${device.productId.toString(16)}")
-                    connection.close()
-                    return@launch
-                }
-                usbSerial = serial
-
-                if (serial.open()) {
-                    serial.setBaudRate(BuddyBotConfig.SERIAL_BAUD_RATE)
-                    serial.setDataBits(UsbSerialInterface.DATA_BITS_8)
-                    serial.setStopBits(UsbSerialInterface.STOP_BITS_1)
-                    serial.setParity(UsbSerialInterface.PARITY_NONE)
-                    serial.setFlowControl(UsbSerialInterface.FLOW_CONTROL_OFF)
-                    // Pico W USB CDC needs DTR/RTS asserted for reliable line RX
-                    if (device.vendorId == VID_RASPBERRY_PI) {
-                        try {
-                            serial.setDTR(true)
-                            serial.setRTS(true)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "CDC DTR/RTS set failed (non-fatal): ${e.message}")
-                        }
-                    }
-                    serial.read { data ->
-                        lastSerialRxMs = System.currentTimeMillis()
-                        val str = String(data)
-                        serialBuffer.append(str)
-                        if (serialBuffer.contains("\n")) {
-                            val messages = serialBuffer.toString().split("\n")
-                            for (i in 0 until messages.size - 1) {
-                                val msg = normalizeIncomingLine(messages[i])
-                                if (msg.isNotEmpty()) {
-                                    log("[RECV] USB ← Robot: $msg")
-                                    onMessageReceived?.invoke(msg)
-                                }
-                            }
-                            val last = messages.last()
-                            serialBuffer.setLength(0)
-                            serialBuffer.append(last)
-                        }
-                    }
-                    communicationMode.value = CommunicationMode.USB_SERIAL
-                    lastSerialRxMs = System.currentTimeMillis()
-                    log("✅ Serial connected at ${BuddyBotConfig.SERIAL_BAUD_RATE} baud")
-                    startSerialHealthCheck()
-                    startWriteQueuePump()
-                    delay(500)
-                    sendCommand("DIAG:RUN")
-                } else {
-                    log("ERROR: Could not open serial port")
-                    connection.close()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "USB connect error", e)
-            }
-        }
-    }
-
-    // ── Write queue pump — serialises all USB writes on IO dispatcher ────
-    // Gives each command a 20 ms gap so the Mega's 50 Hz parse loop
-    // never sees two commands jammed into the same read tick.
-    private fun startWriteQueuePump() {
-        writeQueueJob?.cancel()
-        writeQueueJob = scope.launch(Dispatchers.IO) {
-            for (payload in writeQueue) {
-                if (communicationMode.value != CommunicationMode.USB_SERIAL) break
-                try {
-                    usbSerial?.write(payload.toByteArray(Charsets.UTF_8))
-                    delay(20)
-                } catch (e: Exception) {
-                    log("Write pump error: ${e.message}")
-                }
-            }
-        }
-    }
-
-    // ────────────────────────────────────────────────────────────────────────
-    //  SERIAL HEALTH CHECK — reconnects if Mega goes silent for 15 s
-    // ────────────────────────────────────────────────────────────────────────
-    private fun startSerialHealthCheck() {
-        serialHealthJob?.cancel()
-        serialHealthJob = scope.launch {
-            while (isActive) {
-                delay(SERIAL_HEALTH_CHECK_INTERVAL_MS)
-                if (communicationMode.value == CommunicationMode.USB_SERIAL) {
-                    val silenceMs = System.currentTimeMillis() - lastSerialRxMs
-                    if (silenceMs > SERIAL_SILENCE_THRESHOLD_MS) {
-                        log("⚠️ Serial health check: no data in ${silenceMs}ms — reconnecting…")
-                        communicationMode.value = CommunicationMode.DISCONNECTED
-                        try { usbSerial?.close() } catch (e: Exception) { }
-                        usbSerial = null
-                        delay(1500)
-                        initializeUSBSerial()
-                    } else {
-                        log("Serial health OK (last rx ${silenceMs}ms ago)")
-                    }
-                }
-            }
-        }
-    }
-
-    // ────────────────────────────────────────────────────────────────────────
-    //  HTTP
-    // ────────────────────────────────────────────────────────────────────────
-    fun initializeHttp(ip: String) {
-        if (ip.isBlank()) {
-            log("HTTP: IP not configured — skipping")
-            return
-        }
-        log("Connecting HTTP: http://$ip")
-
-        httpRetryJob?.cancel()
-        httpRetryCount = 0
-        httpIp = ip
-
+    private fun openDevice(device: UsbDevice) {
         scope.launch(Dispatchers.IO) {
             try {
-                val request = Request.Builder()
-                    .url("http://$ip/health")
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    log("✅ HTTP CONNECTED to $ip")
-                    communicationMode.value = CommunicationMode.HTTP_PICO_W
-                    httpRetryCount = 0
-                    startHttpPolling(ip)
-                } else {
-                    log("❌ HTTP health check failed: ${response.code}")
-                    communicationMode.value = CommunicationMode.DISCONNECTED
-                    scheduleHttpReconnect(ip)
+                val usbMgr = context.getSystemService(Context.USB_SERVICE) as UsbManager
+                val driver = prober.probeDevice(device) ?: UsbSerialProber.getDefaultProber().probeDevice(device)
+                    ?: run { log("ERROR: no driver for VID=0x${device.vendorId.toString(16)}"); return@launch }
+                val conn = usbMgr.openDevice(device) ?: run { log("ERROR: openDevice null"); return@launch }
+                val port = driver.ports.firstOrNull() ?: run { log("ERROR: no ports"); conn.close(); return@launch }
+
+                port.open(conn)
+                port.setParameters(BAUD, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+                try { port.dtr = true } catch (e: Exception) { Log.w(TAG, "DTR: ${e.message}") }
+                try { port.rts = true } catch (e: Exception) { Log.w(TAG, "RTS: ${e.message}") }
+
+                serialPort = port
+
+                val listener = object : SerialInputOutputManager.Listener {
+                    override fun onNewData(data: ByteArray) {
+                        lastRxMs = System.currentTimeMillis()
+                        processIncoming(data)
+                    }
+                    override fun onRunError(e: Exception) {
+                        log("IO error: ${e.message}")
+                        if (communicationMode.value == CommunicationMode.USB_SERIAL) {
+                            communicationMode.value = CommunicationMode.DISCONNECTED
+                            scope.launch { delay(1_500); initializeUSBSerial() }
+                        }
+                    }
                 }
+                ioManager?.stop(); ioFuture?.cancel(true)
+                val iom = SerialInputOutputManager(port, listener).also {
+                    it.readTimeout = READ_TIMEOUT; it.writeTimeout = WRITE_TIMEOUT
+                }
+                ioManager = iom; ioFuture = ioExecutor.submit(iom)
+
+                communicationMode.value = CommunicationMode.USB_SERIAL
+                lastRxMs = System.currentTimeMillis()
+                log("USB OPEN baud=$BAUD port=${port.portNumber}")
+                startWriteJob(); startHealthCheck()
+                delay(300); sendCommand("DIAG:RUN")
             } catch (e: Exception) {
-                log("HTTP init error: ${e.message}")
+                Log.e(TAG, "openDevice error", e)
                 communicationMode.value = CommunicationMode.DISCONNECTED
-                scheduleHttpReconnect(ip)
             }
+        }
+    }
+
+    private fun processIncoming(data: ByteArray) {
+        lineBuf.append(String(data, Charsets.UTF_8))
+        var nl: Int
+        while (lineBuf.indexOf("\n").also { nl = it } >= 0) {
+            val msg = normalise(lineBuf.substring(0, nl))
+            lineBuf.delete(0, nl + 1)
+            if (msg.isNotEmpty()) { log("[RECV] $msg"); onMessageReceived?.invoke(msg) }
+        }
+        if (lineBuf.length > 2048) { lineBuf.clear(); log("WARN: buf overflow") }
+    }
+
+    private fun normalise(raw: String): String {
+        var s = raw.trim()
+        val ci = s.indexOf("|CRC:"); if (ci > 0) s = s.substring(0, ci)
+        return s.removeSuffix("|END").trim()
+    }
+
+    private fun startWriteJob() {
+        writeJob?.cancel()
+        writeJob = scope.launch(Dispatchers.IO) {
+            for (payload in writeQueue) {
+                val p = serialPort
+                if (p == null || !p.isOpen || communicationMode.value != CommunicationMode.USB_SERIAL) {
+                    log("WARN: write skipped: ${payload.trim()}"); continue
+                }
+                try { p.write(payload.toByteArray(Charsets.UTF_8), WRITE_TIMEOUT) } catch (e: Exception) { log("Write err: ${e.message}") }
+                delay(20)
+            }
+        }
+    }
+
+    private fun startHealthCheck() {
+        healthJob?.cancel()
+        healthJob = scope.launch {
+            while (isActive) {
+                delay(HEALTH_MS)
+                if (communicationMode.value == CommunicationMode.USB_SERIAL) {
+                    val silence = System.currentTimeMillis() - lastRxMs
+                    if (silence > SILENCE_MS) { log("Health: ${silence}ms — reconnect"); closeSerial(); delay(1_500); initializeUSBSerial() }
+                    else log("Health OK (${silence}ms)")
+                }
+            }
+        }
+    }
+
+    private fun closeSerial() {
+        communicationMode.value = CommunicationMode.DISCONNECTED
+        try { ioManager?.stop() } catch (_: Exception) {}
+        ioManager = null; ioFuture?.cancel(true); ioFuture = null
+        try { serialPort?.close() } catch (_: Exception) {}
+        serialPort = null; writeJob?.cancel()
+        log("Serial closed")
+    }
+
+    fun initializeHttp(ip: String) {
+        if (ip.isBlank()) return
+        log("HTTP: $ip"); httpRetry = 0; httpIp = ip; httpRetryJob?.cancel()
+        scope.launch(Dispatchers.IO) {
+            try {
+                val resp = http.newCall(Request.Builder().url("http://$ip/health").build()).execute()
+                if (resp.isSuccessful) { log("HTTP OK"); communicationMode.value = CommunicationMode.HTTP_PICO_W; startHttpPolling(ip) }
+                else scheduleHttpRetry(ip)
+            } catch (e: Exception) { log("HTTP init: ${e.message}"); scheduleHttpRetry(ip) }
         }
     }
 
@@ -457,146 +313,66 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
         httpPollJob = scope.launch(Dispatchers.IO) {
             while (isActive && communicationMode.value == CommunicationMode.HTTP_PICO_W) {
                 try {
-                    val request = Request.Builder()
-                        .url("http://$ip/status")
-                        .build()
-                    val response = httpClient.newCall(request).execute()
-                    if (response.isSuccessful) {
-                        val body = response.body?.string() ?: ""
-                        parseHttpStatus(body)
-                    }
-                } catch (e: Exception) {
-                    log("HTTP poll error: ${e.message}")
-                }
-                delay(1500)
+                    val resp = http.newCall(Request.Builder().url("http://$ip/status").build()).execute()
+                    if (resp.isSuccessful) parseHttpStatus(resp.body?.string() ?: "")
+                } catch (e: Exception) { log("HTTP poll: ${e.message}") }
+                delay(1_500)
             }
         }
     }
 
     private fun parseHttpStatus(json: String) {
+        if (json.isBlank()) return
         try {
-            val obj = org.json.JSONObject(json)
-            // Mode update
-            if (obj.has("mode")) {
-                onMessageReceived?.invoke("MODE:${obj.getString("mode")}")
-            }
-            // Ultrasonic distances
-            val front = if (obj.has("front")) obj.getInt("front") else -1
-            val rear  = if (obj.has("rear"))  obj.getInt("rear")  else -1
-            val left  = if (obj.has("left"))  obj.getInt("left")  else -1
-            val right = if (obj.has("right")) obj.getInt("right") else -1
-            if (front != -1 || rear != -1 || left != -1 || right != -1) {
-                onMessageReceived?.invoke("US:$front,$rear,$left,$right")
-            }
-            // Battery telemetry
-            val voltage = if (obj.has("voltage")) obj.getString("voltage") else
-                          if (obj.has("battery")) obj.getString("battery") else "0.0"
-            val pct = if (obj.has("batteryPercent")) obj.getString("batteryPercent") else
-                      if (obj.has("pct")) obj.getString("pct") else "0"
-            onMessageReceived?.invoke("TELE:$voltage,$pct,0")
-            // Gas / flame alerts
-            val gas = if (obj.has("gas")) obj.getString("gas") else "0"
-            val flame = if (obj.has("flame")) obj.getString("flame") else "0"
-            if (gas != "0") onMessageReceived?.invoke("ALERT:GAS_ALERT")
-            if (flame == "1") onMessageReceived?.invoke("ALERT:FLAME_DETECTED")
-        } catch (e: Exception) {
-            log("HTTP status parse error: ${e.message}")
-        }
+            val o = JSONObject(json)
+            o.optString("mode").takeIf { it.isNotBlank() }?.let { onMessageReceived?.invoke("MODE:$it") }
+            val f = o.optInt("front",-1); val r = o.optInt("rear",-1); val l = o.optInt("left",-1); val ri = o.optInt("right",-1)
+            if (f>=0||r>=0||l>=0||ri>=0) onMessageReceived?.invoke("US:$f,$r,$l,$ri")
+            onMessageReceived?.invoke("TELE:${o.optString("battery","0.0")},${o.optString("pct","0")},0")
+            if (o.optInt("flame",0)==1) onMessageReceived?.invoke("ALERT:FLAME_DETECTED")
+        } catch (e: Exception) { log("HTTP parse: ${e.message}") }
     }
 
-    private fun scheduleHttpReconnect(ip: String) {
-        if (httpRetryCount >= MAX_HTTP_RETRIES) {
-            log("HTTP: max retries reached — giving up")
-            return
-        }
-        httpRetryCount++
-        val delayMs = calculateBackoff(httpRetryCount)
-        log("HTTP retry #$httpRetryCount in ${delayMs}ms")
-
+    private fun scheduleHttpRetry(ip: String) {
+        if (httpRetry >= 10) return
+        val ms = (1000L * (1L shl httpRetry++)).coerceAtMost(30_000L)
         httpRetryJob?.cancel()
-        httpRetryJob = scope.launch {
-            delay(delayMs)
-            if (communicationMode.value == CommunicationMode.DISCONNECTED) {
-                initializeHttp(ip)
-            }
-        }
+        httpRetryJob = scope.launch { delay(ms); if (communicationMode.value == CommunicationMode.DISCONNECTED) initializeHttp(ip) }
     }
 
-    private fun calculateBackoff(retry: Int): Long {
-        return (INITIAL_RETRY_DELAY_MS * (1L shl (retry - 1)))
-            .coerceAtMost(MAX_RETRY_DELAY_MS)
-    }
-
-    // ────────────────────────────────────────────────────────────────────────
-    //  WEBCAM HELPERS
-    // ────────────────────────────────────────────────────────────────────────
-    fun setWebcamPermissionCallback(callback: (UsbDevice) -> Unit) {
-        onUsbPermissionForWebcam = callback
-    }
-
-    fun requestWebcamPermission(device: UsbDevice) {
-        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-        val permIntent = PendingIntent.getBroadcast(
-            context, 0,
-            Intent(ACTION_USB_PERMISSION_WEBCAM).setPackage(context.packageName),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                PendingIntent.FLAG_MUTABLE else 0)
-        usbManager.requestPermission(device, permIntent)
-    }
-
-    // ────────────────────────────────────────────────────────────────────────
-    //  SEND COMMAND
-    // ────────────────────────────────────────────────────────────────────────
     fun sendCommand(command: String) {
-        val clean = command.trimEnd('\r', '\n')
-        if (clean.isEmpty()) return
-        val payload = "$clean\n"
+        val clean = command.trimEnd('\r', '\n'); if (clean.isEmpty()) return
         when (communicationMode.value) {
             CommunicationMode.USB_SERIAL -> {
-                if (usbSerial?.isOpen() != true) {
-                    Log.w(TAG, "Serial not open — dropping: $clean"); return
-                }
-                // Route through write queue. Pump drains at 20 ms interval
-                // so the Mega parse loop never receives simultaneous bytes.
-                if (!writeQueue.trySend(payload).isSuccess)
-                    Log.w(TAG, "Write queue full — dropped: $clean")
-                else
-                    log("[SEND] USB → Mega: $clean")
+                if (writeQueue.trySend("$clean\n").isSuccess) log("[SEND] USB $clean") else log("WARN: queue full: $clean")
             }
-            CommunicationMode.HTTP_PICO_W -> {
-                scope.launch(Dispatchers.IO) {
-                    try {
-                        val url = "http://$httpIp/cmd?c=${java.net.URLEncoder.encode(clean, "UTF-8")}"
-                        val resp = httpClient.newCall(Request.Builder().url(url).build()).execute()
-                        if (resp.isSuccessful) log("[SEND] HTTP → PicoW: $clean")
-                        else log("[SEND] HTTP error ${resp.code}: $clean")
-                    } catch (e: Exception) { Log.e(TAG, "HTTP send failed: ${e.message}") }
-                }
+            CommunicationMode.HTTP_PICO_W -> scope.launch(Dispatchers.IO) {
+                try {
+                    val enc = java.net.URLEncoder.encode(clean, "UTF-8")
+                    http.newCall(Request.Builder().url("http://$httpIp/cmd?c=$enc").build()).execute()
+                } catch (e: Exception) { Log.e(TAG, "HTTP send: ${e.message}") }
             }
-            CommunicationMode.DISCONNECTED ->
-                log("[WARN] sendCommand ignored (disconnected): $clean")
+            CommunicationMode.DISCONNECTED -> log("WARN: disconnected, dropped: $clean")
         }
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    //  CLEANUP
-    // ────────────────────────────────────────────────────────────────────────
+    fun setWebcamPermissionCallback(cb: (UsbDevice) -> Unit) { onCamPerm = cb }
+
+    fun requestWebcamPermission(device: UsbDevice) {
+        val pi = PendingIntent.getBroadcast(context, 0, Intent(ACTION_CAM_PERM).setPackage(context.packageName),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+        (context.getSystemService(Context.USB_SERVICE) as UsbManager).requestPermission(device, pi)
+    }
+
     fun unregister() {
-        try { context.unregisterReceiver(usbReceiver) } catch (e: Exception) { }
-        try { context.unregisterReceiver(webcamReceiver) } catch (e: Exception) { }
+        try { context.unregisterReceiver(usbReceiver) } catch (_: Exception) {}
+        try { context.unregisterReceiver(camReceiver)  } catch (_: Exception) {}
     }
 
     fun close() {
-        serialHealthJob?.cancel()
-        writeQueueJob?.cancel()
-        httpRetryJob?.cancel()
-        httpPollJob?.cancel()
-        communicationMode.value = CommunicationMode.DISCONNECTED
-        try { usbSerial?.close() } catch (e: Exception) { }
-        usbSerial = null
-        httpIp = ""
-        log("Communications closed")
+        closeSerial(); healthJob?.cancel(); httpRetryJob?.cancel(); httpPollJob?.cancel(); httpIp = ""
+        log("ArduinoComms closed")
     }
 
-    private fun log(message: String) = Log.d(TAG, message)
+    private fun log(msg: String) = Log.d(TAG, msg)
 }
