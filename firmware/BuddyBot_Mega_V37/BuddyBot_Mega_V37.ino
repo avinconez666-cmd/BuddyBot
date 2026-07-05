@@ -92,7 +92,15 @@ const float BAT_MAX   = 8.4f;
 const float BAT_MIN   = 6.0f;
 const float BAT_LOW   = 6.6f;
 const float BAT_WARN  = 7.0f;
-const float BAT_VDIV  = 5.62f;
+// BAT_VDIV: voltage divider ratio for VOLTAGE_SENSOR (A9).
+// KS0509 has no onboard battery sense circuit — external divider on A9.
+// Measured 27.0V display vs 7.99V actual with BAT_VDIV=5.62 → corrected to 1.663.
+// Formula: battVolt = (analogRead(A9) / 1023.0) * 5.0 * BAT_VDIV
+// ⚠️ Hardware: at 8.4V full charge, A9 sees ~5.05V (marginally safe — add 1N4148
+//    diode in series on A9 line to drop ~0.6V, or use R1=47kΩ / R2=10kΩ divider
+//    for ratio 5.7 → safe headroom and BAT_VDIV = 5.7).
+// To recalibrate: BAT_VDIV = 1.663 × (displayed_V / actual_V)
+const float BAT_VDIV  = 1.663f;
 const float BAT_CTEMP = 50.0f;
 const float BAT_WTEMP = 45.0f;
 
@@ -132,20 +140,20 @@ const float CURRENT_VREF        = 5.0f;
 #define LED_R_PIN         5
 #define LED_G_PIN         4
 #define LED_B_PIN         3
-#define LED_W_PIN         -1
+#define LED_W_PIN         46
 
 // ── Digital outputs ──────────────────────────────────────────────────────────
 #define FAN_BODY_PIN      45    // moved from 11 (Timer5 PWM -- safe with DHT on 44)
-#define FAN_HEAD_BLOW_PIN 46    // moved from 12 (Timer5 PWM)
-#define FAN_HEAD_EXT_PIN  37
-#define UV_LIGHT_PIN      2
+#define FAN_HEAD_BLOW_PIN 13    // moved from 12 (Timer5 PWM)
+#define FAN_HEAD_EXT_PIN  2
+#define UV_LIGHT_PIN      45
 #define BUZZER_PIN        -1   // RETIRED V37 — audio via Pico W SC8002B amp on GP14
 
 // ── Digital inputs ───────────────────────────────────────────────────────────
 #define MOMENTARY_BTN     40
 #define UNHINGED_SW       A4
 #define TILT_SENSOR       48
-#define PIR_PIN           23    // moved from 10
+#define PIR_PIN           6    // moved from 10
 #define DHT_PIN           44
 #define GAS_DO            -1
 #define CURRENT_SENSOR    A3
