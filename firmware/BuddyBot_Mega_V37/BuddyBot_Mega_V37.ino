@@ -104,7 +104,9 @@ const float BAT_VDIV  = 1.663f;
 const float BAT_CTEMP = 50.0f;
 const float BAT_WTEMP = 45.0f;
 
-const float HEAD_FAN_TEMP = 35.0f;
+const float HEAD_FAN_TEMP   = 35.0f;   // head fan turns ON  at this temperature
+const float HEAD_FAN_HYST   =  3.0f;   // head fan turns OFF at (HEAD_FAN_TEMP - HYST) = 32°C
+const float BODY_FAN_HYST   =  3.0f;   // body fan hysteresis (turns OFF 3°C below BAT_WTEMP/35°C)
 
 const int OBS_STOP = 40;
 const int OBS_SLOW = 50;
@@ -168,7 +170,7 @@ const float CURRENT_VREF        = 5.0f;
 #define REAR_IR   41
 #define FRONT_IR  A6
 #define LEFT_IR   A2    // moved from 30
-#define RIGHT_IR  26    // moved from 29
+#define RIGHT_IR  -1    // disabled — wire being traced, re-enable when confirmed
 
 // ── Ultrasonic sensors ───────────────────────────────────────────────────────
 #define FRONT_TRIG  24
@@ -456,7 +458,14 @@ float readThermistor(int pin) {
   return (c < -50 || c > 120) ? 25.0f : c;
 }
 
-float readHeadTemp() { return readThermistor(HEAD_TEMP_SENSOR); }
+float readHeadTemp() {
+  // Exponential moving average (α=0.15) smooths ADC noise on the NTC thermistor.
+  // Prevents false threshold crossings that cause fan chatter at the setpoint.
+  static float smoothed = 25.0f;
+  float raw = readThermistor(HEAD_TEMP_SENSOR);
+  smoothed = (smoothed * 0.85f) + (raw * 0.15f);
+  return smoothed;
+}
 
 // ════════════════════════════════════════════════════════════════════
 //  TB6612 DIRECT MOTOR CONTROL
@@ -649,14 +658,43 @@ void updatePower() {
 //  FAN CONTROL
 // ════════════════════════════════════════════════════════════════════
 void updateFans() {
-  bool headHot   = (headTemp >= HEAD_FAN_TEMP);
-  bool headState = fanHeadAuto ? headHot : fanHeadOn;
-  digitalWrite(FAN_HEAD_BLOW_PIN, headState ? HIGH : LOW);
-  digitalWrite(FAN_HEAD_EXT_PIN,  headState ? HIGH : LOW);
-  bool bodyHot   = (battTemp > BAT_WTEMP || ambTemp > 35.0f);
-  bool bodyState = fanBodyAuto ? bodyHot : fanBodyOn;
-  if (battTemp > BAT_CTEMP) bodyState = true;
-  digitalWrite(FAN_BODY_PIN, bodyState ? HIGH : LOW);
+  // ── Head fans (blow + exhaust run together) ───────────────────────────────
+  // Hysteresis prevents chatter when temperature hovers near the setpoint.
+  //   ON  threshold: HEAD_FAN_TEMP       (35°C)
+  //   OFF threshold: HEAD_FAN_TEMP - HYST (32°C)
+  // Without this, the fan switches on/off ~5× per second at the setpoint,
+  // sounding like fast/slow oscillation and stressing the motor.
+  bool headNowOn = (digitalRead(FAN_HEAD_EXT_PIN) == HIGH);
+  bool headState;
+  if (fanHeadAuto) {
+    if      (!headNowOn && headTemp >= HEAD_FAN_TEMP)                    headState = true;
+    else if ( headNowOn && headTemp <  HEAD_FAN_TEMP - HEAD_FAN_HYST)    headState = false;
+    else                                                                   headState = headNowOn;
+  } else {
+    headState = fanHeadOn;
+  }
+  if (headState != headNowOn) {
+    digitalWrite(FAN_HEAD_BLOW_PIN, headState ? HIGH : LOW);
+    digitalWrite(FAN_HEAD_EXT_PIN,  headState ? HIGH : LOW);
+  }
+
+  // ── Body fan ──────────────────────────────────────────────────────────────
+  bool bodyNowOn = (digitalRead(FAN_BODY_PIN) == HIGH);
+  bool bodyState;
+  if (battTemp > BAT_CTEMP) {
+    bodyState = true;  // critical battery temp — always run body fan
+  } else if (fanBodyAuto) {
+    bool bodyHot  = (battTemp > BAT_WTEMP) || (ambTemp > 35.0f);
+    bool bodyCool = (battTemp <= BAT_WTEMP - BODY_FAN_HYST) && (ambTemp <= 35.0f - BODY_FAN_HYST);
+    if      (!bodyNowOn && bodyHot)   bodyState = true;
+    else if ( bodyNowOn && bodyCool)  bodyState = false;
+    else                               bodyState = bodyNowOn;
+  } else {
+    bodyState = fanBodyOn;
+  }
+  if (bodyState != bodyNowOn) {
+    digitalWrite(FAN_BODY_PIN, bodyState ? HIGH : LOW);
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
