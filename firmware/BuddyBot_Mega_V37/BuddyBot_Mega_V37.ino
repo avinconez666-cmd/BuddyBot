@@ -143,7 +143,7 @@ const float CURRENT_VREF        = 5.0f;
 #define LED_W_PIN         46
 
 // ── Digital outputs ──────────────────────────────────────────────────────────
-#define FAN_BODY_PIN      45    // moved from 11 (Timer5 PWM -- safe with DHT on 44)
+#define FAN_BODY_PIN      44    // moved from 11 (Timer5 PWM -- safe with DHT on 44)
 #define FAN_HEAD_BLOW_PIN 13    // moved from 12 (Timer5 PWM)
 #define FAN_HEAD_EXT_PIN  2
 #define UV_LIGHT_PIN      45
@@ -154,7 +154,7 @@ const float CURRENT_VREF        = 5.0f;
 #define UNHINGED_SW       A4
 #define TILT_SENSOR       48
 #define PIR_PIN           6    // moved from 10
-#define DHT_PIN           44
+#define DHT_PIN           -1
 #define GAS_DO            -1
 #define CURRENT_SENSOR    A3
 #define CHARGE_DETECT_PIN -1
@@ -166,7 +166,7 @@ const float CURRENT_VREF        = 5.0f;
 
 // ── IR obstacle sensors (LOW = obstacle detected) ────────────────────────────
 #define REAR_IR   41
-#define FRONT_IR  A4
+#define FRONT_IR  A6
 #define LEFT_IR   A2    // moved from 30
 #define RIGHT_IR  26    // moved from 29
 
@@ -1317,22 +1317,89 @@ void setLedMode(String m){
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  MAGNETOMETER
+//  MAGNETOMETER   (Jaycar XC4496 — auto-detects MMC5883MA or HMC5883L)
 // ════════════════════════════════════════════════════════════════════
+//  XC4496 shipped HMC5883L (addr 0x1E) until ~2021, then switched to
+//  Memsic MMC5883MA (addr 0x30, chip-ID 0x0C at reg 0x2F).
+//  This code probes MMC first, falls back to HMC if not found.
+//
+//  Magnetic declination for Bunbury WA (2026): -2.15°
+//  true_heading = raw_heading + COMPASS_DECLINATION_DEG
+//  Update annually at: magnetic-declination.com
+//
+//  Hard-iron calibration (run calibration sketch, enter results here):
+//    Rotate robot 360° slowly, note raw mx/my min and max.
+//    Offset = (max + min) / 2   for each axis.
+#define COMPASS_DECLINATION_DEG  (-2.15f)
+#define COMPASS_OFFSET_X          0          // hard-iron X — calibrate & set
+#define COMPASS_OFFSET_Y          0          // hard-iron Y — calibrate & set
+
 void initMagnetometer(){
-  Wire.beginTransmission(0x30);Wire.write(0x2F);
-  if(Wire.endTransmission()==0){Wire.requestFrom(0x30,(uint8_t)1);if(Wire.available()&&Wire.read()==0x0C){magChip=2;magOk=true;Wire.beginTransmission(0x30);Wire.write(0x08);Wire.write(0x20);Wire.endTransmission();delay(20);Wire.beginTransmission(0x30);Wire.write(0x08);Wire.write(0x40);Wire.endTransmission();delay(20);return;}}
-  Wire.beginTransmission(0x1E);Wire.write(0x00);Wire.write(0x70);Wire.endTransmission();
-  Wire.beginTransmission(0x1E);Wire.write(0x01);Wire.write(0xA0);Wire.endTransmission();
-  Wire.beginTransmission(0x1E);Wire.write(0x02);Wire.write(0x00);Wire.endTransmission();
-  Wire.beginTransmission(0x1E);if(Wire.endTransmission()==0){magChip=1;magOk=true;}
+  // ── Probe MMC5883MA (newer XC4496, I²C addr 0x30) ──────────────────
+  Wire.beginTransmission(0x30);
+  Wire.write(0x2F);                          // Product-ID register
+  Wire.endTransmission(false);
+  Wire.requestFrom((uint8_t)0x30,(uint8_t)1);
+  if(Wire.available() && Wire.read()==0x0C){ // 0x0C = MMC5883MA chip ID
+    magChip = 2;
+    // 1. Software reset
+    Wire.beginTransmission(0x30);Wire.write(0x08);Wire.write(0x80);Wire.endTransmission();
+    delay(20);
+    // 2. Enable automatic SET/RESET (removes hard-iron bias, reg 0x07 bit6)
+    Wire.beginTransmission(0x30);Wire.write(0x07);Wire.write(0x40);Wire.endTransmission();
+    delay(5);
+    magOk = true;
+    dbg("[MAG] MMC5883MA detected at 0x30");
+    return;
+  }
+  // ── Probe HMC5883L (older XC4496, I²C addr 0x1E) ───────────────────
+  Wire.beginTransmission(0x1E);Wire.write(0x00);Wire.write(0x70);Wire.endTransmission(); // CRA: 8-avg, 15 Hz
+  Wire.beginTransmission(0x1E);Wire.write(0x01);Wire.write(0xA0);Wire.endTransmission(); // CRB: ±4.7 Ga
+  Wire.beginTransmission(0x1E);Wire.write(0x02);Wire.write(0x00);Wire.endTransmission(); // continuous mode
+  Wire.beginTransmission(0x1E);
+  if(Wire.endTransmission()==0){ magChip=1; magOk=true; dbg("[MAG] HMC5883L detected at 0x1E"); }
+  else                         { magChip=0; magOk=false;dbg("[MAG] No magnetometer found — HDG disabled"); }
 }
 
 void readMagnetometer(){
-  if(!magOk)return;int16_t mx=0,my=0;
-  if(magChip==2){Wire.beginTransmission(0x30);Wire.write(0x08);Wire.write(0x01);Wire.endTransmission();delay(10);Wire.beginTransmission(0x30);Wire.write(0x00);Wire.endTransmission();Wire.requestFrom(0x30,(uint8_t)6);if(Wire.available()<6)return;uint8_t xl=Wire.read(),xh=Wire.read(),yl=Wire.read(),yh=Wire.read();Wire.read();Wire.read();mx=((int16_t)(xh<<8|xl))-32768;my=((int16_t)(yh<<8|yl))-32768;}
-  else{Wire.beginTransmission(0x1E);Wire.write(0x03);Wire.endTransmission();Wire.requestFrom(0x1E,(uint8_t)6);if(Wire.available()<6)return;uint8_t xh=Wire.read(),xl=Wire.read();Wire.read();Wire.read();uint8_t yh=Wire.read(),yl=Wire.read();mx=(int16_t)(xh<<8|xl);my=(int16_t)(yh<<8|yl);}
-  float h=atan2f((float)my,(float)mx)*180.0f/M_PI;if(h<0)h+=360.0f;magHeading=h;
+  if(!magOk) return;
+  int16_t mx=0, my=0;
+
+  if(magChip==2){
+    // MMC5883MA: trigger single measurement via TM_M bit in INT_CTRL_0 (reg 0x07)
+    Wire.beginTransmission(0x30);Wire.write(0x07);Wire.write(0x01);Wire.endTransmission();
+    delay(10);  // measurement time ≥6.6 ms at BW=00
+    Wire.beginTransmission(0x30);Wire.write(0x00);Wire.endTransmission();
+    Wire.requestFrom((uint8_t)0x30,(uint8_t)6);
+    if(Wire.available()<6) return;
+    uint8_t xl=Wire.read(), xh=Wire.read();  // 0x00, 0x01
+    uint8_t yl=Wire.read(), yh=Wire.read();  // 0x02, 0x03
+    Wire.read(); Wire.read();                 // 0x04, 0x05 (Z — not used)
+    mx = (int16_t)((xh<<8)|xl) - 32768;
+    my = (int16_t)((yh<<8)|yl) - 32768;
+  } else {
+    // HMC5883L: continuous mode — just read data registers (no trigger needed)
+    Wire.beginTransmission(0x1E);Wire.write(0x03);Wire.endTransmission();
+    Wire.requestFrom((uint8_t)0x1E,(uint8_t)6);
+    if(Wire.available()<6) return;
+    uint8_t xh=Wire.read(), xl=Wire.read();  // 0x03, 0x04
+    Wire.read(); Wire.read();                 // 0x05, 0x06 (Z — not used)
+    uint8_t yh=Wire.read(), yl=Wire.read();  // 0x07, 0x08
+    mx = (int16_t)((xh<<8)|xl);
+    my = (int16_t)((yh<<8)|yl);
+  }
+
+  // Apply hard-iron calibration offsets (default 0,0 — see calibration note above)
+  mx -= COMPASS_OFFSET_X;
+  my -= COMPASS_OFFSET_Y;
+
+  // Calculate heading (0–360°) and apply magnetic declination for Bunbury WA
+  float h = atan2f((float)my, (float)mx) * 180.0f / M_PI;
+  if(h < 0.0f) h += 360.0f;
+  h += COMPASS_DECLINATION_DEG;
+  if(h < 0.0f)    h += 360.0f;
+  if(h >= 360.0f) h -= 360.0f;
+  magHeading = h;
 }
 
 // ════════════════════════════════════════════════════════════════════
