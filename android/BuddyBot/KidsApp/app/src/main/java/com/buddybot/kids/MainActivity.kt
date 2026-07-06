@@ -474,13 +474,20 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 // mode-change / mode-request emissions) into MainActivity's local _robotState.
                 lifecycleScope.launch {
                     viewModel.robotState.collect { vmState ->
-                        // Only mirror the fields the ViewModel owns; keep local activity fields intact.
-                        _robotState.value = _robotState.value.copy(
+                        val prev = _robotState.value
+                        _robotState.value = prev.copy(
                             currentMode         = vmState.currentMode,
                             communicationMode   = vmState.communicationMode,
                             showPinEntry        = vmState.showPinEntry,
-                            requestedMode       = vmState.requestedMode
+                            requestedMode       = vmState.requestedMode,
+                            buddybotIP          = vmState.buddybotIP,
+                            wifiSetupPhase      = vmState.wifiSetupPhase
                         )
+                        if (vmState.buddybotIP.isNotEmpty() && vmState.buddybotIP != prev.buddybotIP) {
+                            getSharedPreferences("buddybot", MODE_PRIVATE)
+                                .edit { putString("buddybotIP", vmState.buddybotIP) }
+                            logComm("COMM", "Robot IP from telemetry: ${vmState.buddybotIP}")
+                        }
                     }
                 }
                 // Also register the local handleArduinoMessage for Activity-side side effects
@@ -1552,21 +1559,36 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 )
             } else returnToWakeWordListening()
         } else if (isProcessingCommand) {
-            currentSpeechText = text; lastSpeechTime = System.currentTimeMillis(); checkForSilence()
+            // Final result from recognizer — we already have the complete utterance.
+            // Skip checkForSilence() polling (which adds a 2s dead wait) and go direct.
+            silenceHandler.removeCallbacksAndMessages(null)
+            if (text.isNotBlank()) {
+                currentSpeechText = text
+                processCommand(text)
+            } else {
+                isProcessingCommand = false
+                returnToWakeWordListening()
+            }
         }
     }
 
     private fun startCommandListening() {
-        currentSpeechText = ""; lastSpeechTime = System.currentTimeMillis()
-        // Cancel any still-active session before starting a new one.
-        // startListening() while a session is live causes ERROR_RECOGNIZER_BUSY on
-        // some devices (Samsung S9) and silently drops the new request on others.
+        currentSpeechText = ""
+        lastSpeechTime = System.currentTimeMillis()
+        silenceHandler.removeCallbacksAndMessages(null)
         speechRecognizer?.cancel()
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-AU")          // S9 locale
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            // Give AJ plenty of time to form a sentence — 3-year-old speech is slower
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 300L)
         }
         speechRecognizer?.startListening(intent)
+        Log.d(TAG, "Command listening started")
     }
 
     private fun checkForSilence() {
@@ -1584,54 +1606,48 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         _robotState.value = _robotState.value.copy(isProcessing = true)
         lifecycleScope.launch {
             try {
-                // Mega V37 processS9Command() uses colon separators (MOTOR:F, AUTO:ON, …).
+                // Map spoken commands to Mega V37 motor/control commands.
+                // Falls through to AI for anything conversational.
+                val spokenLower = command.lowercase()
                 when {
-                    command.contains("forward", true) -> {
-                        arduinoComms.sendCommand("MOTOR:F"); speakText("Moving forward")
+                    "forward" in spokenLower ->
+                        { arduinoComms.sendCommand("MOTOR:F"); speakTextSuspend("Moving forward") }
+                    "backward" in spokenLower || "back" in spokenLower ->
+                        { arduinoComms.sendCommand("MOTOR:B"); speakTextSuspend("Moving backward") }
+                    "turn left" in spokenLower || (spokenLower == "left") ->
+                        { arduinoComms.sendCommand("MOTOR:L"); speakTextSuspend("Turning left") }
+                    "turn right" in spokenLower || (spokenLower == "right") ->
+                        { arduinoComms.sendCommand("MOTOR:R"); speakTextSuspend("Turning right") }
+                    "stop" in spokenLower ->
+                        { arduinoComms.sendCommand("MOTOR:S"); speakTextSuspend("Stopping") }
+                    "dance" in spokenLower || "spin" in spokenLower || "turn around" in spokenLower ->
+                        { arduinoComms.sendCommand("MOTOR:DANCE"); speakTextSuspend("Let's dance!") }
+                    "auto" in spokenLower && ("off" in spokenLower || "stop" in spokenLower) ->
+                        { arduinoComms.sendCommand("AUTO:OFF"); speakTextSuspend("Autonomous mode off") }
+                    "auto" in spokenLower ->
+                        { arduinoComms.sendCommand("AUTO:ON"); speakTextSuspend("Autonomous mode on") }
+                    "speed up" in spokenLower || "faster" in spokenLower ->
+                        { arduinoComms.sendCommand("FAST"); speakTextSuspend("Speeding up") }
+                    "slow down" in spokenLower || "slower" in spokenLower ->
+                        { arduinoComms.sendCommand("SLOW"); speakTextSuspend("Slowing down") }
+                    else -> {
+                        // AI response — log which provider is active
+                        Log.d(TAG, "AI query: \"$command\"")
+                        val response = getAIResponse(command)
+                        Log.d(TAG, "AI response: \"$response\"")
+                        // Await speech — HotwordService resumes only AFTER robot finishes speaking
+                        speakTextSuspend(response)
                     }
-
-                    command.contains("backward", true) || command.contains("back", true) -> {
-                        arduinoComms.sendCommand("MOTOR:B"); speakText("Moving backward")
-                    }
-
-                    command.contains("left", true) -> {
-                        arduinoComms.sendCommand("MOTOR:L"); speakText("Turning left")
-                    }
-
-                    command.contains("right", true) -> {
-                        arduinoComms.sendCommand("MOTOR:R"); speakText("Turning right")
-                    }
-
-                    command.contains("stop", true) -> {
-                        arduinoComms.sendCommand("MOTOR:S"); speakText("Stopping")
-                    }
-
-                    command.contains("dance", true) || command.contains("spin", true) || command.contains("turn around", true) -> {
-                        arduinoComms.sendCommand("MOTOR:DANCE"); speakText("Let's dance!")
-                    }
-
-                    (command.contains("auto", true) && (command.contains("off", true) || command.contains("stop", true))) -> {
-                        arduinoComms.sendCommand("AUTO:OFF"); speakText("Autonomous mode off")
-                    }
-
-                    command.contains("auto", true) -> {
-                        arduinoComms.sendCommand("AUTO:ON"); speakText("Autonomous mode on")
-                    }
-
-                    command.contains("speed up", true) || command.contains("faster", true) -> {
-                        arduinoComms.sendCommand("FAST"); speakText("Speeding up")
-                    }
-
-                    command.contains("slow down", true) || command.contains("slower", true) -> {
-                        arduinoComms.sendCommand("SLOW"); speakText("Slowing down")
-                    }
-
-                    else -> speakText(getAIResponse(command))
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "processCommand error: ${e.message}", e)
             } finally {
                 _robotState.value = _robotState.value.copy(isProcessing = false)
-                isProcessingCommand = false; currentSpeechText = ""
-                Handler(Looper.getMainLooper()).postDelayed({ returnToWakeWordListening() }, 1000)
+                isProcessingCommand = false
+                currentSpeechText = ""
+                // 500ms gap after speech before resuming wake-word listening
+                delay(500)
+                withContext(Dispatchers.Main) { returnToWakeWordListening() }
             }
         }
     }
@@ -1724,7 +1740,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     }
 
     private fun speakText(text: String) {
-        lifecycleScope.launch {
+        lifecycleScope.launch { speakTextSuspend(text) }
+    }
+
+    /** Suspend version — use this inside coroutines that need to AWAIT speech completion.
+     *  This ensures HotwordService is not resumed mid-sentence after AI responses. */
+    private suspend fun speakTextSuspend(text: String) {
             _robotState.value = _robotState.value.copy(isSpeaking = true)
             try {
                 if (isOperationalPhrase(text)) {
@@ -1755,7 +1776,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             } finally {
                 _robotState.value = _robotState.value.copy(isSpeaking = false)
             }
-        }
     }
 
     /**
@@ -2052,6 +2072,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                     Toast.makeText(this, "Robot communication not ready yet", Toast.LENGTH_SHORT).show()
                     false
                 }
+                arduinoComms.communicationMode.value != CommunicationMode.USB_SERIAL -> {
+                    logComm("WIFI", "Cannot connect — USB serial not connected (mode=${arduinoComms.communicationMode.value})")
+                    Toast.makeText(this, "USB serial not connected — plug robot into phone", Toast.LENGTH_LONG).show()
+                    false
+                }
                 else -> {
                     WiFiCredentialsStore.validateMegaCommandLength(safeSsid, safePass)?.let { err ->
                         logComm("WIFI", err)
@@ -2059,6 +2084,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                         return false
                     }
                     logComm("WIFI", "Sending credentials for \"$safeSsid\" to robot")
+                    _robotState.value = _robotState.value.copy(wifiSetupPhase = "sending")
                     arduinoComms.sendCommand("WIFI|$safeSsid|$safePass")
                     WiFiCredentialsStore.save(this, safeSsid, safePass)
                     Toast.makeText(this, "WiFi credentials sent to robot", Toast.LENGTH_SHORT).show()
