@@ -121,6 +121,7 @@ struct Telem {
   bool  autodock=false; char dockSt[10]="IDLE";
   float heading=-1; int gpsSats=0; bool cob=false;
   char ledMode[10]="OFF"; char ledWhite[6]="OFF"; int ledBright=255;
+  bool  uvOn=false;   // UV light state — updated from Mega UV: messages
 } T;
 bool brainToggle[6]={true,true,true,true,true,true};
 const char* brainLabels[6]={"TEMP","GAS","VOLTAGE","ULTRASONICS","STATUS","MOTOR"};
@@ -190,6 +191,28 @@ void ensureWifiRadio() {
   dbgPush("[PICO] WiFi radio ready");
 }
 
+// CYW43 radio init can disturb Wire1 on GP26/GP27 — re-probe touch after WiFi starts.
+static bool touchI2cOk = false;
+
+void restoreTouchI2c() {
+  Wire1.end();
+  delay(5);
+  Wire1.setSDA(PIN_CTP_SDA);
+  Wire1.setSCL(PIN_CTP_SCL);
+  Wire1.begin();
+  Wire1.setClock(400000);
+  delay(50);
+  Wire1.beginTransmission(CTP_ADDR);
+  int err = Wire1.endTransmission();
+  touchI2cOk = (err == 0);
+  if (touchI2cOk) {
+    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xA4); Wire1.write(0x00); Wire1.endTransmission();
+    dbgPush("[PICO] Touch I2C restored after WiFi radio");
+  } else {
+    dbgPush("[PICO] WARN: Touch I2C lost after WiFi radio");
+  }
+}
+
 void reportWifiSuccess() {
   wifiOK = true;
   if (!webSrvStarted) {
@@ -215,6 +238,7 @@ void reportWifiFailure() {
 void startWifiConnect() {
   if (wifiConnectState == WIFI_ST_CONNECTING) return;
   ensureWifiRadio();
+  restoreTouchI2c();
   strncpy(wifiSsid, pendingWifiSsid, 32); wifiSsid[32] = 0;
   strncpy(wifiPass, pendingWifiPass, 63); wifiPass[63] = 0;
   trimInPlace(wifiSsid);
@@ -518,6 +542,11 @@ void handleMegaLine(const char* line){
   else if(strncmp(line,"LED|",4)==0)parseLed(line);
   else if(strcmp(line,"AUTODOCK:ON")==0){T.autodock=true;requestBodyRefresh();}
   else if(strcmp(line,"AUTODOCK:OFF")==0){T.autodock=false;requestBodyRefresh();}
+  else if(strncmp(line,"UV:",3)==0){
+    // UV:ACTIVE or UV:OFF from Mega
+    T.uvOn=(strncmp(line+3,"ACTIVE",6)==0);
+    requestBodyRefresh();   // refresh Lights screen if visible
+  }
   else if(strncmp(line,"WIFI|",5)==0) parseWifiConnect(line);
   else if(strncmp(line,"BEEP:",5)==0) handleBeep(line);
 }
@@ -1304,9 +1333,21 @@ void drawLights(){
   int16_t tw=strlen(bb)*12; tft.setCursor(bx+(bw-tw)/2,by+13); tft.print(bb);
 
   hRule(380,C_PINK);
-  char mb[44]; snprintf(mb,44,"MODE:%s  W:%s  BR:%d",(const char*)T.ledMode,(const char*)T.ledWhite,T.ledBright);
-  tft.setTextSize(1); tft.setTextColor(C_PINK,C_BG);
-  tft.setCursor(8,390); tft.print(mb);
+
+  // UV LIGHT TOGGLE
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG);
+  tft.setCursor(8,388); tft.print("UV STERILISER");
+  uint16_t uvCol  = T.uvOn ? 0xAFE5 : C_LGRAY;   // purple-white when on, grey when off
+  uint16_t uvBg   = T.uvOn ? 0x300A : 0x1082;
+  tft.fillRoundRect(8,400,SCR_W-16,44,8,uvBg);
+  tft.drawRoundRect(8,400,SCR_W-16,44,8,uvCol);
+  tft.setTextSize(2);
+  tft.setTextColor(uvCol,uvBg);
+  int16_t ulx = (SCR_W - (T.uvOn?6:7)*12) / 2;   // centre label
+  tft.setCursor(ulx,413);
+  tft.print(T.uvOn ? "UV  ON" : "UV  OFF");
+  // small indicator dot
+  tft.fillCircle(SCR_W-28,422,8,T.uvOn ? 0xAFE5 : C_LGRAY);
 }
 
 void handleLightsTouch(TouchPt& t){
@@ -1336,6 +1377,14 @@ void handleLightsTouch(TouchPt& t){
     char bb[16];
     if(t.x>=8&&t.x<78){ int nb=constrain(T.ledBright-32,16,255); snprintf(bb,16,"BRIGHT:%d",nb); sndClick(); sendLed(bb); screenDirty=true; return; }
     if(t.x>=242&&t.x<312){ int nb=constrain(T.ledBright+32,16,255); snprintf(bb,16,"BRIGHT:%d",nb); sndClick(); sendLed(bb); screenDirty=true; return; }
+  }
+  // UV toggle button (y=400..444)
+  if(t.y>=400&&t.y<444){
+    sndClick();
+    MEGA_SERIAL.println(T.uvOn ? "UV:OFF" : "UV:ON");
+    T.uvOn = !T.uvOn;   // optimistic update — Mega confirms via UV: reply
+    screenDirty = true;
+    return;
   }
 }
 
@@ -2209,7 +2258,7 @@ void setup() {
   // bridgeSetup() initialises USB CDC (S9) + Serial2 UART1 (Mega GP4/GP5).
   bridgeSetup();
   Serial.println(F("[PICO] BuddyBot Dash booting..."));
-  Serial.println(F("PICO_FW:WIFI_V3"));
+  Serial.println(F("PICO_FW:WIFI_V4"));
   tft.init();
   tft.setRotation(ROTATION);
   tft.invertDisplay(false);
@@ -2223,51 +2272,27 @@ void setup() {
   digitalWrite(AUDIO_PIN, LOW);
   pinMode(PIN_CTP_RST, OUTPUT);
   digitalWrite(PIN_CTP_RST, LOW);  waitMs(50);
-  digitalWrite(PIN_CTP_RST, HIGH); waitMs(500);   // FT6336U boot time — needs full 500ms
+  digitalWrite(PIN_CTP_RST, HIGH); waitMs(300);
   Wire1.setSDA(PIN_CTP_SDA);
   Wire1.setSCL(PIN_CTP_SCL);
   Wire1.begin();
   Wire1.setClock(400000);
-  waitMs(100);                                    // I2C stabilise
+  waitMs(50);
   pinMode(PIN_CTP_INT, INPUT_PULLUP);
 
-  // FT6336U handshake — probe, then force polling mode.
-  // Some units ship in interrupt mode with an inverted default; blind polling
-  // returns stale/zero data unless we explicitly enable polling (reg 0xA4 = 0x00).
-  // We write the mode register TWICE with a verify read in between to catch
-  // units that ignore the first write during their boot self-test.
   Wire1.beginTransmission(CTP_ADDR);
   int err = Wire1.endTransmission();
-  if (err == 0) {
-    // First: soft-reset the device mode by clearing register 0x00 (device mode = normal)
+  touchI2cOk = (err == 0);
+  if (touchI2cOk) {
     Wire1.beginTransmission(CTP_ADDR); Wire1.write(0x00); Wire1.write(0x00); Wire1.endTransmission(); delay(5);
-
-    // Force polling mode (register 0xA4 = 0x00) — write, verify, rewrite if needed
-    for (uint8_t attempt = 0; attempt < 3; attempt++) {
-      Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xA4); Wire1.write(0x00); Wire1.endTransmission(); delay(10);
-      // Read back to verify
-      Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xA4); Wire1.endTransmission(false);
-      Wire1.requestFrom(CTP_ADDR, (uint8_t)1);
-      if (Wire1.available()) {
-        uint8_t mode = Wire1.read();
-        if (mode == 0x00) break;   // polling mode confirmed
-      }
-      delay(20);
-    }
-
-    // Set touch threshold to a moderate value (register 0x80) — helps with finger detection
-    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0x80); Wire1.write(0x40); Wire1.endTransmission(); delay(5);
-
-    // Set gesture detection off — we only need raw touch coordinates
-    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xD0); Wire1.write(0x00); Wire1.endTransmission(); delay(5);
-
+    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xA4); Wire1.write(0x00); Wire1.endTransmission(); delay(5);
     Serial.println(F("[PICO] Touch OK — FT6336U polling mode"));
   } else {
     Serial.print(F("[PICO] Touch init FAIL — I2C err=")); Serial.println(err);
     Serial.println(F("[PICO] Check: SDA on GP26, SCL on GP27, RST on GP15, INT on GP28, VCC 3.3V"));
   }
-  // WiFi after display + touch — CYW43 init before Wire1 can break FT6336U I2C.
-  ensureWifiRadio();
+  // Do NOT init WiFi radio at boot — CYW43 init breaks FT6336U Wire1 I2C on Pico W.
+  // WiFi radio starts only when the app sends WIFI|ssid|pass.
   MEGA_SERIAL.println("PING");
   waitMs(400);
   MEGA_SERIAL.println("STATUS");

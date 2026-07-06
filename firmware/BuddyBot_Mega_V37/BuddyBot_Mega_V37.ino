@@ -802,13 +802,12 @@ void updateFans() {
 //  UV LIGHT STRIP CONTROL
 // ════════════════════════════════════════════════════════════════════
 void updateUV() {
-  bool pirSafe = !(PIR_PIN >= 0 && pirDetected);
-  bool newState = uvAuto ? (lightLevel >= 0 && lightLevel < 300 && pirSafe) : (uvManualOn && pirSafe);
+  // PIR interlock removed — UV toggled manually or via AUTO from Pico/S9 only
+  bool newState = uvAuto ? (lightLevel >= 0 && lightLevel < 300) : uvManualOn;
   if (newState != uvActive) {
     uvActive = newState;
     digitalWrite(UV_LIGHT_PIN, uvActive ? HIGH : LOW);
-    String reason = uvActive ? "ACTIVE" : (pirSafe ? "OFF" : "BLOCKED_PIR");
-    toS9("UV:" + reason);
+    toS9("UV:" + String(uvActive ? "ACTIVE" : "OFF"));
   }
 }
 
