@@ -14,7 +14,9 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <math.h>
-#include <WiFiEspAT.h>
+// Standard Raspberry Pi Pico W (CYW43439) — native WiFi.h from arduino-pico core.
+// WiFiEspAT is for Keyestudio boards with a separate ESP8285 on GP0/GP1 only.
+#include <WiFi.h>
 #include "serial_bridge.h"    // S9↔Mega USB↔UART1 bridge (owns Serial2 GP4/GP5)
 extern volatile bool wifiOK;
 extern volatile bool webCmdReady;
@@ -140,7 +142,7 @@ unsigned long lastPingTx=0;
 uint8_t pingSeq=0;
 bool megaLinked=false;
 
-// WiFi credentials — shared between core0 (Mega link) and core1 (ESP8285)
+// WiFi credentials — core0 only (arduino-pico LWIP must run on core 0, not loop1)
 char wifiSsid[33] = "YOUR_SSID";
 char wifiPass[64] = "YOUR_PASS";
 volatile bool wifiReconnectPending = false;
@@ -148,6 +150,14 @@ char pendingWifiSsid[33] = {0};
 char pendingWifiPass[64] = {0};
 volatile bool wifiIpReady = false;
 char pendingWifiIp[16] = {0};
+bool wifiRadioReady = false;
+bool webSrvStarted = false;
+enum WifiConnectState : uint8_t { WIFI_ST_IDLE, WIFI_ST_CONNECTING };
+WifiConnectState wifiConnectState = WIFI_ST_IDLE;
+unsigned long wifiConnectDeadline = 0;
+unsigned long wifiStatusLogMs = 0;
+WiFiServer webSrv(80);
+void handleWebClient(WiFiClient& cl);
 
 #define DBG_LINES 10
 #define DBG_LEN   48
@@ -161,7 +171,111 @@ void dbgPush(const char* msg) {
   Serial.println(msg);
 }
 
+static void trimInPlace(char* s) {
+  if (!s) return;
+  char* end = s + strlen(s);
+  while (end > s && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r')) {
+    *--end = 0;
+  }
+  char* p = s;
+  while (*p == ' ' || *p == '\t') p++;
+  if (p != s) memmove(s, p, strlen(p) + 1);
+}
+
+void ensureWifiRadio() {
+  if (wifiRadioReady) return;
+  wifiRadioReady = true;
+  WiFi.mode(WIFI_STA);
+  WiFi.noLowPowerMode();
+  dbgPush("[PICO] WiFi radio ready");
+}
+
+void reportWifiSuccess() {
+  wifiOK = true;
+  if (!webSrvStarted) {
+    webSrv.begin();
+    webSrvStarted = true;
+  }
+  IPAddress ip = WiFi.localIP();
+  snprintf(pendingWifiIp, sizeof(pendingWifiIp), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+  wifiIpReady = true;
+  char buf[48];
+  snprintf(buf, sizeof(buf), "[PICO] WiFi OK %s", pendingWifiIp);
+  dbgPush(buf);
+  picoToS9(String(F("WIFI_IP:")) + pendingWifiIp);
+}
+
+void reportWifiFailure() {
+  wifiOK = false;
+  dbgPush("[PICO] WiFi connect FAILED");
+  picoToMega("WIFI_FAIL");
+  picoToS9("ACK|WIFI_FAIL|END");
+}
+
+void startWifiConnect() {
+  if (wifiConnectState == WIFI_ST_CONNECTING) return;
+  ensureWifiRadio();
+  strncpy(wifiSsid, pendingWifiSsid, 32); wifiSsid[32] = 0;
+  strncpy(wifiPass, pendingWifiPass, 63); wifiPass[63] = 0;
+  trimInPlace(wifiSsid);
+  trimInPlace(wifiPass);
+  if (wifiSsid[0] == '\0' || wifiPass[0] == '\0') {
+    reportWifiFailure();
+    return;
+  }
+  WiFi.disconnect(true);
+  delay(50);
+  WiFi.beginNoBlock(wifiSsid, wifiPass);
+  wifiConnectState = WIFI_ST_CONNECTING;
+  wifiConnectDeadline = millis() + 45000;
+  wifiStatusLogMs = 0;
+  dbgPush("[PICO] WiFi joining...");
+  picoToS9("DBG:WIFI_ST:JOINING");
+}
+
+void handleWifiCore0() {
+  if (wifiReconnectPending) {
+    wifiReconnectPending = false;
+    startWifiConnect();
+  }
+
+  if (wifiConnectState == WIFI_ST_CONNECTING) {
+    WiFi.feedWatchdog();
+    if (WiFi.status() == WL_CONNECTED) {
+      wifiConnectState = WIFI_ST_IDLE;
+      reportWifiSuccess();
+    } else if ((long)(millis() - wifiConnectDeadline) >= 0) {
+      wifiConnectState = WIFI_ST_IDLE;
+      reportWifiFailure();
+    } else if (millis() - wifiStatusLogMs > 3000) {
+      wifiStatusLogMs = millis();
+      char st[40];
+      snprintf(st, sizeof(st), "[PICO] WiFi status=%d", (int)WiFi.status());
+      dbgPush(st);
+      picoToS9(String(F("DBG:WIFI_ST:")) + (int)WiFi.status());
+    }
+    return;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiOK = true;
+    if (!webSrvStarted) {
+      webSrv.begin();
+      webSrvStarted = true;
+    }
+    WiFiClient client = webSrv.accept();
+    if (client && client.connected()) handleWebClient(client);
+    return;
+  }
+
+  wifiOK = false;
+}
+
 void parseWifiConnect(const char* line) {
+  static unsigned long lastWifiReqMs = 0;
+  if (millis() - lastWifiReqMs < 3000) return;
+  lastWifiReqMs = millis();
+
   const char* p = line + 5;
   const char* sep = strchr(p, '|');
   if (!sep) return;
@@ -171,8 +285,10 @@ void parseWifiConnect(const char* line) {
   pendingWifiSsid[slen] = 0;
   strncpy(pendingWifiPass, sep + 1, 63);
   pendingWifiPass[63] = 0;
-  wifiReconnectPending = true;
+  trimInPlace(pendingWifiSsid);
+  trimInPlace(pendingWifiPass);
   dbgPush("[PICO] WiFi connect requested");
+  startWifiConnect();
 }
 
 // Audio queue
@@ -438,6 +554,15 @@ void onS9Line(const String& line){
     dbgPush(line.c_str() + 5);
     // Future: PICO:BEEP:..., PICO:DISPLAY:..., PICO:AUDIO:... etc.
     return;
+  }
+  String cmd = line;
+  cmd.trim();
+  if (cmd.startsWith("CMD:")) {
+    cmd = cmd.substring(4);
+    cmd.trim();
+  }
+  if (cmd.startsWith("WIFI|")) {
+    parseWifiConnect(cmd.c_str());
   }
   // Non-PICO: lines are forwarded to Mega by bridgeLoop() before this callback.
 }
@@ -2083,7 +2208,8 @@ void setup() {
   delay(200);
   // bridgeSetup() initialises USB CDC (S9) + Serial2 UART1 (Mega GP4/GP5).
   bridgeSetup();
-  Serial.println("[PICO] BuddyBot Dash booting...");
+  Serial.println(F("[PICO] BuddyBot Dash booting..."));
+  Serial.println(F("PICO_FW:WIFI_V3"));
   tft.init();
   tft.setRotation(ROTATION);
   tft.invertDisplay(false);
@@ -2097,19 +2223,51 @@ void setup() {
   digitalWrite(AUDIO_PIN, LOW);
   pinMode(PIN_CTP_RST, OUTPUT);
   digitalWrite(PIN_CTP_RST, LOW);  waitMs(50);
-  digitalWrite(PIN_CTP_RST, HIGH); waitMs(300);
+  digitalWrite(PIN_CTP_RST, HIGH); waitMs(500);   // FT6336U boot time — needs full 500ms
   Wire1.setSDA(PIN_CTP_SDA);
   Wire1.setSCL(PIN_CTP_SCL);
   Wire1.begin();
   Wire1.setClock(400000);
-  waitMs(50);
+  waitMs(100);                                    // I2C stabilise
   pinMode(PIN_CTP_INT, INPUT_PULLUP);
+
+  // FT6336U handshake — probe, then force polling mode.
+  // Some units ship in interrupt mode with an inverted default; blind polling
+  // returns stale/zero data unless we explicitly enable polling (reg 0xA4 = 0x00).
+  // We write the mode register TWICE with a verify read in between to catch
+  // units that ignore the first write during their boot self-test.
   Wire1.beginTransmission(CTP_ADDR);
   int err = Wire1.endTransmission();
   if (err == 0) {
+    // First: soft-reset the device mode by clearing register 0x00 (device mode = normal)
     Wire1.beginTransmission(CTP_ADDR); Wire1.write(0x00); Wire1.write(0x00); Wire1.endTransmission(); delay(5);
-    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xA4); Wire1.write(0x00); Wire1.endTransmission(); delay(5);
+
+    // Force polling mode (register 0xA4 = 0x00) — write, verify, rewrite if needed
+    for (uint8_t attempt = 0; attempt < 3; attempt++) {
+      Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xA4); Wire1.write(0x00); Wire1.endTransmission(); delay(10);
+      // Read back to verify
+      Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xA4); Wire1.endTransmission(false);
+      Wire1.requestFrom(CTP_ADDR, (uint8_t)1);
+      if (Wire1.available()) {
+        uint8_t mode = Wire1.read();
+        if (mode == 0x00) break;   // polling mode confirmed
+      }
+      delay(20);
+    }
+
+    // Set touch threshold to a moderate value (register 0x80) — helps with finger detection
+    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0x80); Wire1.write(0x40); Wire1.endTransmission(); delay(5);
+
+    // Set gesture detection off — we only need raw touch coordinates
+    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xD0); Wire1.write(0x00); Wire1.endTransmission(); delay(5);
+
+    Serial.println(F("[PICO] Touch OK — FT6336U polling mode"));
+  } else {
+    Serial.print(F("[PICO] Touch init FAIL — I2C err=")); Serial.println(err);
+    Serial.println(F("[PICO] Check: SDA on GP26, SCL on GP27, RST on GP15, INT on GP28, VCC 3.3V"));
   }
+  // WiFi after display + touch — CYW43 init before Wire1 can break FT6336U I2C.
+  ensureWifiRadio();
   MEGA_SERIAL.println("PING");
   waitMs(400);
   MEGA_SERIAL.println("STATUS");
@@ -2142,6 +2300,7 @@ bool handleGameBack(const TouchPt& t) {
 void loop() {
   sndUpdate();
   bridgeLoop();               // V1.1: S9↔Mega bidirectional line forwarding
+  handleWifiCore0();          // WiFi/LWIP on core 0 (non-blocking — touch keeps running)
   // USB heartbeat — visible on PC serial monitor to confirm Pico firmware is alive
   static unsigned long lastUsbHb = 0;
   if (millis() - lastUsbHb > 5000) {
@@ -2223,9 +2382,7 @@ void loop() {
   }
 }
 
-// WIFI BRIDGE -- Core 1 (ESP8285 on UART0 GP0/GP1 via WiFiEspAT)
-WiFiServer webSrv(80);
-
+// WIFI shared state (serviced on core 0 via handleWifiCore0)
 volatile uint32_t sharedSeq = 0;
 volatile int   sh_gas=0,  sh_pct=0;
 volatile float sh_temp=0,sh_hum=0,sh_volt=0,sh_amps=0;
@@ -2460,66 +2617,4 @@ void handleWebClient(WiFiClient& cl) {
   cl.stop();
 }
 
-void setup1() {
-  Serial1.setTX(0); Serial1.setRX(1);
-  Serial1.begin(115200);
-  delay(800);
-  WiFi.init(Serial1);
-  if (WiFi.status()==WL_NO_MODULE) { wifiOK=false; return; }
-  for (int i=0; i<5 && WiFi.status()!=WL_CONNECTED; i++) {
-    WiFi.begin(wifiSsid, wifiPass);
-    delay(4000);
-  }
-  if (WiFi.status()==WL_CONNECTED) {
-    wifiOK=true;
-    webSrv.begin();
-    IPAddress ip = WiFi.localIP();
-    snprintf(pendingWifiIp, sizeof(pendingWifiIp), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-    wifiIpReady = true;
-  }
-}
-
-void loop1() {
-  if (wifiReconnectPending) {
-    wifiReconnectPending = false;
-    strncpy(wifiSsid, pendingWifiSsid, 32); wifiSsid[32] = 0;
-    strncpy(wifiPass, pendingWifiPass, 63); wifiPass[63] = 0;
-    WiFi.disconnect();
-    delay(200);
-    bool connected = false;
-    for (int i = 0; i < 5 && !connected; i++) {
-      WiFi.begin(wifiSsid, wifiPass);
-      for (int j = 0; j < 20; j++) {
-        delay(500);
-        if (WiFi.status() == WL_CONNECTED) { connected = true; break; }
-      }
-    }
-    if (connected) {
-      wifiOK = true;
-      webSrv.begin();
-      IPAddress ip = WiFi.localIP();
-      snprintf(pendingWifiIp, sizeof(pendingWifiIp), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-      wifiIpReady = true;
-    } else {
-      wifiOK = false;
-    }
-    return;
-  }
-  if (WiFi.status()!=WL_CONNECTED) {
-    wifiOK=false;
-    WiFi.begin(wifiSsid, wifiPass);
-    delay(5000);
-    if (WiFi.status()==WL_CONNECTED) {
-      wifiOK=true;
-      webSrv.begin();
-      IPAddress ip = WiFi.localIP();
-      snprintf(pendingWifiIp, sizeof(pendingWifiIp), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-      wifiIpReady = true;
-    }
-    return;
-  }
-  wifiOK=true;
-  WiFiClient client=webSrv.available();
-  if (client) handleWebClient(client);
-  delay(1);
-}
+// WiFi runs on core 0 via handleWifiCore0() — arduino-pico LWIP is not safe on core 1.
