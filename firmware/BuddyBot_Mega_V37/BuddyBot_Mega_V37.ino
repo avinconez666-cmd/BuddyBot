@@ -489,11 +489,87 @@ float readHeadTemp() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  TB6612 DIRECT MOTOR CONTROL
+//  SOFT-START MOTOR RAMP  (fixes resettable fuse tripping)
 // ════════════════════════════════════════════════════════════════════
+//  Root cause: all four motors jumped to full PWM simultaneously →
+//  inrush current (3-10× running) on all motors at once → 7A PTC trips.
 //
-//  Left side  = Motors A (front) + B (rear)
-//  Right side = Motors C (front) + D (rear)
+//  Fix: non-blocking ramp — each motor steps 16 PWM counts every 20ms
+//  (0→240 in 300ms). Direction changes coast through 0 first to kill
+//  back-EMF spike. ACS712 feedback freezes the ramp if bus current
+//  approaches fuse trip threshold.
+//
+//  updateMotorRamp() must be called from loop() every cycle.
+// ════════════════════════════════════════════════════════════════════
+
+#define MOTOR_RAMP_PERIOD_MS   20    // ramp update interval (50 Hz)
+#define MOTOR_RAMP_STEP        16    // PWM counts per step (300ms to full)
+#define MOTOR_CURRENT_CUTBACK  4.5f  // freeze ramp above this bus current (A)
+
+// Per-motor ramp state (indices: 0=A FL, 1=B RL, 2=C FR, 3=D RR)
+static uint8_t  currentPwm[4] = {0, 0, 0, 0};  // actual PWM written to H-bridge
+static uint8_t  targetPwm [4] = {0, 0, 0, 0};  // desired final PWM
+static bool     targetFwd [4] = {true,true,true,true}; // desired direction
+static bool     currentFwd[4] = {true,true,true,true}; // direction currently set
+
+// IN1/IN2/PWM pin lookup by index
+static const uint8_t MTR_IN1[4] = {MTR_A_IN1, MTR_B_IN1, MTR_C_IN1, MTR_D_IN1};
+static const uint8_t MTR_IN2[4] = {MTR_A_IN2, MTR_B_IN2, MTR_C_IN2, MTR_D_IN2};
+static const uint8_t MTR_PWM[4] = {MTR_A_PWM, MTR_B_PWM, MTR_C_PWM, MTR_D_PWM};
+
+// Schedule a motor — ramp will carry it to target on its own
+static void motorQueue(uint8_t idx, uint8_t speed, bool fwd) {
+  targetPwm[idx] = speed;
+  targetFwd[idx] = fwd;
+}
+
+// Called from loop() — steps each motor toward its target at RAMP_STEP/period
+void updateMotorRamp() {
+  static unsigned long lastRampMs = 0;
+  if (millis() - lastRampMs < MOTOR_RAMP_PERIOD_MS) return;
+  lastRampMs = millis();
+
+  // ACS712 current cutback — freeze the ramp if bus current is too high.
+  // This lets the fuse cool instead of accumulating I²t until it trips.
+  if (currentAmps > MOTOR_CURRENT_CUTBACK) return;
+
+  for (uint8_t i = 0; i < 4; i++) {
+    uint8_t cur = currentPwm[i];
+    uint8_t tgt = targetPwm[i];
+    bool    curDir = currentFwd[i];
+    bool    tgtDir = targetFwd[i];
+
+    if (cur == tgt && curDir == tgtDir) continue;  // already at target
+
+    if (cur == 0 && curDir != tgtDir) {
+      // Safe to flip direction now — motor is stopped
+      currentFwd[i] = tgtDir;
+      curDir = tgtDir;
+      digitalWrite(MTR_IN1[i], tgtDir ? HIGH : LOW);
+      digitalWrite(MTR_IN2[i], tgtDir ? LOW  : HIGH);
+    }
+
+    if (curDir != tgtDir) {
+      // Direction mismatch — ramp DOWN to 0 first before switching
+      cur = (cur > MOTOR_RAMP_STEP) ? cur - MOTOR_RAMP_STEP : 0;
+    } else if (cur < tgt) {
+      // Ramp UP
+      cur = min((int)cur + MOTOR_RAMP_STEP, (int)tgt);
+    } else if (cur > tgt) {
+      // Ramp DOWN (or instant on STOP — see motorsStop)
+      cur = (cur > MOTOR_RAMP_STEP) ? cur - MOTOR_RAMP_STEP : 0;
+    }
+
+    currentPwm[i] = cur;
+    if (cur == 0 && curDir != tgtDir) {
+      // Arrived at 0 mid-direction-change — flip now for next cycle
+      currentFwd[i] = tgtDir;
+      digitalWrite(MTR_IN1[i], tgtDir ? HIGH : LOW);
+      digitalWrite(MTR_IN2[i], tgtDir ? LOW  : HIGH);
+    }
+    analogWrite(MTR_PWM[i], cur);
+  }
+}
 //  Right motors are physically mirrored -- fwd=false drives them FORWARD.
 //  Direction table:
 //    fwd=true  -> IN1=HIGH IN2=LOW  -> left motors forward,  right motors backward
@@ -505,6 +581,7 @@ float readHeadTemp() {
 //    motorsLeft()     : all  fwd=false  -> left back,  right fwd  -> spin left
 //    motorsRight()    : all  fwd=true   -> left fwd,   right back -> spin right
 //
+// Legacy direct-write — kept for emergency stop only (instant, bypasses ramp)
 void motorSet(int in1, int in2, int pwm, uint8_t speed, bool fwd) {
   digitalWrite(in1, fwd ? HIGH : LOW);
   digitalWrite(in2, fwd ? LOW  : HIGH);
@@ -515,39 +592,42 @@ void motorCoast(int in1, int in2, int pwm) {
   digitalWrite(in1, LOW); digitalWrite(in2, LOW); analogWrite(pwm, 0);
 }
 
+// ── Ramped direction commands (safe for normal movement) ─────────────
 void motorsForward() {
-  motorSet(MTR_A_IN1, MTR_A_IN2, MTR_A_PWM, motorSpeedSlot, true);
-  motorSet(MTR_B_IN1, MTR_B_IN2, MTR_B_PWM, motorSpeedSlot, true);
-  motorSet(MTR_C_IN1, MTR_C_IN2, MTR_C_PWM, motorSpeedSlot, false);
-  motorSet(MTR_D_IN1, MTR_D_IN2, MTR_D_PWM, motorSpeedSlot, false);
+  motorQueue(0, motorSpeedSlot, true);
+  motorQueue(1, motorSpeedSlot, true);
+  motorQueue(2, motorSpeedSlot, false);
+  motorQueue(3, motorSpeedSlot, false);
 }
 
 void motorsBackward() {
-  motorSet(MTR_A_IN1, MTR_A_IN2, MTR_A_PWM, motorSpeedSlot, false);
-  motorSet(MTR_B_IN1, MTR_B_IN2, MTR_B_PWM, motorSpeedSlot, false);
-  motorSet(MTR_C_IN1, MTR_C_IN2, MTR_C_PWM, motorSpeedSlot, true);
-  motorSet(MTR_D_IN1, MTR_D_IN2, MTR_D_PWM, motorSpeedSlot, true);
+  motorQueue(0, motorSpeedSlot, false);
+  motorQueue(1, motorSpeedSlot, false);
+  motorQueue(2, motorSpeedSlot, true);
+  motorQueue(3, motorSpeedSlot, true);
 }
 
 void motorsLeft() {
-  motorSet(MTR_A_IN1, MTR_A_IN2, MTR_A_PWM, motorSpeedSlot, false);
-  motorSet(MTR_B_IN1, MTR_B_IN2, MTR_B_PWM, motorSpeedSlot, false);
-  motorSet(MTR_C_IN1, MTR_C_IN2, MTR_C_PWM, motorSpeedSlot, false);
-  motorSet(MTR_D_IN1, MTR_D_IN2, MTR_D_PWM, motorSpeedSlot, false);
+  motorQueue(0, motorSpeedSlot, false);
+  motorQueue(1, motorSpeedSlot, false);
+  motorQueue(2, motorSpeedSlot, false);
+  motorQueue(3, motorSpeedSlot, false);
 }
 
 void motorsRight() {
-  motorSet(MTR_A_IN1, MTR_A_IN2, MTR_A_PWM, motorSpeedSlot, true);
-  motorSet(MTR_B_IN1, MTR_B_IN2, MTR_B_PWM, motorSpeedSlot, true);
-  motorSet(MTR_C_IN1, MTR_C_IN2, MTR_C_PWM, motorSpeedSlot, true);
-  motorSet(MTR_D_IN1, MTR_D_IN2, MTR_D_PWM, motorSpeedSlot, true);
+  motorQueue(0, motorSpeedSlot, true);
+  motorQueue(1, motorSpeedSlot, true);
+  motorQueue(2, motorSpeedSlot, true);
+  motorQueue(3, motorSpeedSlot, true);
 }
 
+// STOP is always instant — safety-critical, must not ramp
 void motorsStop() {
-  motorCoast(MTR_A_IN1, MTR_A_IN2, MTR_A_PWM);
-  motorCoast(MTR_B_IN1, MTR_B_IN2, MTR_B_PWM);
-  motorCoast(MTR_C_IN1, MTR_C_IN2, MTR_C_PWM);
-  motorCoast(MTR_D_IN1, MTR_D_IN2, MTR_D_PWM);
+  for (uint8_t i = 0; i < 4; i++) {
+    targetPwm[i]  = 0;
+    currentPwm[i] = 0;
+    motorCoast(MTR_IN1[i], MTR_IN2[i], MTR_PWM[i]);
+  }
 }
 
 void applyMotorSpeed() {
@@ -1031,6 +1111,7 @@ void processPicoCommand(String cmd) {
   if (cmd=="ESTOP_CLEAR") { emergencyStop=false;estopRetries=0;estopT=0;toS9("ACK|ESTOP_CLEARED|END"); return; }
   if (cmd=="PONG") { return; }
   if (cmd.startsWith("WIFI_IP:")) { toS9(cmd); return; }
+  if (cmd.startsWith("WIFI_FAIL")) { toS9("ACK|WIFI_FAIL|END"); return; }
   if (cmd=="AUTODOCK:ON")  { selfChargeEnabled=true;  Serial1.println(F("AUTODOCK:ON"));  return; }
   if (cmd=="AUTODOCK:OFF") { selfChargeEnabled=false; cancelDocking(); Serial1.println(F("AUTODOCK:OFF")); return; }
   if (cmd=="SMOKE_CLEAR") {
@@ -1600,6 +1681,9 @@ void setup(){
 //  MAIN LOOP
 // ════════════════════════════════════════════════════════════════════
 void loop(){
+  // Motor ramp runs every cycle — MUST be first for minimal latency
+  updateMotorRamp();
+
   if(millis()-bootStartTime<BOOT_LOCK_TIME){
     static bool bootStopSent=false;
     if(!bootStopSent){motorsStop();bootStopSent=true;}
