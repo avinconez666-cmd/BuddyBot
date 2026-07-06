@@ -1336,7 +1336,7 @@ void drawLights(){
 
   // UV LIGHT TOGGLE
   tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG);
-  tft.setCursor(8,388); tft.print("UV STERILISER");
+  tft.setCursor(8,388); tft.print("UV LIGHT");
   uint16_t uvCol  = T.uvOn ? 0xAFE5 : C_LGRAY;   // purple-white when on, grey when off
   uint16_t uvBg   = T.uvOn ? 0x300A : 0x1082;
   tft.fillRoundRect(8,400,SCR_W-16,44,8,uvBg);
