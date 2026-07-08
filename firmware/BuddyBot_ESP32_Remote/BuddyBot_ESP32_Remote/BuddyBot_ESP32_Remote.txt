@@ -1,0 +1,276 @@
+/*
+ * BuddyBot ESP32-WROOM Multi-Mode Remote Control
+ * Hardware: Keyestudio KS0413 ESP32 + XC3726 OLED + XC3736 Encoder + 6 Buttons
+ * Dual Profile: Robot Drive Mode <-> Pico W Game Controller Mode
+ */
+
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1351.h>
+#include <SPI.h>
+
+// WiFi Configuration (Match your Pico W Hotspot setup)
+const char* ssid     = "YOUR_SSID"; 
+const char* password = "YOUR_PASS";
+const String robotIP = "111.222.333.444"; 
+
+// XC3726 1.54" Color OLED Pin Definition (SSD1351 SPI)
+#define SCREEN_WIDTH  128
+#define SCREEN_HEIGHT 128
+#define OLED_CS_PIN    5
+#define OLED_DC_PIN   21
+#define OLED_RST_PIN  22
+
+Adafruit_SSD1351 tft = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, OLED_CS_PIN, OLED_DC_PIN, OLED_RST_PIN);
+
+// Extended Color Palette (RGB565)
+#define COLOR_BLACK   0x0000
+#define COLOR_BLUE    0x001F
+#define COLOR_RED     0xF800
+#define COLOR_GREEN   0x07E0
+#define COLOR_CYAN    0x07FF
+#define COLOR_YELLOW  0xFFE0
+#define COLOR_MAGENTA 0xF81F
+#define COLOR_WHITE   0xFFFF
+
+// XC3736 Rotary Encoder Pins
+#define ENC_CLK 32
+#define ENC_DT  33
+#define ENC_SW  25
+
+// 6x Tactile Buttons
+#define BTN_FWD   13  // D-Pad Up
+#define BTN_BWD    4  // D-Pad Down
+#define BTN_LEFT  16  // D-Pad Left
+#define BTN_RIGHT 17  // D-Pad Right
+#define BTN_STOP   2  // Game Action / Fire
+#define BTN_MODE  15  // Profile Toggle Button
+
+const int buttonPins[] = {BTN_FWD, BTN_BWD, BTN_LEFT, BTN_RIGHT, BTN_STOP, BTN_MODE};
+const int numButtons = 6;
+
+// Operating Modes State Machine
+enum OperationMode {
+  MODE_ROBOT_DRIVE,
+  MODE_PICO_GAME
+};
+OperationMode currentMode = MODE_ROBOT_DRIVE;
+
+// Command Profile Arrays matching processPicoCommand parser
+const String robotCommands[] = { "MOTOR:F", "MOTOR:B", "MOTOR:L", "MOTOR:R", "MOTOR:S", "PROFILE_CHANGE" };
+const String gameCommands[]  = { "GAME:UP", "GAME:DOWN", "GAME:LEFT", "GAME:RIGHT", "GAME:FIRE", "PROFILE_CHANGE" };
+
+// State Management variables
+int lastClkState;
+int currentSpeedIndex = 1; 
+const String speedSettings[] = {"SPEED:SLOW", "SPEED:NORMAL", "SPEED:FAST"};
+const char* speedLabels[]    = {"SLOW (130)", "NORMAL (200)", "FAST (240)"};
+
+unsigned long lastDebounceTime = 0;
+const unsigned long debounceDelay = 50; 
+String lastSentStatus = "IDLE";
+
+void setup() {
+  Serial.begin(115200);
+
+  for (int i = 0; i < numButtons; i++) {
+    pinMode(buttonPins[i], INPUT_PULLUP);
+  }
+
+  pinMode(ENC_CLK, INPUT);
+  pinMode(ENC_DT, INPUT);
+  pinMode(ENC_SW, INPUT_PULLUP);
+  lastClkState = digitalRead(ENC_CLK);
+
+  tft.begin();
+  tft.fillScreen(COLOR_BLACK);
+  tft.setRotation(0);
+  
+  refreshInterface();
+  connectToRobotWiFi();
+}
+
+void loop() {
+  handleWiFiReconnections();
+  readRotaryEncoder();
+  readTactileButtons();
+}
+
+// Redraws the interface screens dynamically based on active mode
+void refreshInterface() {
+  tft.fillScreen(COLOR_BLACK);
+  tft.setTextSize(1);
+  
+  if (currentMode == MODE_ROBOT_DRIVE) {
+    // Robot Dashboard Look
+    tft.setTextColor(COLOR_CYAN);
+    tft.setCursor(10, 5);
+    tft.print("--- ROBOT DRIVE ---");
+    
+    tft.setTextColor(COLOR_WHITE);
+    tft.setCursor(5, 55);
+    tft.print("Drive Profile:");
+    tft.setTextColor(COLOR_YELLOW);
+    tft.setCursor(5, 70);
+    tft.print(speedLabels[currentSpeedIndex]);
+  } 
+  else if (currentMode == MODE_PICO_GAME) {
+    // Retro Game Controller Look
+    tft.setTextColor(COLOR_MAGENTA);
+    tft.setCursor(10, 5);
+    tft.print("--- PICO GAMEPAD ---");
+    
+    tft.setTextColor(COLOR_WHITE);
+    tft.setCursor(5, 55);
+    tft.print("Layout: Active");
+    tft.setTextColor(COLOR_GREEN);
+    tft.setCursor(5, 70);
+    tft.print("D-PAD + FIRE READY");
+  }
+
+  // Network Status Block Line
+  updateDisplayNetworkStatus();
+
+  // Bottom Status Bar
+  tft.setTextColor(COLOR_WHITE);
+  tft.setCursor(5, 105);
+  tft.print("TX Pack: ");
+  tft.print(lastSentStatus);
+}
+
+void connectToRobotWiFi() {
+  WiFi.begin(ssid, password);
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  updateDisplayNetworkStatus();
+}
+
+void handleWiFiReconnections() {
+  static unsigned long lastWiFiCheck = 0;
+  if (millis() - lastWiFiCheck > 5000) {
+    lastWiFiCheck = millis();
+    if (WiFi.status() != WL_CONNECTED) {
+      updateDisplayNetworkStatus();
+      WiFi.disconnect();
+      WiFi.reconnect();
+    }
+  }
+}
+
+void updateDisplayNetworkStatus() {
+  tft.fillRect(5, 25, 120, 12, COLOR_BLACK);
+  tft.setCursor(5, 25);
+  tft.setTextSize(1);
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    tft.setTextColor(COLOR_GREEN);
+    tft.print("Link: LINKED TO PICO");
+  } else {
+    tft.setTextColor(COLOR_RED);
+    tft.print("Link: SEARCHING...");
+  }
+}
+
+void readRotaryEncoder() {
+  int clkState = digitalRead(ENC_CLK);
+  
+  if (clkState != lastClkState && clkState == LOW) {
+    bool clockWise = (digitalRead(ENC_DT) != clkState);
+    
+    if (currentMode == MODE_ROBOT_DRIVE) {
+      // Scale Speed Modes
+      if (clockWise) {
+        currentSpeedIndex = min(currentSpeedIndex + 1, 2);
+      } else {
+        currentSpeedIndex = max(currentSpeedIndex - 1, 0);
+      }
+      
+      tft.fillRect(5, 70, 120, 12, COLOR_BLACK);
+      tft.setTextColor(COLOR_YELLOW);
+      tft.setCursor(5, 70);
+      tft.print(speedLabels[currentSpeedIndex]);
+      
+      sendRobotCommand(speedSettings[currentSpeedIndex]);
+    } 
+    else if (currentMode == MODE_PICO_GAME) {
+      // Act as an analog scroll dial / paddle wheel encoder for games (e.g. Pong style)
+      if (clockWise) {
+        sendRobotCommand("GAME:ENC_CW");
+      } else {
+        sendRobotCommand("GAME:ENC_CCW");
+      }
+    }
+  }
+  lastClkState = clkState;
+
+  // Encoder Click Button actions
+  if (digitalRead(ENC_SW) == LOW) {
+    if (millis() - lastDebounceTime > debounceDelay) {
+      if (currentMode == MODE_ROBOT_DRIVE) {
+        sendRobotCommand("MOTOR:S"); // E-Stop
+      } else {
+        sendRobotCommand("GAME:SELECT"); // Menu Selection Click
+      }
+      lastDebounceTime = millis();
+    }
+  }
+}
+
+void readTactileButtons() {
+  if (millis() - lastDebounceTime < debounceDelay) return;
+
+  for (int i = 0; i < numButtons; i++) {
+    if (digitalRead(buttonPins[i]) == LOW) {
+      
+      // Handle Profile Swapping Intercept (Button 6)
+      if (buttonPins[i] == BTN_MODE) {
+        if (currentMode == MODE_ROBOT_DRIVE) {
+          currentMode = MODE_PICO_GAME;
+          sendRobotCommand("GAME:START"); // Tell Pico a game session is opening
+        } else {
+          currentMode = MODE_ROBOT_DRIVE;
+          sendRobotCommand("GAME:EXIT");  // Gracefully drop back out to Dash
+        }
+        refreshInterface();
+      } 
+      else {
+        // Send command based on active mode mapping array
+        if (currentMode == MODE_ROBOT_DRIVE) {
+          sendRobotCommand(robotCommands[i]);
+        } else {
+          sendRobotCommand(gameCommands[i]);
+        }
+      }
+      
+      lastDebounceTime = millis();
+      break; 
+    }
+  }
+}
+
+void sendRobotCommand(String cmd) {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  String url = "http://" + robotIP + "/cmd?c=" + cmd;
+  
+  http.begin(url);
+  http.setTimeout(120); // Fast timeout loop prioritization for low game latency
+  
+  int httpCode = http.GET();
+  if (httpCode > 0) {
+    lastSentStatus = cmd;
+    
+    // Refresh status line feedback at bottom
+    tft.fillRect(5, 115, 120, 12, COLOR_BLACK);
+    tft.setTextColor(COLOR_WHITE);
+    tft.setCursor(5, 115);
+    tft.print(lastSentStatus);
+  }
+  http.end();
+}

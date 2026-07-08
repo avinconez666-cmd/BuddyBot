@@ -183,11 +183,24 @@ static void trimInPlace(char* s) {
   if (p != s) memmove(s, p, strlen(p) + 1);
 }
 
+// Fixed credentials for the ESP32 remote to auto-connect (no router needed)
+#define RC_AP_SSID "BuddyBot-RC"
+#define RC_AP_PASS "BuddyBot2025"
+
 void ensureWifiRadio() {
   if (wifiRadioReady) return;
   wifiRadioReady = true;
-  WiFi.mode(WIFI_STA);
+  // WIFI_AP_STA: concurrent softAP for the ESP32 remote + STA for home network
+  WiFi.mode(WIFI_AP_STA);
   WiFi.noLowPowerMode();
+  // Start softAP immediately — fixed IP 192.168.4.1, no router needed
+  if (WiFi.softAP(RC_AP_SSID, RC_AP_PASS)) {
+    dbgPush("[PICO] AP up: BuddyBot-RC / 192.168.4.1");
+    // webSrv handles connections from both AP and STA interfaces
+    if (!webSrvStarted) { webSrv.begin(); webSrvStarted = true; }
+  } else {
+    dbgPush("[PICO] WARN: softAP failed");
+  }
   dbgPush("[PICO] WiFi radio ready");
 }
 
@@ -2344,7 +2357,20 @@ void loop() {
   }
   if (webCmdReady) {
     char wc[64]; strncpy(wc,(char*)webCmd,63); wc[63]=0; webCmdReady=false;
-    picoToMega(String(wc));
+    if (strncmp(wc,"GAME:",5)==0) {
+      // Game commands from ESP32 remote — handled by Pico locally, not sent to Mega
+      const char* g=wc+5;
+      if      (!strcmp(g,"UP"))    { /* inject up/fwd into active game */ }
+      else if (!strcmp(g,"DOWN"))  { /* inject down */ }
+      else if (!strcmp(g,"LEFT"))  { /* inject left */ }
+      else if (!strcmp(g,"RIGHT")) { /* inject right */ }
+      else if (!strcmp(g,"FIRE") || !strcmp(g,"SELECT")) { /* inject action */ }
+      else if (!strcmp(g,"START")) { /* navigate to games menu */ curScreen=SCR_GAMES; screenDirty=true; }
+      else if (!strcmp(g,"EXIT"))  { /* navigate back to main */ curScreen=SCR_MAIN;  screenDirty=true; }
+    } else {
+      // All other commands (MOTOR:, SPEED:, UV:, AUTO:, etc.) forwarded to Mega
+      picoToMega(String(wc));
+    }
   }
   bridgeLoop();
   if (megaLinked && millis()-lastMegaRx > 12000) {
