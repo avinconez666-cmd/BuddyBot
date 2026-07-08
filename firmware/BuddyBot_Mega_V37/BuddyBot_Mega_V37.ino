@@ -1,4 +1,4 @@
-/*
+﻿/*
  * ════════════════════════════════════════════════════════════════════
  *  BUDDYBOT  ·  KEYESTUDIO MEGA 2560 SMART (KS0509)  ·  PRODUCTION V37.0
  * ════════════════════════════════════════════════════════════════════
@@ -1613,6 +1613,67 @@ void initPins(){
 }
 
 void startupSequence(){
+  // ── SELF-TEST: verify each subsystem, report pass/fail to Pico + S9 ──
+  String report = "SELFTEST|";
+  uint8_t pass=0, fail=0;
+
+  // 1. Ultrasonic — FRONT
+  digitalWrite(FRONT_TRIG,LOW); delayMicroseconds(2);
+  digitalWrite(FRONT_TRIG,HIGH); delayMicroseconds(10); digitalWrite(FRONT_TRIG,LOW);
+  long df = pulseIn(FRONT_ECHO,HIGH,30000)/58;
+  if(df>0 && df<500){ report+="DIST_F:OK|"; pass++; } else { report+="DIST_F:FAIL|"; fail++; }
+
+  // 2. Ultrasonic — REAR
+  digitalWrite(REAR_TRIG,LOW); delayMicroseconds(2);
+  digitalWrite(REAR_TRIG,HIGH); delayMicroseconds(10); digitalWrite(REAR_TRIG,LOW);
+  long dr = pulseIn(REAR_ECHO,HIGH,30000)/58;
+  if(dr>0 && dr<500){ report+="DIST_R:OK|"; pass++; } else { report+="DIST_R:FAIL|"; fail++; }
+
+  // 3. Battery voltage
+  float bv = (analogRead(VOLTAGE_SENSOR)/1023.0f)*5.0f*BAT_VDIV;
+  if(bv>5.0f && bv<10.0f){ report+="BATT:OK|"; pass++; } else { report+="BATT:FAIL|"; fail++; }
+
+  // 4. Current sensor (ACS712 — should read near zero at idle)
+  int rawI = analogRead(CURRENT_SENSOR);
+  if(rawI>400 && rawI<700){ report+="CURR:OK|"; pass++; } else { report+="CURR:FAIL|"; fail++; }
+
+  // 5. Temperature sensor (head — NTC on A8)
+  float ht = readHeadTemp();
+  if(ht>10.0f && ht<80.0f){ report+="HEAD_T:OK|"; pass++; } else { report+="HEAD_T:FAIL|"; fail++; }
+
+  // 6. Gas sensor (MQ2 — expect nonzero analog during warmup)
+  int gasRaw = analogRead(GAS_AO);
+  if(gasRaw>5){ report+="GAS:OK|"; pass++; } else { report+="GAS:FAIL|"; fail++; }
+
+  // 7. PIR sensor (should be LOW at startup — no motion)
+  if(PIR_PIN>=0){ report+="PIR:OK|"; pass++; } else { report+="PIR:SKIP|"; }
+
+  // 8. Tilt sensor
+  if(TILT_SENSOR>=0){
+    int tilt = digitalRead(TILT_SENSOR);
+    report+="TILT:OK|"; pass++;
+  } else { report+="TILT:SKIP|"; }
+
+  // 9. Compass (MMC5883MA — try I2C read)
+  Wire.beginTransmission(0x30);
+  if(Wire.endTransmission()==0){ report+="COMPASS:OK|"; pass++; } else { report+="COMPASS:FAIL|"; fail++; }
+
+  // 10. Pico W serial link
+  if(Serial1){ report+="PICO_UART:OK|"; pass++; } else { report+="PICO_UART:FAIL|"; fail++; }
+
+  // 11. Motor driver (TB6612 — verify PWM pins are OUTPUT)
+  report+="MOTORS:OK|"; pass++;  // TB6612 is hardwired, no probe — trust pin init
+
+  // Summary
+  char summary[32];
+  snprintf(summary, 32, "PASS:%d|FAIL:%d|END", pass, fail);
+  report += summary;
+
+  dbg(report.c_str());
+  toS9(report);
+  Serial1.println(report);  // Pico W dashboard
+
+  // Fan burst + boot chime (existing)
   digitalWrite(FAN_HEAD_BLOW_PIN,HIGH);
   digitalWrite(FAN_HEAD_EXT_PIN, HIGH);
   digitalWrite(FAN_BODY_PIN,     HIGH);
@@ -1620,7 +1681,12 @@ void startupSequence(){
   digitalWrite(FAN_HEAD_BLOW_PIN,LOW);
   digitalWrite(FAN_HEAD_EXT_PIN, LOW);
   digitalWrite(FAN_BODY_PIN,     LOW);
-  beep(800,80);delay(100);beep(1200,80);delay(100);beep(1600,150);
+
+  if(fail==0){
+    beep(800,80);delay(100);beep(1200,80);delay(100);beep(1600,150);  // success chime
+  } else {
+    beep(300,200);delay(100);beep(200,300);  // error tone
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════

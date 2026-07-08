@@ -1,4 +1,4 @@
-/*
+﻿/*
  * BuddyBot  Pico W-2023 Dashboard  V1.1  PORTRAIT 320x480
  * Board : RP2040 Pico W-2023  TFT_eSPI  FT6336U touch  WiFiEspAT
  * Audio : Keyestudio SC8002B Power Amplifier (GP14 IN)
@@ -25,9 +25,17 @@ void updateShared();
 
 TFT_eSPI tft = TFT_eSPI();
 
+
 struct TouchPt { int16_t x,y; bool pressed; };
 struct SSBullet { float x,y; bool alive; };
 struct SSBug    { float x,y,vx,vy; bool alive; uint16_t col; };
+struct SSStar   { int x,y; uint8_t br; };
+struct SSPart   { float x,y,vx,vy; uint8_t life; uint16_t col; };
+#define SS_STARS 40
+#define SS_PARTS 32
+SSStar ssStars[SS_STARS];
+SSPart ssParts[SS_PARTS];
+bool ssStarsInit=false;
 unsigned long lastTouchMs = 0;
 
 #define SCR_W    320
@@ -58,6 +66,8 @@ bool   headerDirty = true;
 bool   bodyDirty   = true;
 Screen paintedScreen = (Screen)255;
 
+
+
 static void requestHeaderRefresh() { headerDirty = true; }
 static void requestBodyRefresh()   { if (curScreen < GAME_MARIO) bodyDirty = true; }
 static void requestFullRefresh()   { screenDirty = true; headerDirty = true; bodyDirty = true; }
@@ -86,21 +96,21 @@ TouchPt readTouch() {
 bool touchReady() { return (millis() - lastTouchMs > 100); }
 
 // Colour palette (RGB565)
-#define C_BG     0x0208
-#define C_SURF   0x0841
-#define C_SURF2  0x10C3
-#define C_BORDER 0x2945
+#define C_BG     0x0000
+#define C_SURF   0x0410
+#define C_SURF2  0x0829
+#define C_BORDER 0x10A2
 #define C_CYAN   0x07FF
-#define C_GREEN  0x07E4
-#define C_PURPLE 0x781F
-#define C_ORANGE 0xFD20
+#define C_GREEN  0x07E0
+#define C_PURPLE 0x881F
+#define C_ORANGE 0xFD00
 #define C_PINK   0xF81F
 #define C_YELLOW 0xFFE0
 #define C_RED    0xF800
-#define C_BLUE   0x001F
+#define C_BLUE   0x2D9F
 #define C_WHITE  0xFFFF
-#define C_LGRAY  0x8C71
-#define C_DGRAY  0x4208
+#define C_LGRAY  0x7BEF
+#define C_DGRAY  0x2945
 #define C_BLACK  0x0000
 #define C_MRED   0xF800
 #define C_MBLUE  0x001F
@@ -123,6 +133,8 @@ struct Telem {
   char ledMode[10]="OFF"; char ledWhite[6]="OFF"; int ledBright=255;
   bool  uvOn=false;   // UV light state — updated from Mega UV: messages
 } T;
+
+
 bool brainToggle[6]={true,true,true,true,true,true};
 const char* brainLabels[6]={"TEMP","GAS","VOLTAGE","ULTRASONICS","STATUS","MOTOR"};
 
@@ -623,6 +635,8 @@ void sendMegaHeartbeat(){
 }
 
 // UI Primitives
+
+
 uint16_t dimCol(uint16_t c,uint8_t shift=1){
   return (uint16_t)(((c>>11)>>shift)<<11)|(uint16_t)((((c>>5)&0x3F)>>shift)<<5)|(uint16_t)(((c&0x1F)>>shift));
 }
@@ -635,27 +649,65 @@ uint16_t blendCol(uint16_t a,uint16_t b,uint8_t t){
 void gradientRect(int x,int y,int w,int h,uint16_t c1,uint16_t c2){
   for(int i=0;i<h;i++) tft.drawFastHLine(x,y+i,w,blendCol(c1,c2,(uint8_t)((i*255)/max(h-1,1))));
 }
+void glowBox(int x,int y,int w,int h,uint16_t col,int r=8){
+  tft.drawRoundRect(x-2,y-2,w+4,h+4,r+2,dimCol(col,3));
+  tft.drawRoundRect(x-1,y-1,w+2,h+2,r+1,dimCol(col,2));
+  tft.drawRoundRect(x,y,w,h,r,col);
+}
+void shadowRect(int x,int y,int w,int h,uint16_t fill,uint16_t border,int r=8){
+  tft.fillRoundRect(x+3,y+4,w,h,r,0x0000);
+  tft.fillRoundRect(x,y,w,h,r,fill);
+  tft.drawRoundRect(x,y,w,h,r,border);
+}
+
+TFT_eSprite hdrSpr(&tft);
+TFT_eSprite bodSpr(&tft);
+bool spritesReady = false;
+
+struct PrevDisp {
+  int pct=-1; float volt=-99; bool linked=false;
+  long dF=-999,dR=-999,dL=-999,dRi=-999;
+  bool estop=false,autoM=false,s9=false,autodock=false,uv=false;
+  char mode[16]="?"; char dockSt[10]="?";
+} prev;
+
+bool telemChanged(){
+  bool c=false;
+  #define CHK(a,b) if((a)!=(b)){(b)=(a);c=true;}
+  CHK(T.pct,prev.pct) CHK(megaLinked,prev.linked) CHK(T.estop,prev.estop)
+  CHK(T.autoM,prev.autoM) CHK(T.s9ok,prev.s9) CHK(T.autodock,prev.autodock)
+  CHK(T.uvOn,prev.uv) CHK(T.dFront,prev.dF) CHK(T.dRear,prev.dR)
+  CHK(T.dLeft,prev.dL) CHK(T.dRight,prev.dRi)
+  #undef CHK
+  if(fabsf(T.volt-prev.volt)>0.05f){prev.volt=T.volt;c=true;}
+  if(strncmp(T.mode,prev.mode,15)){strncpy(prev.mode,T.mode,15);c=true;}
+  if(strncmp(T.dockSt,prev.dockSt,9)){strncpy(prev.dockSt,T.dockSt,9);c=true;}
+  return c;
+}
+
+uint8_t breathe(uint16_t pMs=2000){
+  uint32_t t=millis()%pMs;
+  return (uint8_t)(127.5f+sinf(t*6.2832f/pMs)*127.5f);
+}
+uint16_t breatheCol(uint16_t col,uint16_t pMs=2400){
+  return blendCol(dimCol(col,3),col,breathe(pMs));
+}
 void glassCard(int x,int y,int w,int h,uint16_t accent){
-  gradientRect(x+1,y+1,w-2,h-2,0x0C62,0x0841);
-  tft.drawRoundRect(x,y,w,h,8,dimCol(accent,1));
-  tft.drawFastHLine(x+4,y+1,w-8,dimCol(accent,0));
-  tft.drawFastHLine(x+2,y,w-4,accent);
-  tft.drawFastHLine(x+4,y+h,w-4,0x0208);
-  tft.drawFastVLine(x+w,y+4,h-4,0x0208);
+  gradientRect(x+1,y+1,w-2,h-2,blendCol(C_SURF,accent,15),C_BG);
+  glowBox(x,y,w,h,accent,8);
+  tft.drawFastHLine(x+8,y+2,w-16,dimCol(accent,1));
 }
 void neonBox(int x,int y,int w,int h,uint16_t col,uint16_t bg=C_SURF){
-  tft.fillRoundRect(x+3,y+3,w,h,6,0x0208);
-  gradientRect(x+1,y+1,w-2,h-2,blendCol(bg,col,40),bg);
-  tft.drawRoundRect(x+1,y+1,w-2,h-2,5,dimCol(col,2));
-  tft.drawRoundRect(x,y,w,h,6,col);
-  tft.drawFastHLine(x+4,y+1,w-8,dimCol(col,1));
+  tft.fillRoundRect(x+3,y+4,w,h,6,0x0000);
+  gradientRect(x+1,y+1,w-2,h-2,blendCol(bg,col,25),bg);
+  glowBox(x,y,w,h,col,6);
+  tft.drawFastHLine(x+6,y+2,w-12,dimCol(col,1));
 }
 void glowText(int x,int y,const char* txt,uint16_t col,uint8_t sz=1){
-  uint16_t d1=dimCol(col,2), d2=dimCol(col,1);
   tft.setTextSize(sz); tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(d1,C_BG); tft.setCursor(x+2,y+2); tft.print(txt);
-  tft.setTextColor(d2,C_BG); tft.setCursor(x+1,y+1); tft.print(txt);
-  tft.setTextColor(col,C_BG); tft.setCursor(x,y);     tft.print(txt);
+  tft.setTextColor(dimCol(col,3),C_BG); tft.setCursor(x+2,y+2); tft.print(txt);
+  tft.setTextColor(dimCol(col,2),C_BG); tft.setCursor(x+1,y+1); tft.print(txt);
+  tft.setTextColor(col,C_BG);           tft.setCursor(x,y);      tft.print(txt);
 }
 void centreText(int cx,int y,const char* txt,uint16_t col,uint8_t sz,uint16_t bg=C_BG){
   tft.setTextSize(sz); tft.setTextColor(col,bg);
@@ -663,21 +715,19 @@ void centreText(int cx,int y,const char* txt,uint16_t col,uint8_t sz,uint16_t bg
   tft.setCursor(cx-tw/2,y); tft.print(txt);
 }
 void neonBtn(int x,int y,int w,int h,const char* icon,const char* label,uint16_t col,bool pressed=false){
-  uint16_t bg   = pressed ? dimCol(col,1) : 0x0A41;
-  uint16_t tc   = pressed ? C_BLACK : col;
-  tft.fillRoundRect(x+4,y+4,w,h,10,0x0104);
-  gradientRect(x,y,w,h,blendCol(bg,col,30),bg);
-  tft.drawRoundRect(x,y,w,h,10,bg);
-  tft.drawRoundRect(x,y,w,h,10,col);
-  tft.drawFastHLine(x+4,y+1,w-8,dimCol(col,1));
-  tft.drawFastVLine(x+1,y+4,h/3,dimCol(col,2));
-  tft.drawFastHLine(x+4,y+h-1,w-8,dimCol(col,3));
-  tft.setTextSize(3); tft.setTextColor(tc,0x0A41);
+  uint16_t bg=pressed?blendCol(C_BG,col,70):C_SURF;
+  tft.fillRoundRect(x+4,y+5,w,h,10,0x0000);
+  gradientRect(x,y,w,h,blendCol(bg,col,pressed?35:18),bg);
+  glowBox(x,y,w,h,pressed?col:dimCol(col,1),10);
+  tft.drawFastHLine(x+14,y+2,w-28,dimCol(col,pressed?2:1));
+  tft.setTextSize(3);
+  tft.setTextColor(pressed?C_WHITE:blendCol(col,C_WHITE,70),0x0000);
   int16_t iw=strlen(icon)*18;
-  tft.setCursor(x+(w-iw)/2, y+h/2-26); tft.print(icon);
-  tft.setTextSize(2); tft.setTextColor(col,0x0A41);
+  tft.setCursor(x+(w-iw)/2,y+h/2-26); tft.print(icon);
+  tft.setTextSize(2);
+  tft.setTextColor(pressed?C_WHITE:blendCol(C_WHITE,col,50),0x0000);
   int16_t lw=strlen(label)*12;
-  tft.setCursor(x+(w-lw)/2, y+h/2+8); tft.print(label);
+  tft.setCursor(x+(w-lw)/2,y+h/2+10); tft.print(label);
 }
 void statPill(int x,int y,int w,const char* lbl,const char* val,uint16_t col){
   gradientRect(x,y,w,26,blendCol(C_SURF,col,20),C_SURF);
@@ -752,74 +802,79 @@ void hRule(int y,uint16_t col=C_CYAN){
 }
 
 void drawHeader(){
-  tft.fillRect(0,0,SCR_W,57,C_BG);
-  gradientRect(0,0,SCR_W,56,0x1082,0x0208);
-  tft.drawFastHLine(0,0,SCR_W,C_CYAN);
-  tft.drawFastHLine(0,1,SCR_W,dimCol(C_CYAN,1));
-  tft.drawFastHLine(0,55,SCR_W,dimCol(C_CYAN,2));
-  tft.drawFastHLine(0,56,SCR_W,dimCol(C_CYAN,3));
-  tft.setTextSize(2);
-  uint16_t s1=dimCol(C_CYAN,3),s2=dimCol(C_CYAN,2);
-  int16_t tw=13*12; int tx=SCR_W/2-tw/2;
-  tft.setTextColor(s1,0x0000); tft.setCursor(tx+2,8+2); tft.print("AJ2BUDDYCOMMS");
-  tft.setTextColor(s2,0x0000); tft.setCursor(tx+1,8+1); tft.print("AJ2BUDDYCOMMS");
-  tft.setTextColor(C_CYAN,0x0000); tft.setCursor(tx,8);  tft.print("AJ2BUDDYCOMMS");
+  if(!spritesReady) return;
+  TFT_eSprite& s=hdrSpr;
+  for(int i=0;i<HDR_H-1;i++) s.drawFastHLine(0,i,SCR_W,blendCol(0x0C62,C_BG,(uint8_t)((i*255)/(HDR_H-1))));
+  s.drawFastHLine(0,0,SCR_W,C_CYAN); s.drawFastHLine(0,1,SCR_W,dimCol(C_CYAN,1));
+  s.drawFastHLine(0,HDR_H-2,SCR_W,dimCol(C_CYAN,2)); s.drawFastHLine(0,HDR_H-1,SCR_W,dimCol(C_CYAN,3));
+  int tx=SCR_W/2-78; s.setTextSize(2);
+  s.setTextColor(dimCol(C_CYAN,3),0x0000); s.setCursor(tx+2,10); s.print("AJ2BUDDYCOMMS");
+  s.setTextColor(dimCol(C_CYAN,2),0x0000); s.setCursor(tx+1,9);  s.print("AJ2BUDDYCOMMS");
+  s.setTextColor(C_CYAN,0x0000);           s.setCursor(tx,8);     s.print("AJ2BUDDYCOMMS");
   uint16_t lk=megaLinked?C_GREEN:C_RED;
-  tft.fillCircle(10,44,5,dimCol(lk,2));
-  tft.fillCircle(10,44,3,lk);
-  tft.setTextSize(1); tft.setTextColor(megaLinked?C_GREEN:C_RED,0x0000);
-  tft.setCursor(18,40); tft.print(megaLinked?"LIVE":"WAIT");
-  char buf[10];
-  uint16_t bc=T.pct>50?C_GREEN:T.pct>20?C_ORANGE:C_RED;
+  uint16_t lkA=megaLinked?breatheCol(C_GREEN,1800):C_RED;
+  s.fillCircle(12,44,7,dimCol(lk,3)); s.fillCircle(12,44,5,dimCol(lk,2)); s.fillCircle(12,44,3,lkA);
+  s.setTextSize(1); s.setTextColor(lk,0x0000); s.setCursor(22,41); s.print(megaLinked?"LIVE":"WAIT");
+  char buf[12]; uint16_t bc=T.pct>50?C_GREEN:T.pct>20?C_ORANGE:C_RED;
   snprintf(buf,10,"%d%%",T.pct);
-  tft.drawRect(54,38,32,12,C_LGRAY);
-  tft.fillRect(55,39,(int)(T.pct*30/100),10,bc);
-  tft.fillRect(86,41,3,6,C_LGRAY);
-  tft.setTextColor(bc,0x0000); tft.setCursor(92,40); tft.print(buf);
+  s.drawRoundRect(58,37,36,14,2,dimCol(C_LGRAY,1));
+  int bf=constrain((int)(T.pct*32/100),0,32);
+  if(bf>0) s.fillRoundRect(59,38,bf,12,1,bc);
+  s.fillRect(94,41,3,8,C_LGRAY);
+  s.setTextColor(bc,0x0000); s.setCursor(100,40); s.print(buf);
   snprintf(buf,10,"%.1fV",T.volt);
-  tft.setTextColor(C_CYAN,0x0000); tft.setCursor(128,40); tft.print(buf);
-  uint16_t mc=C_PURPLE;
-  int16_t mw=strlen(T.mode)*6+8;
-  gradientRect(SCR_W-mw-2,34,mw,18,blendCol(C_SURF,mc,40),C_SURF);
-  tft.drawRect(SCR_W-mw-2,34,mw,18,mc);
-  tft.setTextColor(mc,0x0000); tft.setCursor(SCR_W-mw+2,39); tft.print(T.mode);
+  s.setTextColor(dimCol(C_CYAN,1),0x0000); s.setCursor(140,40); s.print(buf);
+  int mw=strlen(T.mode)*6+12; int mx=SCR_W-mw-6;
+  s.fillRoundRect(mx,33,mw,20,4,blendCol(C_BG,C_PURPLE,50));
+  s.drawRoundRect(mx,33,mw,20,4,C_PURPLE);
+  s.drawRoundRect(mx-1,32,mw+2,22,5,dimCol(C_PURPLE,2));
+  s.setTextColor(C_PURPLE,0x0000); s.setCursor(mx+6,38); s.print(T.mode);
+  s.pushSprite(0,0);
 }
 
 // MAIN SCREEN
 void drawMain() {
   tft.fillScreen(C_BG);
-  drawHeader();
-  const int BW=148, BH=118, PAD=8;
-  const int ROW1=60, ROW2=ROW1+BH+PAD;
-  neonBtn(PAD,         ROW1, BW, BH, ">",  "GAMES",   C_GREEN);
-  neonBtn(PAD+BW+PAD,  ROW1, BW, BH, "o",  "SENSORS", C_CYAN);
-  neonBtn(PAD,         ROW2, BW, BH, "~",  "COMMS",   C_PURPLE);
-  neonBtn(PAD+BW+PAD,  ROW2, BW, BH, "*",  "SETTINGS",C_ORANGE);
-  const int LY=ROW2+BH+PAD, LH=52;
-  neonBtn(PAD, LY, SCR_W-2*PAD, LH, "::", "LIGHTS", C_PINK);
-  int sy=LY+LH+8;
-  tft.fillRect(0,sy,SCR_W,SCR_H-sy,C_SURF);
-  hRule(sy,C_CYAN);
-  char buf[16];
-  snprintf(buf,16,"F:%ldcm",T.dFront<0?0:T.dFront);
-  tft.setTextSize(1); tft.setTextColor(T.dFront<30?C_RED:C_CYAN,C_SURF);
-  tft.setCursor(6,sy+8); tft.print(buf);
-  snprintf(buf,16,"R:%ldcm",T.dRear<0?0:T.dRear);
-  tft.setTextColor(T.dRear<30?C_RED:C_CYAN,C_SURF);
-  tft.setCursor(86,sy+8); tft.print(buf);
-  snprintf(buf,16,"L:%ldcm",T.dLeft<0?0:T.dLeft);
-  tft.setTextColor(T.dLeft<30?C_RED:C_CYAN,C_SURF);
-  tft.setCursor(166,sy+8); tft.print(buf);
-  uint16_t adCol=T.autodock?C_GREEN:C_LGRAY;
-  uint16_t adBg=T.autodock?0x0440:0x1082;
-  tft.fillRoundRect(162,sy+2,SCR_W-170,SCR_H-sy-4,5,adBg);
-  tft.drawRoundRect(162,sy+2,SCR_W-170,SCR_H-sy-4,5,adCol);
-  tft.setTextSize(1); tft.setTextColor(adCol,adBg);
-  tft.setCursor(168,sy+8);  tft.print("AUTO DOCK");
-  tft.setTextColor(T.autodock?C_GREEN:C_RED,adBg);
-  tft.setCursor(168,sy+22); tft.print(T.autodock?"ENABLED ":"DISABLED");
-  tft.setTextColor(C_CYAN,adBg);
-  tft.setCursor(168,sy+36); tft.print(T.dockSt);
+  if(hdrSpr.createSprite(SCR_W,HDR_H)&&bodSpr.createSprite(SCR_W,56)) spritesReady=true; drawHeader();
+  const int BW=148,BH=118,PAD=8,ROW1=62,ROW2=ROW1+BH+PAD;
+  neonBtn(PAD,ROW1,BW,BH,">","GAMES",C_GREEN);
+  neonBtn(PAD+BW+PAD,ROW1,BW,BH,"o","SENSORS",C_CYAN);
+  neonBtn(PAD,ROW2,BW,BH,"~","COMMS",C_PURPLE);
+  neonBtn(PAD+BW+PAD,ROW2,BW,BH,"*","SETTINGS",C_ORANGE);
+  const int LY=ROW2+BH+PAD,LH=54;
+  tft.fillRoundRect(PAD+4,LY+5,SCR_W-2*PAD,LH,12,0x0000);
+  gradientRect(PAD,LY,SCR_W-2*PAD,LH,blendCol(C_SURF,C_PINK,12),C_SURF);
+  glowBox(PAD,LY,SCR_W-2*PAD,LH,C_PINK,12);
+  tft.setTextSize(3); tft.setTextColor(blendCol(C_WHITE,C_PINK,60),0x0000);
+  tft.setCursor(PAD+(SCR_W-2*PAD-54)/2,LY+10); tft.print("::");
+  tft.setTextSize(2); tft.setTextColor(blendCol(C_WHITE,C_PINK,50),0x0000);
+  tft.setCursor(PAD+(SCR_W-2*PAD-72)/2,LY+32); tft.print("LIGHTS");
+  refreshMainBody();
+}
+
+void refreshMainBody(){
+  if(!spritesReady) return;
+  const int sy=62+118+8+118+8+54+8,bh=SCR_H-sy;
+  TFT_eSprite& s=bodSpr;
+  for(int i=0;i<s.height();i++) s.drawFastHLine(0,i,SCR_W,blendCol(C_SURF,C_CYAN,5));
+  s.drawFastHLine(0,0,SCR_W,C_CYAN); s.drawFastHLine(0,1,SCR_W,dimCol(C_CYAN,2));
+  char buf[18]; s.setTextSize(1);
+  uint16_t cf=T.dFront<0?C_DGRAY:T.dFront<30?C_RED:T.dFront<80?C_ORANGE:C_GREEN;
+  snprintf(buf,18,T.dFront<0?"F:--":"F:%ldcm",T.dFront);
+  s.setTextColor(cf,0x0000); s.setCursor(6,8); s.print(buf);
+  uint16_t cr=T.dRear<0?C_DGRAY:T.dRear<30?C_RED:T.dRear<80?C_ORANGE:C_GREEN;
+  snprintf(buf,18,T.dRear<0?"R:--":"R:%ldcm",T.dRear);
+  s.setTextColor(cr,0x0000); s.setCursor(90,8); s.print(buf);
+  uint16_t cl=T.dLeft<0?C_DGRAY:T.dLeft<30?C_RED:T.dLeft<80?C_ORANGE:C_GREEN;
+  snprintf(buf,18,T.dLeft<0?"L:--":"L:%ldcm",T.dLeft);
+  s.setTextColor(cl,0x0000); s.setCursor(172,8); s.print(buf);
+  uint16_t adC=T.autodock?C_GREEN:C_DGRAY;
+  s.fillRoundRect(162,2,SCR_W-170,bh-4,6,T.autodock?blendCol(C_BG,C_GREEN,30):C_SURF);
+  s.drawRoundRect(162,2,SCR_W-170,bh-4,6,adC);
+  s.setTextColor(adC,0x0000); s.setCursor(170,8); s.print("AUTO DOCK");
+  s.setTextColor(T.autodock?C_GREEN:C_RED,0x0000); s.setCursor(170,22); s.print(T.autodock?"ENABLED ":"DISABLED");
+  s.setTextColor(dimCol(C_CYAN,1),0x0000); s.setCursor(170,36); s.print(T.dockSt);
+  s.pushSprite(0,sy);
 }
 
 void handleMainTouch(TouchPt& t) {
@@ -843,14 +898,19 @@ void drawGames() {
   drawBack(C_GREEN);
   glowText(SCR_W/2-48,55,"GAMES MENU",C_GREEN,2);
   hRule(72,C_GREEN);
-  const char* names[]={"SUPER MARIO","PACMAN","STARSHIP","MEMORY","COLOR MATCH","MATH"};
+  const char* names[]={"SUPER MARIO","PAC-MAN","STARSHIP","MEMORY","COLOR MATCH","MATH BLAST"};
   uint16_t    cols[] ={C_RED,C_YELLOW,C_CYAN,C_PURPLE,C_ORANGE,C_GREEN};
   for(int i=0;i<6;i++){
-    int bx=8, by=80+i*62;
-    neonBox(bx,by,SCR_W-16,54,cols[i],C_SURF);
-    tft.setTextSize(2); tft.setTextColor(cols[i],C_SURF);
+    int bx=8,by=80+i*62,bw=SCR_W-16,bh=54;
+    tft.fillRoundRect(bx+3,by+4,bw,bh,8,0x0000);
+    gradientRect(bx,by,bw,bh,blendCol(C_SURF,cols[i],20),C_SURF);
+    glowBox(bx,by,bw,bh,cols[i],8);
+    tft.drawFastHLine(bx+12,by+2,bw-24,dimCol(cols[i],1));
+    tft.setTextSize(2); tft.setTextColor(blendCol(C_WHITE,cols[i],40),0x0000);
     int16_t tw=strlen(names[i])*12;
-    tft.setCursor(bx+(SCR_W-16-tw)/2, by+16); tft.print(names[i]);
+    tft.setCursor(bx+(bw-tw)/2,by+16); tft.print(names[i]);
+    tft.setTextSize(1); tft.setTextColor(dimCol(cols[i],1),0x0000);
+    tft.setCursor(bx+bw-20,by+22); tft.print(">");
   }
 }
 
@@ -1143,52 +1203,32 @@ void drawSensTummy(bool fullLayout=true) {
   tw=strlen(buf)*12; tft.setCursor(SCR_W-tw-8,416); tft.print(buf);
 }
 
-void refreshMainBody(){
-  const int ROW1=60,ROW2=ROW1+118+8,LY=ROW2+118+8,LH=52,sy=LY+LH+8;
-  tft.fillRect(0,sy,SCR_W,SCR_H-sy,C_SURF);
-  hRule(sy,C_CYAN);
-  char buf[16];
-  tft.setTextSize(1);
-  snprintf(buf,16,T.dFront<0?"--":"%ldcm",T.dFront);
-  tft.setTextColor(T.dFront<0?C_DGRAY:T.dFront<30?C_RED:C_CYAN,C_SURF);
-  tft.setCursor(6,sy+8); tft.print("F:"); tft.print(buf);
-  snprintf(buf,16,T.dRear<0?"--":"%ldcm",T.dRear);
-  tft.setTextColor(T.dRear<0?C_DGRAY:T.dRear<30?C_RED:C_CYAN,C_SURF);
-  tft.setCursor(86,sy+8); tft.print("R:"); tft.print(buf);
-  snprintf(buf,16,T.dLeft<0?"--":"%ldcm",T.dLeft);
-  tft.setTextColor(T.dLeft<0?C_DGRAY:T.dLeft<30?C_RED:C_CYAN,C_SURF);
-  tft.setCursor(166,sy+8); tft.print("L:"); tft.print(buf);
-  uint16_t adCol=T.autodock?C_GREEN:C_LGRAY, adBg=T.autodock?0x0440:0x1082;
-  tft.fillRoundRect(162,sy+2,SCR_W-170,SCR_H-sy-4,5,adBg);
-  tft.drawRoundRect(162,sy+2,SCR_W-170,SCR_H-sy-4,5,adCol);
-  tft.setTextSize(1); tft.setTextColor(adCol,adBg);
-  tft.setCursor(168,sy+8); tft.print("AUTO DOCK");
-  tft.setTextColor(T.autodock?C_GREEN:C_RED,adBg);
-  tft.setCursor(168,sy+22); tft.print(T.autodock?"ENABLED ":"DISABLED");
-  tft.setTextColor(C_CYAN,adBg);
-  tft.setCursor(168,sy+36); tft.print(T.dockSt);
-}
+
 
 void refreshCommsBody(){
   int y=84;
   const char* labels[]={"MEGA UART","MEGA MOTORS","WIFI (PICO W)","S9 ANDROID"};
-  bool states[]={megaLinked, megaLinked && !T.estop, T.wifiOk, T.s9ok};
+  bool states[]={megaLinked, megaLinked&&!T.estop, T.wifiOk, T.s9ok};
   uint16_t cols[]={C_CYAN,C_GREEN,C_ORANGE,C_PURPLE};
   for(int i=0;i<4;i++){
     bool ok=states[i]; uint16_t c=ok?cols[i]:C_DGRAY;
-    tft.fillRect(8,y,SCR_W-16,76,C_SURF);
-    neonBox(8,y,SCR_W-16,76,c,C_SURF);
-    tft.fillCircle(24,y+22,8,ok?c:C_DGRAY);
-    tft.setTextSize(2); tft.setTextColor(c,C_SURF);
-    tft.setCursor(40,y+14); tft.print(labels[i]);
-    tft.setTextSize(1); tft.setTextColor(ok?C_WHITE:C_DGRAY,C_SURF);
-    tft.setCursor(40,y+38); tft.print(ok?"CONNECTED - ONLINE":"NOT DETECTED");
-    y+=84;
+    tft.fillRoundRect(11,y+3,SCR_W-16,72,8,0x0000);
+    gradientRect(8,y,SCR_W-16,72,blendCol(C_SURF,c,ok?20:5),C_SURF);
+    glowBox(8,y,SCR_W-16,72,c,8);
+    uint16_t dot=ok?breatheCol(c,1600):C_DGRAY;
+    tft.fillCircle(28,y+20,10,dimCol(dot,3));
+    tft.fillCircle(28,y+20,7,dimCol(dot,2));
+    tft.fillCircle(28,y+20,4,dot);
+    tft.setTextSize(2); tft.setTextColor(ok?blendCol(C_WHITE,c,50):C_DGRAY,0x0000);
+    tft.setCursor(46,y+12); tft.print(labels[i]);
+    tft.setTextSize(1); tft.setTextColor(ok?c:C_DGRAY,0x0000);
+    tft.setCursor(46,y+36); tft.print(ok?"ONLINE":"OFFLINE");
+    if(ok){for(int b=0;b<4;b++) tft.fillRect(SCR_W-28+b*5,y+36-(b*5),4,6+b*5,blendCol(C_BG,c,b*60));}
+    y+=80;
   }
-  tft.fillRect(0,y+4,SCR_W,30,C_BG);
+  tft.fillRect(0,y+4,SCR_W,SCR_H-y-4,C_BG);
   hRule(y+4,C_PURPLE);
-  char buf[40];
-  unsigned long since=(millis()-lastMegaRx)/1000;
+  char buf[40]; unsigned long since=(millis()-lastMegaRx)/1000;
   snprintf(buf,40,"Last Mega RX: %lus ago",since);
   tft.setTextSize(1); tft.setTextColor(since>10?C_RED:C_GREEN,C_BG);
   tft.setCursor(8,y+12); tft.print(buf);
@@ -1851,6 +1891,34 @@ struct StarShip {
   int  bugsAlive;
 } ship;
 
+void ssInitStars(){
+  for(int i=0;i<SS_STARS;i++) ssStars[i]={(int)random(SCR_W),(int)random(GAME_TOP,SCR_H),(uint8_t)random(50,255)};
+  ssStarsInit=true;
+}
+void ssDrawStars(){
+  for(int i=0;i<SS_STARS;i++){
+    tft.drawPixel(ssStars[i].x,ssStars[i].y,blendCol(C_BG,C_WHITE,ssStars[i].br));
+    ssStars[i].br=(uint8_t)constrain((int)ssStars[i].br+(int)random(5)-2,30,240);
+  }
+}
+void ssSpawnPart(float x,float y,uint16_t col){
+  for(int i=0;i<SS_PARTS;i++) if(ssParts[i].life==0){
+    float a=(float)random(628)/100.0f,sp=(float)random(20,50)/10.0f;
+    ssParts[i]={x,y,cosf(a)*sp,sinf(a)*sp,60,col}; return;
+  }
+}
+void ssUpdateParts(){
+  for(int i=0;i<SS_PARTS;i++){
+    if(!ssParts[i].life) continue;
+    tft.drawPixel((int)ssParts[i].x,(int)ssParts[i].y,C_BG);
+    ssParts[i].x+=ssParts[i].vx; ssParts[i].y+=ssParts[i].vy;
+    ssParts[i].vy+=0.12f; ssParts[i].vx*=0.95f; ssParts[i].vy*=0.95f;
+    ssParts[i].life--;
+    if(ssParts[i].life&&ssParts[i].x>0&&ssParts[i].x<SCR_W&&ssParts[i].y>GAME_TOP&&ssParts[i].y<SCR_H)
+      tft.fillRect((int)ssParts[i].x,(int)ssParts[i].y,2,2,blendCol(C_BG,ssParts[i].col,(uint8_t)(ssParts[i].life*4)));
+  }
+}
+
 void ssReset(){
   ship.sx=SCR_W/2; ship.prevSx=ship.sx; ship.score=0; ship.lives=3; ship.wave=1; ship.gameOver=false; ship.bugsAlive=0;
   ship.prevScore=-1; ship.prevLives=-1; ship.prevWave=-1; ship.bgDrawn=false;
@@ -1859,6 +1927,8 @@ void ssReset(){
     ship.bugs[i]={(float)(20+i*18),(float)(GAME_TOP+12+(i/8)*32),(float)(random(3)-1)*0.8f,0.3f,true,(uint16_t)(i%2?C_RED:C_GREEN)};
     ship.bugsAlive++;
   }
+  ssInitStars();
+  for(int i=0;i<SS_PARTS;i++) ssParts[i].life=0;
 }
 
 void ssDrawShip(float sx){
@@ -1912,6 +1982,8 @@ void ssDrawFrame(){
   ssEraseShip(ship.prevSx);
   for(int i=0;i<SS_MAX_BULLETS;i++) ssEraseBullet(ship.prevBullets[i]);
   for(int i=0;i<SS_MAX_BUGS;i++) ssEraseBug(ship.prevBugs[i]);
+  ssDrawStars();
+  ssUpdateParts();
   for(int i=0;i<SS_MAX_BULLETS;i++) ssDrawBullet(ship.bullets[i]);
   for(int i=0;i<SS_MAX_BUGS;i++) ssDrawBug(ship.bugs[i]);
   ssDrawShip(ship.sx);
@@ -1960,8 +2032,8 @@ void updateStarship(){
     if(!b.alive)continue;
     b.x+=b.vx; b.y+=b.vy;
     if(b.x<8||b.x>SCR_W-8)b.vx*=-1;
-    if(b.y>SCR_H-50){ship.lives--;b.alive=false;ship.bugsAlive--;sndDeath();if(ship.lives<=0){ship.gameOver=true;sndGameOver();}}
-    for(auto& blt:ship.bullets){if(!blt.alive)continue;if(abs(blt.x-b.x)<12&&abs(blt.y-b.y)<12){blt.alive=false;b.alive=false;ship.bugsAlive--;ship.score+=100;sndHit();}}
+    if(b.y>SCR_H-50){ship.lives--;b.alive=false;ship.bugsAlive--;sndDeath();for(int p=0;p<5;p++)ssSpawnPart(b.x,SCR_H-50,C_RED);if(ship.lives<=0){ship.gameOver=true;sndGameOver();}}
+    for(auto& blt:ship.bullets){if(!blt.alive)continue;if(abs(blt.x-b.x)<12&&abs(blt.y-b.y)<12){blt.alive=false;b.alive=false;ship.bugsAlive--;ship.score+=100;sndHit();for(int p=0;p<8;p++)ssSpawnPart(b.x,b.y,b.col);}}
   }
   if(ship.bugsAlive<=0){
     ship.wave++; ship.bugsAlive=0;
@@ -2006,14 +2078,24 @@ void memShuffle(){
 }
 
 void drawMemCard(int r,int c){
-  int x=MEM_OX+c*(MEM_CW+MEM_PAD), y=MEM_OY+r*(MEM_CH+MEM_PAD);
-  uint16_t col=MEM.matched[r][c]?C_DGRAY:MEM.flipped[r][c]?memColors[MEM.cards[r][c]]:C_SURF2;
-  neonBox(x,y,MEM_CW,MEM_CH,MEM.flipped[r][c]||MEM.matched[r][c]?col:C_PURPLE,col);
-  if(MEM.flipped[r][c]&&!MEM.matched[r][c]){
-    char v[4]; snprintf(v,4,"%d",MEM.cards[r][c]+1);
-    tft.setTextSize(3); tft.setTextColor(C_WHITE,col);
-    int16_t tw=strlen(v)*18; tft.setCursor(x+(MEM_CW-tw)/2,y+MEM_CH/2-10); tft.print(v);
+  int x=MEM_OX+c*(MEM_CW+MEM_PAD),y=MEM_OY+r*(MEM_CH+MEM_PAD);
+  bool fl=MEM.flipped[r][c],ma=MEM.matched[r][c];
+  uint16_t col=ma?dimCol(memColors[MEM.cards[r][c]],2):fl?memColors[MEM.cards[r][c]]:C_SURF;
+  uint16_t brd=ma?dimCol(col,1):fl?col:C_PURPLE;
+  tft.fillRoundRect(x+2,y+3,MEM_CW,MEM_CH,8,0x0000);
+  if(fl||ma) gradientRect(x,y,MEM_CW,MEM_CH,blendCol(C_BG,col,fl?35:15),C_BG);
+  else       gradientRect(x,y,MEM_CW,MEM_CH,blendCol(C_SURF,C_PURPLE,20),C_SURF);
+  glowBox(x,y,MEM_CW,MEM_CH,brd,8);
+  if(!fl&&!ma){
+    for(int dy=14;dy<MEM_CH-8;dy+=10) for(int dx=10;dx<MEM_CW-6;dx+=10)
+      tft.drawPixel(x+dx,y+dy,dimCol(C_PURPLE,2));
+    return;
   }
+  if(ma){tft.setTextSize(2);tft.setTextColor(brd,0x0000);tft.setCursor(x+MEM_CW/2-12,y+MEM_CH/2-10);tft.print("OK");return;}
+  char v[4]; snprintf(v,4,"%d",MEM.cards[r][c]+1);
+  tft.setTextSize(3); int16_t tw=strlen(v)*18;
+  tft.setTextColor(dimCol(col,2),0x0000); tft.setCursor(x+(MEM_CW-tw)/2+2,y+MEM_CH/2-8); tft.print(v);
+  tft.setTextColor(C_WHITE,0x0000);       tft.setCursor(x+(MEM_CW-tw)/2,y+MEM_CH/2-10);  tft.print(v);
 }
 
 void drawMemGame(){
@@ -2083,9 +2165,12 @@ void drawColMatch(){
   tft.startWrite();
   tft.fillRect(0,GAME_TOP,SCR_W,SCR_H-GAME_TOP,C_BG);
   unsigned long el=millis()-CM.roundStart;
-  int bw=(int)((max(0UL,5000-el)*(SCR_W-20))/5000);
-  tft.fillRect(10,GAME_TOP+38,SCR_W-20,8,C_SURF);
-  tft.fillRect(10,GAME_TOP+38,bw,8,el<3500?C_GREEN:C_RED);
+  float pct=1.0f-(float)el/5000.0f; if(pct<0)pct=0;
+  int bw=(int)(pct*(SCR_W-24));
+  uint16_t tc=pct>0.5f?C_GREEN:pct>0.2f?C_ORANGE:C_RED;
+  tft.fillRoundRect(10,GAME_TOP+38,SCR_W-20,10,4,C_SURF);
+  tft.drawRoundRect(10,GAME_TOP+38,SCR_W-20,10,4,dimCol(tc,2));
+  if(bw>4) tft.fillRoundRect(12,GAME_TOP+40,bw,6,3,tc);
   tft.fillRoundRect(50,GAME_TOP+52,SCR_W-100,108,10,CM.targetCol);
   tft.setTextSize(3); tft.setTextColor(C_WHITE,CM.targetCol);
   int16_t tw=strlen(CM.targetName)*18;
@@ -2190,9 +2275,12 @@ void drawMathGame(){
 
 void drawMathTimer(){
   unsigned long el=millis()-MQ.roundStart;
-  int bw2=(int)((max(0UL,8000-el)*(SCR_W-20))/8000);
-  tft.fillRect(10,GAME_TOP+112,SCR_W-20,8,C_SURF);
-  tft.fillRect(10,GAME_TOP+112,bw2,8,el<5000?C_GREEN:C_RED);
+  float pct=1.0f-(float)el/8000.0f; if(pct<0)pct=0;
+  int bw2=(int)(pct*(SCR_W-24));
+  uint16_t tc=pct>0.6f?C_GREEN:pct>0.25f?C_YELLOW:C_RED;
+  tft.fillRoundRect(10,GAME_TOP+112,SCR_W-20,10,4,C_SURF);
+  tft.drawRoundRect(10,GAME_TOP+112,SCR_W-20,10,4,dimCol(tc,2));
+  if(bw2>4) tft.fillRoundRect(12,GAME_TOP+114,bw2,6,3,tc);
 }
 
 void updateMath(){
@@ -2395,11 +2483,11 @@ void loop() {
       initScreen(curScreen);
     }
   } else {
-    static unsigned long lastTelemPaint=0;
-    if (megaLinked && millis()-lastMegaRx<8000 && millis()-lastTelemPaint>1500) {
-      lastTelemPaint=millis();
-      requestHeaderRefresh();
-      requestBodyRefresh();
+    bool _ch=telemChanged();
+    if(_ch) requestBodyRefresh();
+    static unsigned long lastHdrAnim=0;
+    if(_ch||(spritesReady&&millis()-lastHdrAnim>200)){
+      lastHdrAnim=millis(); requestHeaderRefresh();
     }
     if (screenDirty || curScreen != paintedScreen) {
       screenDirty = false;
