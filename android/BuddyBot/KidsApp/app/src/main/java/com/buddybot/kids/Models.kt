@@ -78,6 +78,8 @@ data class RobotState(
     val lastGesture: String = "",
     val estopRetryCount: Int = 0,
     val buddybotIP: String = "",
+    /** WiFi provisioning UI phase: "", "connecting", "connected", "failed" */
+    val wifiSetupPhase: String = "",
     val gestureReactionsEnabled: Boolean = true,
     val isAutoMode: Boolean = false,
     val eventBanner: Pair<String, BannerLevel>? = null

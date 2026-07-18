@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ════════════════════════════════════════════════════════════════════
  *  BUDDYBOT  ·  KEYESTUDIO MEGA 2560 SMART (KS0509)  ·  PRODUCTION V37.0
  * ════════════════════════════════════════════════════════════════════
@@ -168,7 +168,7 @@ const float CURRENT_VREF        = 5.0f;
 
 // ── IR obstacle sensors (LOW = obstacle detected) ────────────────────────────
 #define REAR_IR   41
-#define FRONT_IR  -1
+#define FRONT_IR  A6
 #define LEFT_IR   A2    // moved from 30
 #define RIGHT_IR  -1    // disabled — wire being traced, re-enable when confirmed
 
@@ -592,22 +592,6 @@ void motorCoast(int in1, int in2, int pwm) {
   digitalWrite(in1, LOW); digitalWrite(in2, LOW); analogWrite(pwm, 0);
 }
 
-// ── Single-motor isolation test (diagnostic) ──────────────────────────
-//  Drives ONLY the requested motor (bypassing the ramp/queue entirely) at
-//  a low fixed speed for ~700ms, then coasts it back to a stop. Reports
-//  which physical pins it toggled so a multimeter/continuity check can
-//  confirm whether the Mega is actually driving that H-bridge channel —
-//  if the pins toggle correctly here but the wheel still doesn't move,
-//  the fault is downstream (wiring, TB6612 channel, or the motor itself).
-void testSingleMotor(uint8_t idx, const char* label) {
-  toS9(String(F("MOTOR_TEST:")) + label + "|IN1=" + String(MTR_IN1[idx]) +
-       "|IN2=" + String(MTR_IN2[idx]) + "|PWM=" + String(MTR_PWM[idx]) + "|RUNNING");
-  motorSet(MTR_IN1[idx], MTR_IN2[idx], MTR_PWM[idx], 150, true);
-  delay(700);
-  motorCoast(MTR_IN1[idx], MTR_IN2[idx], MTR_PWM[idx]);
-  toS9(String(F("MOTOR_TEST:")) + label + "|DONE");
-}
-
 // ── Ramped direction commands (safe for normal movement) ─────────────
 void motorsForward() {
   motorQueue(0, motorSpeedSlot, true);
@@ -1008,12 +992,6 @@ void processS9Command(String cmd) {
   if (cmd=="MOTOR:R")     { sendMotor("RIGHT");    toS9("ACK|MOTOR:R|END"); return; }
   if (cmd=="MOTOR:S")     { sendMotor("STOP");     toS9("ACK|MOTOR:S|END"); return; }
   if (cmd=="MOTOR:DANCE") { startDance();   toS9("ACK|DANCE|END");   return; }
-  // Diagnostic: jog ONE wheel in isolation to test for a dead motor/channel.
-  // A = Front Left, B = Rear Left, C = Front Right, D = Rear Right.
-  if (cmd=="MOTOR:TESTA") { testSingleMotor(0,"A_FRONT_LEFT");  toS9("ACK|MOTOR:TESTA|END"); return; }
-  if (cmd=="MOTOR:TESTB") { testSingleMotor(1,"B_REAR_LEFT");   toS9("ACK|MOTOR:TESTB|END"); return; }
-  if (cmd=="MOTOR:TESTC") { testSingleMotor(2,"C_FRONT_RIGHT"); toS9("ACK|MOTOR:TESTC|END"); return; }
-  if (cmd=="MOTOR:TESTD") { testSingleMotor(3,"D_REAR_RIGHT");  toS9("ACK|MOTOR:TESTD|END"); return; }
   if (cmd=="DEFENSE")     { startDefense(); toS9("ACK|DEFENSE|END"); return; }
   if (cmd.startsWith("SPEED:")) {
     int spd=cmd.substring(6).toInt();
@@ -1635,79 +1613,6 @@ void initPins(){
 }
 
 void startupSequence(){
-  // ── SELF-TEST: verify each subsystem, report pass/fail to Pico + S9 ──
-  String report = "SELFTEST|";
-  uint8_t pass=0, fail=0;
-
-  // 1. Ultrasonic — FRONT
-  digitalWrite(FRONT_TRIG,LOW); delayMicroseconds(2);
-  digitalWrite(FRONT_TRIG,HIGH); delayMicroseconds(10); digitalWrite(FRONT_TRIG,LOW);
-  long df = pulseIn(FRONT_ECHO,HIGH,30000)/58;
-  if(df>0 && df<500){ report+="DIST_F:OK|"; pass++; } else { report+="DIST_F:FAIL|"; fail++; }
-
-  // 2. Ultrasonic — REAR
-  digitalWrite(REAR_TRIG,LOW); delayMicroseconds(2);
-  digitalWrite(REAR_TRIG,HIGH); delayMicroseconds(10); digitalWrite(REAR_TRIG,LOW);
-  long dr = pulseIn(REAR_ECHO,HIGH,30000)/58;
-  if(dr>0 && dr<500){ report+="DIST_R:OK|"; pass++; } else { report+="DIST_R:FAIL|"; fail++; }
-
-  // 2b. Ultrasonic — LEFT  (BUGFIX: self-test never checked this sensor before)
-  digitalWrite(LEFT_TRIG,LOW); delayMicroseconds(2);
-  digitalWrite(LEFT_TRIG,HIGH); delayMicroseconds(10); digitalWrite(LEFT_TRIG,LOW);
-  long dl = pulseIn(LEFT_ECHO,HIGH,30000)/58;
-  if(dl>0 && dl<500){ report+="DIST_L:OK|"; pass++; } else { report+="DIST_L:FAIL|"; fail++; }
-
-  // 2c. Ultrasonic — RIGHT (BUGFIX: self-test never checked this sensor before)
-  digitalWrite(RIGHT_TRIG,LOW); delayMicroseconds(2);
-  digitalWrite(RIGHT_TRIG,HIGH); delayMicroseconds(10); digitalWrite(RIGHT_TRIG,LOW);
-  long dri = pulseIn(RIGHT_ECHO,HIGH,30000)/58;
-  if(dri>0 && dri<500){ report+="DIST_RI:OK|"; pass++; } else { report+="DIST_RI:FAIL|"; fail++; }
-
-  // 3. Battery voltage
-  float bv = (analogRead(VOLTAGE_SENSOR)/1023.0f)*5.0f*BAT_VDIV;
-  if(bv>5.0f && bv<10.0f){ report+="BATT:OK|"; pass++; } else { report+="BATT:FAIL|"; fail++; }
-
-  // 4. Current sensor (ACS712 — should read near zero at idle)
-  int rawI = analogRead(CURRENT_SENSOR);
-  if(rawI>400 && rawI<700){ report+="CURR:OK|"; pass++; } else { report+="CURR:FAIL|"; fail++; }
-
-  // 5. Temperature sensor (head — NTC on A8)
-  float ht = readHeadTemp();
-  if(ht>10.0f && ht<80.0f){ report+="HEAD_T:OK|"; pass++; } else { report+="HEAD_T:FAIL|"; fail++; }
-
-  // 6. Gas sensor (MQ2 — expect nonzero analog during warmup)
-  int gasRaw = analogRead(GAS_AO);
-  if(gasRaw>5){ report+="GAS:OK|"; pass++; } else { report+="GAS:FAIL|"; fail++; }
-
-  // 7. PIR sensor (should be LOW at startup — no motion)
-  if(PIR_PIN>=0){ report+="PIR:OK|"; pass++; } else { report+="PIR:SKIP|"; }
-
-  // 8. Tilt sensor
-  if(TILT_SENSOR>=0){
-    int tilt = digitalRead(TILT_SENSOR);
-    report+="TILT:OK|"; pass++;
-  } else { report+="TILT:SKIP|"; }
-
-  // 9. Compass (MMC5883MA — try I2C read)
-  Wire.beginTransmission(0x30);
-  if(Wire.endTransmission()==0){ report+="COMPASS:OK|"; pass++; } else { report+="COMPASS:FAIL|"; fail++; }
-
-  // 10. Pico W serial link
-  if(Serial1){ report+="PICO_UART:OK|"; pass++; } else { report+="PICO_UART:FAIL|"; fail++; }
-
-  // 11. Motor driver (TB6612 — verify PWM pins are OUTPUT)
-  report+="MOTORS:OK|"; pass++;  // TB6612 is hardwired, no probe — trust pin init
-
-  // Summary
-  char summary[32];
-  snprintf(summary, 32, "PASS:%d|FAIL:%d|END", pass, fail);
-  report += summary;
-
-  dbg(report.c_str());
-  toS9(report);
-  Serial1.println(report);  // Pico W dashboard
-
-  // Fan burst + boot chime (existing)
   digitalWrite(FAN_HEAD_BLOW_PIN,HIGH);
   digitalWrite(FAN_HEAD_EXT_PIN, HIGH);
   digitalWrite(FAN_BODY_PIN,     HIGH);
@@ -1715,12 +1620,7 @@ void startupSequence(){
   digitalWrite(FAN_HEAD_BLOW_PIN,LOW);
   digitalWrite(FAN_HEAD_EXT_PIN, LOW);
   digitalWrite(FAN_BODY_PIN,     LOW);
-
-  if(fail==0){
-    beep(800,80);delay(100);beep(1200,80);delay(100);beep(1600,150);  // success chime
-  } else {
-    beep(300,200);delay(100);beep(200,300);  // error tone
-  }
+  beep(800,80);delay(100);beep(1200,80);delay(100);beep(1600,150);
 }
 
 // ════════════════════════════════════════════════════════════════════

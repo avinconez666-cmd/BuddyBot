@@ -1,0 +1,761 @@
+Starting: Intent { cmp=com.buddybot.kids/.MainActivity }
+
+07-06 02:04:45.553 26443 26443 D ArduinoComms: WARN: disconnected, dropped: SENS|H:69|P:74|R:-121
+07-06 02:04:45.629  1381  2138 I ActivityManager: Force stopping com.buddybot.kids appid=10345 user=0: from pid 5604
+07-06 02:04:45.630  1381  2138 I ActivityManager: Killing 26443:com.buddybot.kids/u0a345 (adj 0): stop 
+com.buddybot.kids
+07-06 02:04:45.633  1381  2138 W ActivityManager: Scheduling restart of crashed service 
+com.buddybot.kids/.EnvironmentMonitoringService in 1000ms
+07-06 02:04:45.634  1381  2138 W ActivityManager: Scheduling restart of crashed service 
+com.buddybot.kids/.HotwordService in 11000ms
+07-06 02:04:45.634  1381  2138 W ActivityTaskManager: Force removing ActivityRecord{9881c68 u0 
+com.buddybot.kids/.MainActivity t454 f}: app died, no saved state
+07-06 02:04:45.634  1381  1381 I EdgeLightingManager: hideForNotification : packageName = com.buddybot.kids
+07-06 02:04:45.634  1381  1381 I EdgeLightingPolicyManager:NotificationGroup: remove : sbn : 
+StatusBarNotification(pkg=com.buddybot.kids user=UserHandle{0} id=100 tag=null key=0|com.buddybot.kids|100|null|10345: 
+Notification(channel=buddybot_monitoring pri=-1 contentView=null vibrate=null sound=null defaults=0x0 flags=0x62 
+color=0x00000000 vis=PRIVATE semFlags=0x0 semPriority=0 semMissedCount=0))
+07-06 02:04:45.636  5140  5140 I AndroidRuntime: VM exiting with result code 0, cleanup skipped.
+07-06 02:04:45.646  1381  1381 I EdgeLightingManager: hideForNotification : packageName = com.buddybot.kids
+07-06 02:04:45.646  1381  1381 I EdgeLightingPolicyManager:NotificationGroup: remove : sbn : 
+StatusBarNotification(pkg=com.buddybot.kids user=UserHandle{0} id=200 tag=null key=0|com.buddybot.kids|200|null|10345: 
+Notification(channel=buddybot_hotword pri=-1 contentView=null vibrate=null sound=null defaults=0x0 flags=0x62 
+color=0x00000000 actions=1 vis=PRIVATE semFlags=0x0 semPriority=0 semMissedCount=0))
+07-06 02:04:45.656  2199  2261 V NotificationManager_FLP: Notification for foreground service is removed, 
+0|com.buddybot.kids|100|null|10345
+07-06 02:04:45.657  2199  2261 V NotificationManager_FLP: Notification for foreground service is removed, 
+0|com.buddybot.kids|200|null|10345
+07-06 02:04:45.662  1381  2138 V WindowManager: Changing focus from Window{71a965 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity} to null displayId=0 
+Callers=com.android.server.wm.RootWindowContainer.updateFocusedWindowLocked:204 
+com.android.server.wm.WindowManagerService.updateFocusedWindowLocked:6458 
+com.android.server.wm.AppWindowToken.commitVisibility:898 
+com.android.server.wm.AppWindowToken.onRemovedFromDisplay:1146 
+com.android.server.wm.DisplayContent.removeAppToken:1318 
+com.android.server.wm.ActivityRecord.removeWindowContainer:1586 
+07-06 02:04:45.666  1381  2138 V WindowManager: Setting visibility of Window{71a965 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity}: false, 
+caller=com.android.server.wm.WindowContainer.sendAppVisibilityToClients:644 
+com.android.server.wm.AppWindowToken.setClientHidden:632 com.android.server.wm.AppWindowToken.onAnimationFinished:3913 
+com.android.server.wm.AppWindowToken.commitVisibility:914 
+com.android.server.wm.AppWindowToken.onRemovedFromDisplay:1146 
+07-06 02:04:45.667  1381  2138 I WindowManager: Destroying surface 
+Surface(name=com.buddybot.kids/com.buddybot.kids.MainActivity$_26443)/@0x1ea33a6 called by 
+com.android.server.wm.WindowStateAnimator.destroySurface:1834 
+com.android.server.wm.WindowStateAnimator.destroySurfaceLocked:733 
+com.android.server.wm.WindowState.removeImmediately:2402 com.android.server.wm.WindowState.removeIfPossible:2546 
+com.android.server.wm.WindowState.removeIfPossible:2425 
+com.android.server.wm.WindowToken.removeAllWindowsIfPossible:151 
+com.android.server.wm.AppWindowToken.removeIfPossible:1126 
+com.android.server.wm.AppWindowToken.onRemovedFromDisplay:1193 
+07-06 02:04:45.668   917  1837 I Layer   : id=1232 removeFromCurrentState 
+com.buddybot.kids/com.buddybot.kids.MainActivity$_26443#0 (71)
+07-06 02:04:45.668   917  1837 I Layer   : id=1233 removeFromCurrentState Bounds for - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@0#0 (71)
+07-06 02:04:45.668   917  1837 I Layer   : id=1235 removeFromCurrentState Background for -SurfaceView - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0 (71)
+07-06 02:04:45.668   917  1837 I Layer   : id=1234 removeFromCurrentState SurfaceView - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0 (71)
+07-06 02:04:45.669   917  1837 I Layer   : id=1230 removeFromCurrentState 71a965 
+com.buddybot.kids/com.buddybot.kids.MainActivity#0 (71)
+07-06 02:04:45.669   917  1837 I SurfaceFlinger: id=1230 Removed 71a965 
+com.buddybot.kids/com.buddybot.kids.MainActivity#0 (71)
+07-06 02:04:45.671   917   917 I Layer   : id=1230[1] Destroyed 71a965 
+com.buddybot.kids/com.buddybot.kids.MainActivity#0
+07-06 02:04:45.671   917  1837 I Layer   : id=1218 removeFromCurrentState AppWindowToken{7964d26 token=Token{80bf881 
+ActivityRecord{9881c68 u0 com.buddybot.kids/.MainActivity t454}}}#0 (70)
+07-06 02:04:45.672   917  1837 I SurfaceFlinger: id=1218 Removed AppWindowToken{7964d26 token=Token{80bf881 
+ActivityRecord{9881c68 u0 com.buddybot.kids/.MainActivity t454}}}#0 (70)
+07-06 02:04:45.680  1381  3684 V AudioService.RecordingActivityMonitor: updateSoundAppPolicy packageName = 
+com.buddybot.kids
+07-06 02:04:45.681   917  1837 I SurfaceFlinger: id=1232 Removed 
+com.buddybot.kids/com.buddybot.kids.MainActivity$_26443#0 (70)
+07-06 02:04:45.681   917  1837 I SurfaceFlinger: id=1233 Removed Bounds for - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@0#0 (70)
+07-06 02:04:45.682   917  1837 I SurfaceFlinger: id=1234 Removed SurfaceView - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0 (70)
+07-06 02:04:45.682   917  1837 I SurfaceFlinger: id=1235 Removed Background for -SurfaceView - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0 (70)
+07-06 02:04:45.682  1381  3641 D PowerManagerService: [api] handleWakeLockDeath : release WakeLock : FULL_WAKE_LOCK    
+             'BuddyBot::WakeLock' ACQUIRE_CAUSES_WAKEUP ACQ=-1m30s313ms (uid=10345 pid=26443 pkg=com.buddybot.kids)
+07-06 02:04:45.682  1381  3641 I EdgeLightingManager: hideForWakeLock packageName=com.buddybot.kids
+07-06 02:04:45.683  1381  3641 I EdgeLightingPolicyManager: isAcceptableApplication:  pkg=com.buddybot.kids , range=4 
+, includeAllApp=false , userId=0 , infoRange=0 , infoCategory=0
+07-06 02:04:45.687   917   917 I Layer   : id=1232[1] Destroyed 
+com.buddybot.kids/com.buddybot.kids.MainActivity$_26443#0
+07-06 02:04:45.688   917   917 I Layer   : id=1233[1] Destroyed Bounds for - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@0#0
+07-06 02:04:45.688   917   917 I Layer   : id=1234[1] Destroyed SurfaceView - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0
+07-06 02:04:45.688   917   917 I Layer   : id=1235[1] Destroyed Background for -SurfaceView - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0
+07-06 02:04:45.689   917   917 I Layer   : id=1218[1] Destroyed AppWindowToken{7964d26 token=Token{80bf881 
+ActivityRecord{9881c68 u0 com.buddybot.kids/.MainActivity t454}}}#0
+07-06 02:04:45.696  1381  2138 I ActivityManager:   Force stopping service ServiceRecord{e01fe09 u0 
+com.buddybot.kids/.EnvironmentMonitoringService}
+07-06 02:04:45.696  1381  2138 I ActivityManager:   Force stopping service ServiceRecord{2b11330 u0 
+com.buddybot.kids/.HotwordService}
+07-06 02:04:45.703  1381  1536 I WindowManager: Focus moving from Window{71a965 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity} to null displayId=0
+07-06 02:04:45.703  1381  1536 I WindowManager: Losing focus: Window{71a965 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity}
+07-06 02:04:45.704  1381  1536 E WindowManager: RemoteException occurs on reporting focusChanged, w=Window{71a965 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity}
+07-06 02:04:45.712  1381  1550 W BroadcastQueue: Background execution not allowed: receiving Intent { 
+act=android.intent.action.PACKAGE_RESTARTED dat=package:com.buddybot.kids flg=0x10 (has extras) } to 
+android/com.kddi.android.CpaNotiReceiver
+07-06 02:04:45.716  1381  1381 D SamsungAlarmManager: Remove alarm for next reason : 
+android.intent.action.PACKAGE_RESTARTED : package: com.buddybot.kids
+07-06 02:04:45.775  1381  1546 D LauncherAppsService: onReceive: Intent { act=android.intent.action.PACKAGE_RESTARTED 
+dat=package:com.buddybot.kids flg=0x10 (has extras) }
+07-06 02:04:45.795  1381  2138 I ActivityTaskManager: START u0 {flg=0x10000000 cmp=com.buddybot.kids/.MainActivity} 
+from uid 2000
+07-06 02:04:45.804   917  1007 I SurfaceFlinger: id=1253 createSurf (0x0),-1 flag=80004, AppWindowToken{4b2c619 
+token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity t455}}}#0
+07-06 02:04:45.811  1381  1536 D GameManagerService: getForegroundPair(), state=0, bounds=[0,0][2960,1440], 
+displayId=0, userId=0, taskName=com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:45.811  1381  1536 D GameManagerService: MultiWindowEventListener.onFocusedStackChanged(), pkgName: 
+com.buddybot.kids, clsName: com.buddybot.kids.MainActivity, fgActivityName:com.buddybot.kids/.MainActivity, userID:0
+07-06 02:04:45.811  1381  1536 D GameSDK@LifeCycle:   taskId=455: com.buddybot.kids/com.buddybot.kids.MainActivity 
+bounds=[0,0][2960,1440] userId=0 visible=true 
+topActivity=ComponentInfo{com.buddybot.kids/com.buddybot.kids.MainActivity}
+07-06 02:04:45.811  1381  1977 D GameManagerService: onLooperPrepared(), msg: { when=0 what=10000 
+obj=ComponentInfo{com.buddybot.kids/com.buddybot.kids.MainActivity} 
+target=com.samsung.android.game.GameManagerService$FgCheckThread$1 }
+07-06 02:04:45.811  1381  1977 D GameManagerService: notifyResumePause(). of pkg: com.buddybot.kids, type: 4, 
+isMinimized: false, isTunableApp: false
+07-06 02:04:45.813  1381  1537 D PhoneWindow: forceLight changed to true [Splash Screen com.buddybot.kids] from 
+com.android.internal.policy.PhoneWindow.updateForceLightNavigationBar:4274 
+com.android.internal.policy.DecorView.updateColorViews:1547 
+com.android.internal.policy.PhoneWindow.dispatchWindowAttributesChanged:3252 android.view.Window.setFlags:1153 
+com.android.internal.policy.PhoneWindow.generateLayout:2474 
+07-06 02:04:45.818   917  1006 I SurfaceFlinger: id=1254 createSurf (0x0),-1 flag=80004, 4516fc0 Splash Screen 
+com.buddybot.kids#0
+07-06 02:04:45.819  1381  1537 D WindowManager: w is invisible : 4516fc0 Splash Screen com.buddybot.kids
+07-06 02:04:45.820  1381  1537 D WindowManager: w is invisible : 4516fc0 Splash Screen com.buddybot.kids
+07-06 02:04:45.820  1381  1536 D GameSDK@LifeCycle: onFocusedPackageChanged(): newPkgName: com.buddybot.kids, newPid: 
+-999
+07-06 02:04:45.823  1381  1537 V WindowManager: Relayout Window{4516fc0 u0 Splash Screen com.buddybot.kids}: 
+viewVisibility=0 req=2960x1440
+07-06 02:04:45.825   917  1007 I SurfaceFlinger: id=1255 createSurf (2960x1440),1 flag=404, Splash Screen 
+com.buddybot.kids#0
+07-06 02:04:45.827  1381  1537 D WindowManager: makeSurface duration=2 name=Splash Screen com.buddybot.kids
+07-06 02:04:45.830  1381  1536 I ApplicationPolicy: isApplicationExternalStorageWhitelisted:com.buddybot.kids user:0
+07-06 02:04:45.830  1381  1536 D ActivityManager: package  com.buddybot.kids, user - 0 is SDcard whitelisted
+07-06 02:04:45.830  1381  1536 I ApplicationPolicy: isApplicationExternalStorageBlacklisted:com.buddybot.kids user:0
+07-06 02:04:45.830  1381  1536 I ApplicationPolicy: isApplicationExternalStorageBlacklisted:com.buddybot.kids user:0
+07-06 02:04:45.839  1381  1537 D WindowManager: finishDrawingWindow: Window{4516fc0 u0 Splash Screen 
+com.buddybot.kids} mDrawState=DRAW_PENDING
+07-06 02:04:45.842  1381  1537 V WindowManager: performShow on Window{4516fc0 u0 Splash Screen com.buddybot.kids}: 
+mDrawState=READY_TO_SHOW readyForDisplay=false starting=true during animation: policyVis=true parentHidden=false 
+tok.hiddenRequested=false tok.hidden=true animating=true tok animating=true 
+Callers=com.android.server.wm.WindowState.performShowLocked:4819 
+com.android.server.wm.WindowStateAnimator.commitFinishDrawingLocked:415 
+com.android.server.wm.DisplayContent.lambda$new$8$DisplayContent:1026 
+com.android.server.wm.-$$Lambda$DisplayContent$qxt4izS31fb0LF2uo_OF9DMa7gc.accept:4 
+07-06 02:04:45.844  1381  1551 I ActivityManager: Start proc 29067:com.buddybot.kids/u0a345 for activity 
+{com.buddybot.kids/com.buddybot.kids.MainActivity}
+07-06 02:04:45.850 29067 29067 I m.buddybot.kid: Late-enabling -Xcheck:jni
+07-06 02:04:45.871 29067 29067 E m.buddybot.kid: Unknown bits set in runtime_flags: 0x8000
+07-06 02:04:45.883  1381  1441 I ActivityManager: DSS OFF for com.buddybot.kids
+07-06 02:04:45.887  1381  1441 V WindowManager: performShow on Window{4516fc0 u0 Splash Screen com.buddybot.kids}: 
+mDrawState=READY_TO_SHOW readyForDisplay=false starting=true during animation: policyVis=true parentHidden=false 
+tok.hiddenRequested=false tok.hidden=true animating=true tok animating=true 
+Callers=com.android.server.wm.WindowState.performShowLocked:4819 
+com.android.server.wm.WindowStateAnimator.commitFinishDrawingLocked:415 
+com.android.server.wm.DisplayContent.lambda$new$8$DisplayContent:1026 
+com.android.server.wm.-$$Lambda$DisplayContent$qxt4izS31fb0LF2uo_OF9DMa7gc.accept:4 
+07-06 02:04:45.888  1381  1441 D GamePkgDataHelper: notifyAppCreate(), pkgName: com.buddybot.kids, sendRet: true
+07-06 02:04:45.888  1381  1977 D GameManagerService: onLooperPrepared(), msg: { when=0 what=10010 
+obj=com.buddybot.kids target=com.samsung.android.game.GameManagerService$FgCheckThread$1 }
+07-06 02:04:45.888  1381  1977 D GameManagerService: handleMessage(), received MSG_APP_CREATE of pkgName: 
+com.buddybot.kids
+07-06 02:04:45.891  1381  1441 D MARsPolicyManager: onPackageResumedFG pkgName = com.buddybot.kids, userId = 0
+07-06 02:04:45.894  1381  1537 V WindowManager: performShow on Window{4516fc0 u0 Splash Screen com.buddybot.kids}: 
+mDrawState=READY_TO_SHOW readyForDisplay=false starting=true during animation: policyVis=true parentHidden=false 
+tok.hiddenRequested=false tok.hidden=true animating=true tok animating=true 
+Callers=com.android.server.wm.WindowState.performShowLocked:4819 
+com.android.server.wm.WindowStateAnimator.commitFinishDrawingLocked:415 
+com.android.server.wm.DisplayContent.lambda$new$8$DisplayContent:1026 
+com.android.server.wm.-$$Lambda$DisplayContent$qxt4izS31fb0LF2uo_OF9DMa7gc.accept:4 
+07-06 02:04:45.899  1381  1537 I WindowManager: Reparenting to leash, surface=Surface(name=AppWindowToken{4b2c619 
+token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity t455}}})/@0x38471a1
+07-06 02:04:45.899   917  1006 I SurfaceFlinger: id=1258 createSurf (0x0),-1 flag=80004, 
+Surface(name=AppWindowToken{4b2c619 token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity 
+t455}}})/@0x38471a1 - animation-leash#0
+07-06 02:04:45.900  1381  1537 D WindowManager: makeSurface duration=1 
+leash=Surface(name=Surface(name=AppWindowToken{4b2c619 token=Token{8e9c160 ActivityRecord{3941163 u0 
+com.buddybot.kids/.MainActivity t455}}})/@0x38471a1 - animation-leash)/@0xd899fc6
+07-06 02:04:45.900   917  1006 I SurfaceFlinger: id=1259 createSurf (0x0),-1 flag=80004, 
+Surface(name=AppWindowToken{4b2c619 token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity 
+t455}}})/@0x38471a1 - animation-bounds#0
+07-06 02:04:45.902 29067 29067 W ActivityThread: Application com.buddybot.kids can be debugged on port 8100...
+07-06 02:04:45.903  1381  1533 D WindowManager: setSystemUiVisibility: displayId=0, vis=0x8018, fullVis=0x0, 
+dockVis=0x0, win=Window{4516fc0 u0 Splash Screen com.buddybot.kids}
+07-06 02:04:45.910  1381  1536 D GameManagerService: identifyGamePackage. com.buddybot.kids, mCurrentUserId: 0, 
+callerUserId: 0
+07-06 02:04:45.910  1381  1536 D GamePkgDataHelper: getGamePkgData(). com.buddybot.kids
+07-06 02:04:45.910  1381  3684 D GamePkgDataHelper: getSosPolicy(). com.buddybot.kids
+07-06 02:04:45.910  1381  1536 D GameManagerService: noteResumeComponent(), received resumed-component: 
+com.buddybot.kids
+07-06 02:04:45.910  1381  1536 D GamePkgDataHelper: getSosPolicy(). com.buddybot.kids
+07-06 02:04:45.910  1381  1536 D GameManagerService: identifyGamePackage. com.buddybot.kids, mCurrentUserId: 0, 
+callerUserId: 0
+07-06 02:04:45.910  1381  1536 D GamePkgDataHelper: getGamePkgData(). com.buddybot.kids
+07-06 02:04:45.911  1381  1977 D GameManagerService: onLooperPrepared(), msg: { when=-2ms what=10000 
+obj=ComponentInfo{com.buddybot.kids/com.buddybot.kids.MainActivity} 
+target=com.samsung.android.game.GameManagerService$FgCheckThread$1 }
+07-06 02:04:45.911  1381  1977 D GameManagerService: notifyResumePause(). of pkg: com.buddybot.kids, type: 4, 
+isMinimized: false, isTunableApp: false
+07-06 02:04:45.913  8237 25453 I TrayUsageStatesWatcher: noteResumeComponent : 
+ComponentInfo{com.buddybot.kids/com.buddybot.kids.MainActivity}, 4
+07-06 02:04:45.914  1381  1533 D CodecSolution: isMaxAspectPackageEx: com.buddybot.kids : true(2)
+07-06 02:04:45.914  1381  1924 D PkgPredictorService: com.buddybot.kids go to foreground!
+07-06 02:04:45.914  1381  1924 D PkgPredictorService: previous pkgs: 
+com.buddybot.kids,com.buddybot.kids,com.buddybot.kids running pkg: com.buddybot.kids, uid: 0 is system: false
+07-06 02:04:45.914  1381  1924 D PkgPredictorService-Collector:  (hour:2 day:2 previous:[com.buddybot.kids, 
+com.buddybot.kids, com.buddybot.kids] activityName:unknown running:com.buddybot.kids userId:0 screenOrientation:1 
+wifi:1 bt:0 predictTime:2 apkVersion:1.0 consumeTime:-1 preloaded:false>)
+07-06 02:04:45.914  1381  1924 D PkgPredictorService-NapPreloadController: User using: com.buddybot.kids
+07-06 02:04:45.915  1381  1924 D PkgPredictorService-NapClassifier: Predict result: 10.0,29.0,-1.0, - 
+[0_&_com.sec.android.app.myfiles, 0_&_com.buddybot.kids]
+07-06 02:04:45.915  1381  3684 D GameManagerService: identifyForegroundApp. com.buddybot.kids, mCurrentUserId: 0, 
+callerUserId: 0
+07-06 02:04:45.915  1381  3684 D GamePkgDataHelper: getGamePkgData(). com.buddybot.kids
+07-06 02:04:45.917  1381  3684 D GameManagerService: identifyGamePackage. com.buddybot.kids, mCurrentUserId: 0, 
+callerUserId: 0
+07-06 02:04:45.918  1381  3684 D GamePkgDataHelper: getGamePkgData(). com.buddybot.kids
+07-06 02:04:45.965   917   917 I SurfaceFlinger:      DEVICE | 0x773b1452e0 | 0002 | RGBA_8888 |   0.0    0.0 2960.0 
+1440.0 |  101  207 1339 2753 | Splash Screen com.buddybot.kids#0
+07-06 02:04:46.044  1381  2078 D MdnieScenarioControlService:  packageName : com.buddybot.kids    className : 
+com.buddybot.kids.MainActivity
+07-06 02:04:46.255  1381  1537 I WindowManager: Reparenting to original parent: Surface(name=Task=455)/@0xdf4d113, 
+destroyLeash=true, surface=Surface(name=AppWindowToken{4b2c619 token=Token{8e9c160 ActivityRecord{3941163 u0 
+com.buddybot.kids/.MainActivity t455}}})/@0x38471a1
+07-06 02:04:46.257   917  1083 I Layer   : id=1258 removeFromCurrentState Surface(name=AppWindowToken{4b2c619 
+token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity t455}}})/@0x38471a1 - animation-leash#0 
+(76)
+07-06 02:04:46.257   917  1083 I Layer   : id=1259 removeFromCurrentState Surface(name=AppWindowToken{4b2c619 
+token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity t455}}})/@0x38471a1 - animation-bounds#0 
+(76)
+07-06 02:04:46.258   917  1837 I SurfaceFlinger: id=1259 Removed Surface(name=AppWindowToken{4b2c619 
+token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity t455}}})/@0x38471a1 - animation-bounds#0 
+(76)
+07-06 02:04:46.271   917   917 I Layer   : id=1259[1] Destroyed Surface(name=AppWindowToken{4b2c619 
+token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity t455}}})/@0x38471a1 - animation-bounds#0
+07-06 02:04:46.272   917  1007 I SurfaceFlinger: id=1258 Removed Surface(name=AppWindowToken{4b2c619 
+token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity t455}}})/@0x38471a1 - animation-leash#0 
+(74)
+07-06 02:04:46.286   917   917 I SurfaceFlinger:      DEVICE | 0x773b1452e0 | 0002 | RGBA_8888 |   0.0    0.0 2960.0 
+1440.0 |    0    0 1440 2960 | Splash Screen com.buddybot.kids#0
+07-06 02:04:46.288   917   917 I Layer   : id=1258[1] Destroyed Surface(name=AppWindowToken{4b2c619 
+token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity t455}}})/@0x38471a1 - animation-leash#0
+07-06 02:04:46.292  1381  1949 W WifiTransportLayerUtils: getApplicationCategory - IOException com.buddybot.kids
+07-06 02:04:46.303   917   917 I SurfaceFlinger:      DEVICE | 0x773b1452e0 | 0002 | RGBA_8888 |   0.0    0.0 2960.0 
+1440.0 |    0    0 1440 2960 | Splash Screen com.buddybot.kids#0
+07-06 02:04:46.727  1381 10918 D GameManagerService: identifyGamePackage. com.buddybot.kids, mCurrentUserId: 0, 
+callerUserId: 0
+07-06 02:04:46.727  1381 10918 D GamePkgDataHelper: getGamePkgData(). com.buddybot.kids
+07-06 02:04:47.175 29067 29067 W m.buddybot.kid: Class androidx.compose.runtime.snapshots.SnapshotStateList failed 
+lock verification and will run slower.
+07-06 02:04:47.175 29067 29067 W m.buddybot.kid: Common causes for lock verification issues are non-optimized dex code
+07-06 02:04:47.175 29067 29067 W m.buddybot.kid: and incorrect proguard optimizations.
+07-06 02:04:47.295  1381  1441 D PowerManagerService: [api] acquire WakeLock FULL_WAKE_LOCK                 
+'BuddyBot::WakeLock' ACQUIRE_CAUSES_WAKEUP (uid=10345 pid=29067 pkg=com.buddybot.kids)
+07-06 02:04:47.503  1381  1441 I ApplicationPolicy: isApplicationExternalStorageWhitelisted:com.buddybot.kids user:0
+07-06 02:04:47.503  1381  1441 D ActivityManager: package  com.buddybot.kids, user - 0 is SDcard whitelisted
+07-06 02:04:47.503  1381  1441 I ApplicationPolicy: isApplicationExternalStorageBlacklisted:com.buddybot.kids user:0
+07-06 02:04:47.503  1381  1441 I ApplicationPolicy: isApplicationExternalStorageBlacklisted:com.buddybot.kids user:0
+07-06 02:04:47.531  1381  1551 I ActivityManager: Start proc 
+5691:com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0/u0i22 for  
+{com.buddybot.kids/org.chromium.content.app.SandboxedProcessService0:0}
+07-06 02:04:47.532  1381  1551 I ActivityManager: check webview name : 
+com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0check hostingname 
+webview : {com.buddybot.kids/org.chromium.content.app.SandboxedProcessService0:0}
+07-06 02:04:47.544  1058  1058 E audit   : type=1327 audit(1783274687.530:2081): proctitle="com.buddybot.kids"
+07-06 02:04:47.551  1381  1859 I ActivityManager: DSS OFF for com.buddybot.kids
+07-06 02:04:47.674 29067 29067 W m.buddybot.kid: Accessing hidden method Landroid/media/AudioTrack;->getLatency()I 
+(greylist, reflection, allowed)
+07-06 02:04:47.760 29067 29067 D BuddyBotMainActivity: initializeApp: Starting initialization
+07-06 02:04:47.771 29067 29067 D BuddyBotMainActivity: initializeApp: TextToSpeech initialized
+07-06 02:04:47.771 29067 29067 D BuddyBotMainActivity: initializeApp: Camera executor initialized
+07-06 02:04:47.843 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getInt(Ljava/lang/Object;J)I (greylist, linking, allowed)
+07-06 02:04:47.843 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getObject(Ljava/lang/Object;J)Ljava/lang/Object; (greylist, linking, allowed)
+07-06 02:04:47.843 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getLong(Ljava/lang/Object;J)J (greylist,core-platform-api, linking, allowed)
+07-06 02:04:47.843 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getInt(Ljava/lang/Object;J)I (greylist, linking, allowed)
+07-06 02:04:47.844 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->objectFieldOffset(Ljava/lang/reflect/Field;)J (greylist,core-platform-api, linking, allowed)
+07-06 02:04:47.844 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getInt(Ljava/lang/Object;J)I (greylist, linking, allowed)
+07-06 02:04:47.845 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getLong(Ljava/lang/Object;J)J (greylist,core-platform-api, linking, allowed)
+07-06 02:04:47.845 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getObject(Ljava/lang/Object;J)Ljava/lang/Object; (greylist, linking, allowed)
+07-06 02:04:47.845 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putObject(Ljava/lang/Object;JLjava/lang/Object;)V (greylist, linking, allowed)
+07-06 02:04:47.845 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putInt(Ljava/lang/Object;JI)V (greylist, linking, allowed)
+07-06 02:04:47.846 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putLong(Ljava/lang/Object;JJ)V (greylist, linking, allowed)
+07-06 02:04:47.846 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putObject(Ljava/lang/Object;JLjava/lang/Object;)V (greylist, linking, allowed)
+07-06 02:04:47.846 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putInt(Ljava/lang/Object;JI)V (greylist, linking, allowed)
+07-06 02:04:47.846 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putObject(Ljava/lang/Object;JLjava/lang/Object;)V (greylist, linking, allowed)
+07-06 02:04:47.847 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getInt(Ljava/lang/Object;J)I (greylist, linking, allowed)
+07-06 02:04:47.847 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getObject(Ljava/lang/Object;J)Ljava/lang/Object; (greylist, linking, allowed)
+07-06 02:04:47.847 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putObject(Ljava/lang/Object;JLjava/lang/Object;)V (greylist, linking, allowed)
+07-06 02:04:47.847 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putInt(Ljava/lang/Object;JI)V (greylist, linking, allowed)
+07-06 02:04:47.849 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->allocateInstance(Ljava/lang/Class;)Ljava/lang/Object; (greylist, linking, allowed)
+07-06 02:04:47.849 29067  5761 W m.buddybot.kid: Accessing hidden method Llibcore/io/Memory;->peekLong(JZ)J (greylist, 
+reflection, allowed)
+07-06 02:04:47.849 29067  5761 W m.buddybot.kid: Accessing hidden method Llibcore/io/Memory;->pokeLong(JJZ)V 
+(greylist, reflection, allowed)
+07-06 02:04:47.849 29067  5761 W m.buddybot.kid: Accessing hidden method Llibcore/io/Memory;->pokeInt(JIZ)V (greylist, 
+reflection, allowed)
+07-06 02:04:47.849 29067  5761 W m.buddybot.kid: Accessing hidden method Llibcore/io/Memory;->peekInt(JZ)I (greylist, 
+reflection, allowed)
+07-06 02:04:47.849 29067  5761 W m.buddybot.kid: Accessing hidden method Llibcore/io/Memory;->pokeByte(JB)V (greylist, 
+reflection, allowed)
+07-06 02:04:47.849 29067  5761 W m.buddybot.kid: Accessing hidden method Llibcore/io/Memory;->peekByte(J)B (greylist, 
+reflection, allowed)
+07-06 02:04:47.849 29067  5761 W m.buddybot.kid: Accessing hidden method Llibcore/io/Memory;->pokeByteArray(J[BII)V 
+(greylist, reflection, allowed)
+07-06 02:04:47.849 29067  5761 W m.buddybot.kid: Accessing hidden method Llibcore/io/Memory;->peekByteArray(J[BII)V 
+(greylist, reflection, allowed)
+07-06 02:04:47.849 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->arrayBaseOffset(Ljava/lang/Class;)I (greylist,core-platform-api, linking, allowed)
+07-06 02:04:47.849 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->arrayIndexScale(Ljava/lang/Class;)I (greylist, linking, allowed)
+07-06 02:04:47.850 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getInt(Ljava/lang/Object;J)I (greylist, linking, allowed)
+07-06 02:04:47.850 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getLong(Ljava/lang/Object;J)J (greylist,core-platform-api, linking, allowed)
+07-06 02:04:47.850 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putLong(Ljava/lang/Object;JJ)V (greylist, linking, allowed)
+07-06 02:04:47.850 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getLong(Ljava/lang/Object;J)J (greylist,core-platform-api, reflection, allowed)
+07-06 02:04:47.850 29067  5761 W m.buddybot.kid: Accessing hidden field Ljava/nio/Buffer;->address:J (greylist, 
+reflection, allowed)
+07-06 02:04:47.850 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getInt(Ljava/lang/Object;J)I (greylist, reflection, allowed)
+07-06 02:04:47.850 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putInt(Ljava/lang/Object;JI)V (greylist, reflection, allowed)
+07-06 02:04:47.850 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getLong(Ljava/lang/Object;J)J (greylist,core-platform-api, reflection, allowed)
+07-06 02:04:47.850 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putLong(Ljava/lang/Object;JJ)V (greylist, reflection, allowed)
+07-06 02:04:47.850 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getObject(Ljava/lang/Object;J)Ljava/lang/Object; (greylist, reflection, allowed)
+07-06 02:04:47.850 29067  5761 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putObject(Ljava/lang/Object;JLjava/lang/Object;)V (greylist, reflection, allowed)
+07-06 02:04:47.914 29067 29067 D BuddyBotMainActivity: initializeApp: FaceRecognitionManager initialized
+07-06 02:04:47.934 29067 29067 D BuddyBotMainActivity: initializeApp: ObjectDetectionManager initialized
+07-06 02:04:47.948 29067 29067 D ArduinoComms: ArduinoComms init — mik3y USB serial
+07-06 02:04:47.948 29067 29067 D BuddyBotMainActivity: initializeApp: ArduinoComms initialized
+07-06 02:04:47.962 29067 29067 D BuddyBotMainActivity: initializeApp: MainViewModel + MessageRouter initialized
+07-06 02:04:47.964 29067 29067 D BuddyBotMainActivity: initializeApp: AIRouter ready (Groq→Gemini→Claude→Offline)
+07-06 02:04:47.966 29067 29067 D BuddyBotMainActivity: initializeApp: GuardianEngine active
+07-06 02:04:47.967 29067 29067 D BuddyBotMainActivity: initializeApp: SecurityGatekeeper initialized
+07-06 02:04:47.972 29067 29067 D BuddyBotMainActivity: initializeApp: Sensor manager initialized
+07-06 02:04:47.973 29067 29067 D BuddyBotMainActivity: initializeApp: Speech recognizer initialized
+07-06 02:04:47.975 29067 29067 D ArduinoComms: initialize(ip=)
+07-06 02:04:47.976 29067 29067 D ArduinoComms: USB scan: 2 device(s)
+07-06 02:04:47.977 29067 29067 D ArduinoComms:   VID=0x2109 PID=0x8817 class=17 name=/dev/bus/usb/001/004
+07-06 02:04:47.977 29067 29067 D ArduinoComms:   VID=0x2E8A PID=0xF00A class=239 name=/dev/bus/usb/001/003
+07-06 02:04:47.979 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getInt(Ljava/lang/Object;J)I (greylist, linking, allowed)
+07-06 02:04:47.979 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getObject(Ljava/lang/Object;J)Ljava/lang/Object; (greylist, linking, allowed)
+07-06 02:04:47.979 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getLong(Ljava/lang/Object;J)J (greylist,core-platform-api, linking, allowed)
+07-06 02:04:47.979 29067 29067 D ArduinoComms: No serial device found
+07-06 02:04:47.980 29067 29067 D BuddyBotMainActivity: initializeApp: Arduino communications initialized
+07-06 02:04:47.981 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putObject(Ljava/lang/Object;JLjava/lang/Object;)V (greylist, linking, allowed)
+07-06 02:04:47.981 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putInt(Ljava/lang/Object;JI)V (greylist, linking, allowed)
+07-06 02:04:47.981 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putLong(Ljava/lang/Object;JJ)V (greylist, linking, allowed)
+07-06 02:04:47.981 29067 29067 D BuddyBotMainActivity: Communication mode changed: DISCONNECTED
+07-06 02:04:47.985 29067  5765 W m.buddybot.kid: Accessing hidden method Llibcore/io/Memory;->pokeByte(JB)V (greylist, 
+reflection, allowed)
+07-06 02:04:47.985 29067  5765 W m.buddybot.kid: Accessing hidden method Llibcore/io/Memory;->peekByte(J)B (greylist, 
+reflection, allowed)
+07-06 02:04:47.985 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getLong(Ljava/lang/Object;J)J (greylist,core-platform-api, reflection, allowed)
+07-06 02:04:47.985 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getInt(Ljava/lang/Object;J)I (greylist, reflection, allowed)
+07-06 02:04:47.985 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putInt(Ljava/lang/Object;JI)V (greylist, reflection, allowed)
+07-06 02:04:47.985 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getLong(Ljava/lang/Object;J)J (greylist,core-platform-api, reflection, allowed)
+07-06 02:04:47.985 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putLong(Ljava/lang/Object;JJ)V (greylist, reflection, allowed)
+07-06 02:04:47.985 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getObject(Ljava/lang/Object;J)Ljava/lang/Object; (greylist, reflection, allowed)
+07-06 02:04:47.985 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putObject(Ljava/lang/Object;JLjava/lang/Object;)V (greylist, reflection, allowed)
+07-06 02:04:47.986 29067 29067 D BuddyBotMainActivity: HotwordService started
+07-06 02:04:47.986 29067 29067 D BuddyBotMainActivity: initializeApp: HotwordService started
+07-06 02:04:47.987 29067 29067 D BuddyBotMainActivity: initializeApp: Complete
+07-06 02:04:47.989 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getInt(Ljava/lang/Object;J)I (greylist, linking, allowed)
+07-06 02:04:47.990 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getObject(Ljava/lang/Object;J)Ljava/lang/Object; (greylist, linking, allowed)
+07-06 02:04:47.990 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putInt(Ljava/lang/Object;JI)V (greylist, linking, allowed)
+07-06 02:04:48.000 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getInt(Ljava/lang/Object;J)I (greylist, linking, allowed)
+07-06 02:04:48.011 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putObject(Ljava/lang/Object;JLjava/lang/Object;)V (greylist, linking, allowed)
+07-06 02:04:48.011 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->putInt(Ljava/lang/Object;JI)V (greylist, linking, allowed)
+07-06 02:04:48.014 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getObject(Ljava/lang/Object;J)Ljava/lang/Object; (greylist, linking, allowed)
+07-06 02:04:48.015 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getLong(Ljava/lang/Object;J)J (greylist,core-platform-api, linking, allowed)
+07-06 02:04:48.018 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getInt(Ljava/lang/Object;J)I (greylist, linking, allowed)
+07-06 02:04:48.018 29067  5765 W m.buddybot.kid: Accessing hidden method 
+Lsun/misc/Unsafe;->getLong(Ljava/lang/Object;J)J (greylist,core-platform-api, linking, allowed)
+07-06 02:04:48.020   917  1006 I SurfaceFlinger: id=1261 createSurf (0x0),-1 flag=80004, e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity#0
+07-06 02:04:48.344   917  2545 I SurfaceFlinger: id=1262 createSurf (0x0),-1 flag=80004, 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity#0
+07-06 02:04:48.345  1381  1859 V WindowManager: Changing focus from null to Window{58b4270 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity} displayId=0 
+Callers=com.android.server.wm.RootWindowContainer.updateFocusedWindowLocked:204 
+com.android.server.wm.WindowManagerService.updateFocusedWindowLocked:6458 
+com.android.server.wm.WindowManagerService.addWindow:1866 com.android.server.wm.Session.addToDisplay:167 
+android.view.IWindowSession$Stub.onTransact:557 com.android.server.wm.Session.onTransact:142 
+07-06 02:04:48.345  1381  1536 I WindowManager: Focus moving from null to Window{58b4270 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity} displayId=0
+07-06 02:04:48.346  1381  1536 D WindowManager: w is invisible : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.346  1381  1536 D WindowManager: w is invisible : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.346  1381  1536 D WindowManager: w is invisible : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.346  1381  1536 D WindowManager: w is invisible : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.346  1381  1536 D WindowManager: w is invisible : 4516fc0 Splash Screen com.buddybot.kids
+07-06 02:04:48.347  1381  1536 D WindowManager: windowMattersToAccessibility, check : 4516fc0 Splash Screen 
+com.buddybot.kids
+07-06 02:04:48.347  1381  1536 D WindowManager: windowMattersToAccessibility : 4516fc0 Splash Screen com.buddybot.kids
+07-06 02:04:48.347  1381  1536 I WindowManager: Gaining focus: Window{58b4270 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity}
+07-06 02:04:48.347  1381  1859 D WindowManager: w is invisible : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.347  1381  1859 D WindowManager: w is invisible : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.348  1381  1859 D WindowManager: w is invisible : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.348  1381  1859 D WindowManager: w is invisible : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.348  1381  1859 D WindowManager: w is invisible : 4516fc0 Splash Screen com.buddybot.kids
+07-06 02:04:48.348  1381  1859 D WindowManager: windowMattersToAccessibility, check : 4516fc0 Splash Screen 
+com.buddybot.kids
+07-06 02:04:48.348  1381  1859 D WindowManager: windowMattersToAccessibility : 4516fc0 Splash Screen com.buddybot.kids
+07-06 02:04:48.364  1381  1859 V WindowManager: Relayout Window{e3dcb35 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity}: viewVisibility=0 req=2960x1440
+07-06 02:04:48.365  1381  1859 W WindowManager: preserveSurfaceLocked: failed, no surface, w=Window{e3dcb35 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity}
+07-06 02:04:48.365   917  2545 I SurfaceFlinger: id=1263 createSurf (2960x1440),1 flag=4, 
+com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#0
+07-06 02:04:48.366  1381  1859 D WindowManager: makeSurface duration=1 
+name=com.buddybot.kids/com.buddybot.kids.MainActivity$_29067
+07-06 02:04:48.378   917  2545 I SurfaceFlinger: id=1264 createSurf (0x0),2 flag=4, Bounds for - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@0#0
+07-06 02:04:48.379   917  2545 I SurfaceFlinger: id=1265 createSurf (2960x1440),4 flag=404, SurfaceView - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0
+07-06 02:04:48.380   917  2545 I SurfaceFlinger: id=1266 createSurf (0x0),-1 flag=20404, Background for -SurfaceView - 
+com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0
+07-06 02:04:48.397 29067 29067 D ArduinoComms: WARN: disconnected, dropped: SENS|H:70|P:74|R:-120
+07-06 02:04:48.398  1381  1859 D WindowManager: finishDrawingWindow: Window{e3dcb35 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity} mDrawState=DRAW_PENDING
+07-06 02:04:48.403  1381  1537 I WindowManager: Reparenting to leash, surface=Surface(name=4516fc0 Splash Screen 
+com.buddybot.kids)/@0x7f4610f
+07-06 02:04:48.403   917  1006 I SurfaceFlinger: id=1267 createSurf (0x0),-1 flag=80004, Surface(name=4516fc0 Splash 
+Screen com.buddybot.kids)/@0x7f4610f - animation-leash#0
+07-06 02:04:48.404  1381  1537 D WindowManager: makeSurface duration=1 leash=Surface(name=Surface(name=4516fc0 Splash 
+Screen com.buddybot.kids)/@0x7f4610f - animation-leash)/@0x93a159c
+07-06 02:04:48.433  1381  1550 D ApplicationPolicy: isStatusBarNotificationAllowedAsUser: packageName = 
+com.buddybot.kids,userId = 0
+07-06 02:04:48.433  1381  1550 D ApplicationPolicy: isStatusBarNotificationAllowedAsUser: packageName = 
+com.buddybot.kids,userId = 0
+07-06 02:04:48.443  1381  3684 V WindowManager: Relayout Window{e3dcb35 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity}: viewVisibility=0 req=2960x1440
+07-06 02:04:48.443   917   917 I SurfaceFlinger:      DEVICE | 0x773b1459e0 | 0000 | RGBA_8888 |   0.0    0.0 1440.0 
+2960.0 |    0    0 1440 2960 | com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#0
+07-06 02:04:48.443   917   917 I SurfaceFlinger:      DEVICE | 0x773b1452e0 | 0002 | RGBA_8888 |   0.0    0.0 2960.0 
+1440.0 |    0    0 1440 2960 | Splash Screen com.buddybot.kids#0
+07-06 02:04:48.456  1381  1537 I WindowManager: Reparenting to original parent: Surface(name=AppWindowToken{4b2c619 
+token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity t455}}})/@0x38471a1, destroyLeash=true, 
+surface=Surface(name=4516fc0 Splash Screen com.buddybot.kids)/@0x7f4610f
+07-06 02:04:48.457  1381  1537 E WindowManager: win=Window{4516fc0 u0 Splash Screen com.buddybot.kids EXITING} 
+destroySurfaces: appStopped=false win.mWindowRemovalAllowed=true win.mRemoveOnExit=true win.mViewVisibility=0 
+caller=com.android.server.wm.AppWindowToken.destroySurfaces:1249 
+com.android.server.wm.AppWindowToken.destroySurfaces:1230 com.android.server.wm.WindowState.onExitAnimationDone:5189 
+com.android.server.wm.WindowStateAnimator.onAnimationFinished:320 
+com.android.server.wm.WindowState.onAnimationFinished:5630 
+com.android.server.wm.-$$Lambda$yVRF8YoeNdTa8GR1wDStVsHu8xM.run:2 
+com.android.server.wm.SurfaceAnimator.lambda$getFinishedCallback$0$SurfaceAnimator:100 
+07-06 02:04:48.457  1381  1537 I WindowManager: Destroying surface Surface(name=Splash Screen 
+com.buddybot.kids)/@0xf35abff called by com.android.server.wm.WindowStateAnimator.destroySurface:1834 
+com.android.server.wm.WindowStateAnimator.destroySurfaceLocked:733 
+com.android.server.wm.WindowState.destroySurfaceUnchecked:3649 com.android.server.wm.WindowState.destroySurface:3623 
+com.android.server.wm.AppWindowToken.destroySurfaces:1249 com.android.server.wm.AppWindowToken.destroySurfaces:1230 
+com.android.server.wm.WindowState.onExitAnimationDone:5189 
+com.android.server.wm.WindowStateAnimator.onAnimationFinished:320 
+07-06 02:04:48.457   917  1837 I Layer   : id=1255 removeFromCurrentState Splash Screen com.buddybot.kids#0 (78)
+07-06 02:04:48.459   917  1837 I Layer   : id=1254 removeFromCurrentState 4516fc0 Splash Screen com.buddybot.kids#0 
+(78)
+07-06 02:04:48.459   917  1837 I Layer   : id=1267 removeFromCurrentState Surface(name=4516fc0 Splash Screen 
+com.buddybot.kids)/@0x7f4610f - animation-leash#0 (78)
+07-06 02:04:48.459   917  1837 I SurfaceFlinger: id=1254 Removed 4516fc0 Splash Screen com.buddybot.kids#0 (78)
+07-06 02:04:48.459   917  1837 I SurfaceFlinger: id=1267 Removed Surface(name=4516fc0 Splash Screen 
+com.buddybot.kids)/@0x7f4610f - animation-leash#0 (78)
+07-06 02:04:48.459   917  1837 I SurfaceFlinger: id=1255 Removed Splash Screen com.buddybot.kids#0 (78)
+07-06 02:04:48.472   917   917 I Layer   : id=1267[1] Destroyed Surface(name=4516fc0 Splash Screen 
+com.buddybot.kids)/@0x7f4610f - animation-leash#0
+07-06 02:04:48.472   917   917 I Layer   : id=1254[1] Destroyed 4516fc0 Splash Screen com.buddybot.kids#0
+07-06 02:04:48.474   917   917 I Layer   : id=1255[1] Destroyed Splash Screen com.buddybot.kids#0
+07-06 02:04:48.480   917   917 I SurfaceFlinger:      DEVICE | 0x77370519d0 | 0000 | RGBA_8888 |   0.0    0.0 1440.0 
+2960.0 |    0    0 1440 2960 | com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#0
+07-06 02:04:48.501  1381  1536 D WindowManager: w is invisible : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.501  1381  1536 D WindowManager: w is invisible : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.501  1381  1536 D WindowManager: w is invisible : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.502  1381  1536 D WindowManager: windowMattersToAccessibility, check : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.540  1381  1381 I EdgeLightingManager: showForNotification : isInteractive=true, isHeadUp=false, 
+color=0, sbn = StatusBarNotification(pkg=com.buddybot.kids user=UserHandle{0} id=200 tag=null 
+key=0|com.buddybot.kids|200|null|10345: Notification(channel=buddybot_hotword pri=-1 contentView=null vibrate=null 
+sound=null defaults=0x0 flags=0x62 color=0x00000000 actions=1 vis=PRIVATE semFlags=0x0 semPriority=0 semMissedCount=0))
+07-06 02:04:48.540  1381  1381 I EdgeLightingPolicyManager: isAcceptableApplication:  pkg=com.buddybot.kids , 
+range=256 , includeAllApp=false , userId=0 , infoRange=0 , infoCategory=0
+07-06 02:04:48.542  1381  1381 I EdgeLightingPolicyManager: isAcceptableApplication:  pkg=com.buddybot.kids , range=1 
+, includeAllApp=false , userId=0 , infoRange=0 , infoCategory=0
+07-06 02:04:48.543  1381  1381 D NotificationService: 0|com.buddybot.kids|200|null|10345: granting 
+content://settings/system/notification_sound
+07-06 02:04:48.544  1381  1381 D NotificationService: 0|com.buddybot.kids|200|null|10345: granting 
+content://settings/system/notification_sound
+07-06 02:04:48.548  2199  2261 V NotificationManager_FLP: Notification for foreground service is posted, 
+0|com.buddybot.kids|200|null|10345
+07-06 02:04:48.559 29067 29067 W m.buddybot.kid: Accessing hidden method 
+Landroid/graphics/Canvas;->drawPatch(Landroid/graphics/NinePatch;Landroid/graphics/Rect;Landroid/graphics/Paint;)V 
+(greylist-max-o, linking, denied)
+07-06 02:04:48.559 29067 29067 W m.buddybot.kid: Accessing hidden method 
+Landroid/graphics/Canvas;->drawPatch(Landroid/graphics/NinePatch;Landroid/graphics/RectF;Landroid/graphics/Paint;)V 
+(greylist-max-o, linking, denied)
+07-06 02:04:48.564  1381  1979 I CodecSolution: pid(29067) pkg(com.buddybot.kids)
+07-06 02:04:48.572  1381  1859 D CodecSolution: topName : com.buddybot.kids
+07-06 02:04:48.572  1381  1859 I CodecSolution: Top : com.buddybot.kids
+07-06 02:04:48.572  1381  1859 D SCPMHelper: getPackageInfo(com.buddybot.kids)
+07-06 02:04:48.584  1381  1859 V WindowManager: Relayout Window{58b4270 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity}: viewVisibility=0 req=1120x1037
+07-06 02:04:48.586   917  1006 I SurfaceFlinger: id=1268 createSurf (1344x1261),1 flag=4, 
+com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#1
+07-06 02:04:48.587  1381  1859 D WindowManager: makeSurface duration=2 
+name=com.buddybot.kids/com.buddybot.kids.MainActivity$_29067
+07-06 02:04:48.620  1381  3684 D WindowManager: finishDrawingWindow: Window{58b4270 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity} mDrawState=DRAW_PENDING
+07-06 02:04:48.622  1381  1537 D PkgPredictorService: pkg:com.buddybot.kids activity:com.buddybot.kids.MainActivity 
+thisTime:2829
+07-06 02:04:48.629  1381  1537 I WindowManager: Reparenting to leash, surface=Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7
+07-06 02:04:48.629   917  1007 I SurfaceFlinger: id=1269 createSurf (0x0),-1 flag=80004, Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7 - animation-leash#0
+07-06 02:04:48.630  1381  1537 D WindowManager: makeSurface duration=2 leash=Surface(name=Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7 - animation-leash)/@0x1bb1f32
+07-06 02:04:48.640  1381  1533 D WindowManager: setSystemUiVisibility: displayId=0, vis=0x8008, fullVis=0x0, 
+dockVis=0x0, win=Window{58b4270 u0 com.buddybot.kids/com.buddybot.kids.MainActivity}
+07-06 02:04:48.645  1381  1546 I ActivityTaskManager: Displayed com.buddybot.kids/.MainActivity: +2s829ms
+07-06 02:04:48.657  1381  1861 V WindowManager: Relayout Window{58b4270 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity}: viewVisibility=0 req=1120x1037
+07-06 02:04:48.665   917   917 I SurfaceFlinger:      DEVICE | 0x77229e5230 | 0002 | 0x7fa30c06 |   0.0    0.0 1920.0 
+1080.0 |    0    0 1440 2960 | SurfaceView - com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0
+07-06 02:04:48.665   917   917 I SurfaceFlinger:      DEVICE | 0x77370519d0 | 0000 | RGBA_8888 |   0.0    0.0 1440.0 
+2960.0 |    0    0 1440 2960 | com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#0
+07-06 02:04:48.680   917   917 I SurfaceFlinger:      DEVICE | 0x77229e5230 | 0002 | 0x7fa30c06 |   0.0    0.0 1920.0 
+1080.0 |    0    0 1440 2960 | SurfaceView - com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0
+07-06 02:04:48.680   917   917 I SurfaceFlinger:      DEVICE | 0x77370519d0 | 0000 | RGBA_8888 |   0.0    0.0 1440.0 
+2960.0 |    0    0 1440 2960 | com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#0
+07-06 02:04:48.680   917   917 I SurfaceFlinger:      DEVICE | 0x7737050d20 | 0000 | RGBA_8888 |   0.0    0.0 1261.0 
+1344.0 |   90  781 1351 2125 | com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#1
+07-06 02:04:48.684 29067 29067 V InputMethodManager: Starting input: tba=com.buddybot.kids ic=null mNaviBarColor 
+-855310 mIsGetNaviBarColorSuccess true , NavVisible : true , NavTrans : false
+07-06 02:04:48.722  1381  1536 D WindowManager: w is invisible : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.722  1381  1536 D WindowManager: w is invisible : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.722  1381  1536 D WindowManager: windowMattersToAccessibility, check : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.735 29067 29067 V InputMethodManager: Starting input: tba=com.buddybot.kids ic=null mNaviBarColor 
+-855310 mIsGetNaviBarColorSuccess true , NavVisible : true , NavTrans : false
+07-06 02:04:48.780  1381  1533 D CodecSolution: isMaxAspectPackageEx: com.buddybot.kids : true(2)
+07-06 02:04:48.791  1381  1537 I WindowManager: Reparenting to original parent: Surface(name=AppWindowToken{4b2c619 
+token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity t455}}})/@0x38471a1, destroyLeash=true, 
+surface=Surface(name=58b4270 com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7
+07-06 02:04:48.794   917  2545 I Layer   : id=1269 removeFromCurrentState Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7 - animation-leash#0 (77)
+07-06 02:04:48.795   917  2545 I SurfaceFlinger: id=1269 Removed Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7 - animation-leash#0 (77)
+07-06 02:04:48.805   917   917 I Layer   : id=1269[1] Destroyed Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7 - animation-leash#0
+07-06 02:04:48.892  1381  1536 D WindowManager: w is invisible : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.892  1381  1536 D WindowManager: w is invisible : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.892  1381  1536 D WindowManager: windowMattersToAccessibility, check : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:48.911  1381  2078 D MdnieScenarioControlService:  packageName : com.buddybot.kids    className : 
+com.buddybot.kids.MainActivity
+07-06 02:04:48.924 29067 29067 D ArduinoComms: WARN: disconnected, dropped: SENS|H:70|P:74|R:-120
+07-06 02:04:49.444 29067 29067 D ArduinoComms: WARN: disconnected, dropped: SENS|H:70|P:74|R:-120
+07-06 02:04:49.959 29067 29067 D ArduinoComms: WARN: disconnected, dropped: SENS|H:70|P:74|R:-121
+07-06 02:04:50.478 29067 29067 D ArduinoComms: WARN: disconnected, dropped: SENS|H:70|P:74|R:-121
+07-06 02:04:50.984 29067 29067 D ArduinoComms: USB scan: 2 device(s)
+07-06 02:04:50.985 29067 29067 D ArduinoComms:   VID=0x2109 PID=0x8817 class=17 name=/dev/bus/usb/001/004
+07-06 02:04:50.985 29067 29067 D ArduinoComms:   VID=0x2E8A PID=0xF00A class=239 name=/dev/bus/usb/001/003
+07-06 02:04:50.986 29067 29067 D ArduinoComms: No serial device found
+07-06 02:04:50.996 29067 29067 D ArduinoComms: WARN: disconnected, dropped: SENS|H:70|P:74|R:-121
+07-06 02:04:51.514 29067 29067 D ArduinoComms: WARN: disconnected, dropped: SENS|H:70|P:74|R:-121
+07-06 02:04:51.994 29067 29067 D BuddyBotMainActivity: initializeApp: Environment monitoring started (delayed)
+07-06 02:04:52.023  1381  1550 D ApplicationPolicy: isStatusBarNotificationAllowedAsUser: packageName = 
+com.buddybot.kids,userId = 0
+07-06 02:04:52.026  1381  1550 D ApplicationPolicy: isStatusBarNotificationAllowedAsUser: packageName = 
+com.buddybot.kids,userId = 0
+07-06 02:04:52.049  1381  1861 V AudioService.RecordingActivityMonitor: updateSoundAppPolicy packageName = 
+com.buddybot.kids
+07-06 02:04:52.055 29067 29067 D ArduinoComms: WARN: disconnected, dropped: SENS|H:70|P:74|R:-121
+07-06 02:04:52.133  1381  1381 I EdgeLightingManager: showForNotification : isInteractive=true, isHeadUp=false, 
+color=0, sbn = StatusBarNotification(pkg=com.buddybot.kids user=UserHandle{0} id=100 tag=null 
+key=0|com.buddybot.kids|100|null|10345: Notification(channel=buddybot_monitoring pri=-1 contentView=null vibrate=null 
+sound=null defaults=0x0 flags=0x62 color=0x00000000 vis=PRIVATE semFlags=0x0 semPriority=0 semMissedCount=0))
+07-06 02:04:52.134  1381  1381 I EdgeLightingPolicyManager: isAcceptableApplication:  pkg=com.buddybot.kids , 
+range=256 , includeAllApp=false , userId=0 , infoRange=0 , infoCategory=0
+07-06 02:04:52.135  1381  1381 I EdgeLightingPolicyManager: isAcceptableApplication:  pkg=com.buddybot.kids , range=1 
+, includeAllApp=false , userId=0 , infoRange=0 , infoCategory=0
+07-06 02:04:52.135  1381  1381 D NotificationService: 0|com.buddybot.kids|100|null|10345: granting 
+content://settings/system/notification_sound
+07-06 02:04:52.136  1381  1381 D NotificationService: 0|com.buddybot.kids|100|null|10345: granting 
+content://settings/system/notification_sound
+07-06 02:04:52.140  2199  2261 V NotificationManager_FLP: Notification for foreground service is posted, 
+0|com.buddybot.kids|100|null|10345
+07-06 02:04:52.257  1381  1441 I WindowManager: Reparenting to leash, surface=Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7
+07-06 02:04:52.257   917  2545 I SurfaceFlinger: id=1272 createSurf (0x0),-1 flag=80004, Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7 - animation-leash#0
+07-06 02:04:52.258  1381  1441 D WindowManager: makeSurface duration=1 leash=Surface(name=Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7 - animation-leash)/@0xb33a94a
+07-06 02:04:52.259  1381  1441 V WindowManager: Changing focus from Window{58b4270 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity EXITING} to Window{e3dcb35 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity} displayId=0 
+Callers=com.android.server.wm.RootWindowContainer.updateFocusedWindowLocked:204 
+com.android.server.wm.WindowManagerService.updateFocusedWindowLocked:6458 
+com.android.server.wm.WindowState.setupWindowForRemoveOnExit:2569 
+com.android.server.wm.WindowState.removeIfPossible:2538 com.android.server.wm.WindowState.removeIfPossible:2425 
+com.android.server.wm.WindowManagerService.removeWindow:2086 
+07-06 02:04:52.260  1381  1533 D WindowManager: setSystemUiVisibility: displayId=0, vis=0x970e, fullVis=0x0, 
+dockVis=0x0, win=Window{e3dcb35 u0 com.buddybot.kids/com.buddybot.kids.MainActivity}
+07-06 02:04:52.265  1381  1533 D WindowManager: setSystemUiVisibility: displayId=0, vis=0x971e, fullVis=0x0, 
+dockVis=0x0, win=Window{e3dcb35 u0 com.buddybot.kids/com.buddybot.kids.MainActivity}
+07-06 02:04:52.267  1381  1536 I WindowManager: Focus moving from Window{58b4270 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity EXITING} to Window{e3dcb35 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity} displayId=0
+07-06 02:04:52.267  1381  1536 D WindowManager: w is invisible : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:52.268  1381  1536 D WindowManager: w is invisible : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:52.268  1381  1536 D WindowManager: w is invisible : 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:52.268  1381  1536 D WindowManager: windowMattersToAccessibility, check : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:52.268  1381  1536 I WindowManager: Gaining focus: Window{e3dcb35 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity}
+07-06 02:04:52.268  1381  1536 I WindowManager: Losing focus: Window{58b4270 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity EXITING}
+07-06 02:04:52.274  1381  1861 E InputDispatcher: Window handle Window{58b4270 u0 
+com.buddybot.kids/com.buddybot.kids.MainActivity} has no registered input channel
+07-06 02:04:52.284 29067 29067 V InputMethodManager: Starting input: tba=com.buddybot.kids ic=null mNaviBarColor 
+-855310 mIsGetNaviBarColorSuccess true , NavVisible : false , NavTrans : false
+07-06 02:04:52.329  1381  1979 I CodecSolution: pid(29067) pkg(com.buddybot.kids)
+07-06 02:04:52.338  1381  1441 D CodecSolution: topName : com.buddybot.kids
+07-06 02:04:52.338  1381  1441 I CodecSolution: Top : com.buddybot.kids
+07-06 02:04:52.338  1381  1441 D SCPMHelper: getPackageInfo(com.buddybot.kids)
+07-06 02:04:52.424  1381  1537 I WindowManager: Reparenting to original parent: Surface(name=AppWindowToken{4b2c619 
+token=Token{8e9c160 ActivityRecord{3941163 u0 com.buddybot.kids/.MainActivity t455}}})/@0x38471a1, destroyLeash=true, 
+surface=Surface(name=58b4270 com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7
+07-06 02:04:52.424  1381  1537 E WindowManager: win=Window{58b4270 u0 com.buddybot.kids/com.buddybot.kids.MainActivity 
+EXITING} destroySurfaces: appStopped=false win.mWindowRemovalAllowed=true win.mRemoveOnExit=true win.mViewVisibility=0 
+caller=com.android.server.wm.AppWindowToken.destroySurfaces:1249 
+com.android.server.wm.AppWindowToken.destroySurfaces:1230 com.android.server.wm.WindowState.onExitAnimationDone:5189 
+com.android.server.wm.WindowStateAnimator.onAnimationFinished:320 
+com.android.server.wm.WindowState.onAnimationFinished:5630 
+com.android.server.wm.-$$Lambda$yVRF8YoeNdTa8GR1wDStVsHu8xM.run:2 
+com.android.server.wm.SurfaceAnimator.lambda$getFinishedCallback$0$SurfaceAnimator:100 
+07-06 02:04:52.424  1381  1537 I WindowManager: Destroying surface 
+Surface(name=com.buddybot.kids/com.buddybot.kids.MainActivity$_29067)/@0x10dc8a1 called by 
+com.android.server.wm.WindowStateAnimator.destroySurface:1834 
+com.android.server.wm.WindowStateAnimator.destroySurfaceLocked:733 
+com.android.server.wm.WindowState.destroySurfaceUnchecked:3649 com.android.server.wm.WindowState.destroySurface:3623 
+com.android.server.wm.AppWindowToken.destroySurfaces:1249 com.android.server.wm.AppWindowToken.destroySurfaces:1230 
+com.android.server.wm.WindowState.onExitAnimationDone:5189 
+com.android.server.wm.WindowStateAnimator.onAnimationFinished:320 
+07-06 02:04:52.424   917  2545 I Layer   : id=1268 removeFromCurrentState 
+com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#1 (78)
+07-06 02:04:52.426   917  2545 I Layer   : id=1262 removeFromCurrentState 58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity#0 (78)
+07-06 02:04:52.426   917  2545 I Layer   : id=1272 removeFromCurrentState Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7 - animation-leash#0 (78)
+07-06 02:04:52.427   917  1006 I SurfaceFlinger: id=1272 Removed Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7 - animation-leash#0 (78)
+07-06 02:04:52.427   917  1006 I SurfaceFlinger: id=1268 Removed 
+com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#1 (78)
+07-06 02:04:52.441   917   917 I Layer   : id=1272[1] Destroyed Surface(name=58b4270 
+com.buddybot.kids/com.buddybot.kids.MainActivity)/@0x5f8f0e7 - animation-leash#0
+07-06 02:04:52.443   917   917 I Layer   : id=1268[1] Destroyed 
+com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#1
+07-06 02:04:52.447   917   917 I SurfaceFlinger:      DEVICE | 0x773b143d70 | 0002 | 0x7fa30c06 |   0.0    0.0  752.0  
+416.0 |    0    0 1440 2960 | SurfaceView - com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0
+07-06 02:04:52.447   917   917 I SurfaceFlinger:      DEVICE | 0x773b1459e0 | 0000 | RGBA_8888 |   0.0    0.0 1440.0 
+2960.0 |    0    0 1440 2960 | com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#0
+07-06 02:04:52.526  1381  1536 D WindowManager: w is invisible : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:52.527  1381  1536 D WindowManager: windowMattersToAccessibility, check : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:52.607 29067 29067 D ArduinoComms: WARN: disconnected, dropped: SENS|H:70|P:74|R:-121
+07-06 02:04:52.647   917   917 I SurfaceFlinger:      DEVICE | 0x773b1452e0 | 0002 | 0x7fa30c06 |   0.0    0.0  752.0  
+416.0 |    0    0 1440 2960 | SurfaceView - com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0
+07-06 02:04:52.647   917   917 I SurfaceFlinger:      DEVICE | 0x773b1459e0 | 0000 | RGBA_8888 |   0.0    0.0 1440.0 
+2960.0 |    0    0 1440 2960 | com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#0
+07-06 02:04:52.680   917   917 I SurfaceFlinger:      DEVICE | 0x773b1452e0 | 0002 | 0x7fa30c06 |   0.0    0.0  752.0  
+416.0 |    0    0 1440 2960 | SurfaceView - com.buddybot.kids/com.buddybot.kids.MainActivity@89667cf@0#0
+07-06 02:04:52.680   917   917 I SurfaceFlinger:      DEVICE | 0x773b1459e0 | 0000 | RGBA_8888 |   0.0    0.0 1440.0 
+2960.0 |    0    0 1440 2960 | com.buddybot.kids/com.buddybot.kids.MainActivity$_29067#0
+07-06 02:04:52.726  1381  1536 D WindowManager: w is invisible : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:52.727  1381  1536 D WindowManager: windowMattersToAccessibility, check : e3dcb35 
+com.buddybot.kids/com.buddybot.kids.MainActivity
+07-06 02:04:53.126 29067 29067 D ArduinoComms: WARN: disconnected, dropped: SENS|H:70|P:74|R:-121
+07-06 02:04:53.644 29067 29067 D ArduinoComms: WARN: disconnected, dropped: SENS|H:69|P:74|R:-121
+07-06 02:04:53.908 29067  5870 D ProfileInstaller: Installing profile for com.buddybot.kids
+07-06 02:04:53.989 29067 29067 D ArduinoComms: USB scan: 2 device(s)
+07-06 02:04:53.990 29067 29067 D ArduinoComms:   VID=0x2109 PID=0x8817 class=17 name=/dev/bus/usb/001/004
+07-06 02:04:53.990 29067 29067 D ArduinoComms:   VID=0x2E8A PID=0xF00A class=239 name=/dev/bus/usb/001/003
+07-06 02:04:53.992 29067 29067 D ArduinoComms: No serial device found
+

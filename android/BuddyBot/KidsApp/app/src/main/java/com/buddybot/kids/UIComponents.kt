@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.CircularProgressIndicator as MaterialProgressIndicator
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -58,7 +59,7 @@ fun ProcessingOverlay() {
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(color = Color.White)
+            MaterialProgressIndicator(color = Color.White)
             Spacer(modifier = Modifier.height(16.dp))
             Text("Processing...", color = Color.White, fontSize = 18.sp)
         }

@@ -65,7 +65,23 @@ class MainViewModel(
 
         // Auto-populate BuddyBot IP when Pico W broadcasts it
         router.wifiIps
-            .onEach { ip -> if (ip.isNotEmpty() && ip != "0.0.0.0") updateIP(ip) }
+            .onEach { ip ->
+                if (ip.isNotEmpty() && ip != "0.0.0.0") {
+                    updateIP(ip)
+                    _robotState.update { it.copy(wifiSetupPhase = "connected") }
+                }
+            }
+            .launchIn(viewModelScope)
+
+        router.acks
+            .onEach { ack ->
+                when {
+                    ack.startsWith("WIFI_CONNECTING") ->
+                        _robotState.update { it.copy(wifiSetupPhase = "connecting") }
+                    ack.startsWith("WIFI_FAIL") || ack.startsWith("WIFI_ERROR") ->
+                        _robotState.update { it.copy(wifiSetupPhase = "failed") }
+                }
+            }
             .launchIn(viewModelScope)
 
         // Drain raw log channel to StateFlow

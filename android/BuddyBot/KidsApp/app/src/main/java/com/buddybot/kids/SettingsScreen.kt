@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.CircularProgressIndicator as MaterialProgressIndicator
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -148,6 +150,7 @@ fun SettingsMenu(
                     item {
                         ConnectionCard(
                             robotState = robotState,
+                            logs = logs,
                             onToggleCommunication = onToggleCommunication,
                             onIPChange = onIPChange,
                             onConnectRobotWifi = onConnectRobotWifi,
@@ -636,6 +639,7 @@ private fun NeonTestButton(
 @Composable
 private fun ConnectionCard(
     robotState: RobotState,
+    logs: List<String>,
     onToggleCommunication: () -> Unit,
     onIPChange: (String) -> Unit,
     onConnectRobotWifi: (ssid: String, password: String) -> Boolean,
@@ -646,6 +650,7 @@ private fun ConnectionCard(
     var ipSaved by remember { mutableStateOf(false) }
     var phoneSsid by remember { mutableStateOf<String?>(null) }
     var wifiPassword by remember { mutableStateOf("") }
+    var wifiPasswordVisible by remember { mutableStateOf(true) }
     var wifiFeedback by remember { mutableStateOf<String?>(null) }
     var wifiConnecting by remember { mutableStateOf(false) }
     var ipAtConnectStart by remember { mutableStateOf("") }
@@ -679,22 +684,84 @@ private fun ConnectionCard(
         }
     }
 
+    LaunchedEffect(robotState.wifiSetupPhase, wifiConnecting) {
+        if (!wifiConnecting) return@LaunchedEffect
+        when (robotState.wifiSetupPhase) {
+            "connecting" -> wifiFeedback = "Robot received credentials — joining WiFi..."
+            "connected" -> {
+                wifiConnecting = false
+                wifiFeedback = if (robotState.buddybotIP.isNotEmpty())
+                    "Robot connected — IP ${robotState.buddybotIP}"
+                else "Robot connected to WiFi"
+            }
+            "failed" -> {
+                wifiConnecting = false
+                wifiFeedback = "Robot could not join WiFi — check password or reflash Pico W firmware"
+            }
+        }
+    }
+
     LaunchedEffect(robotState.buddybotIP, wifiConnecting) {
-        if (wifiConnecting &&
-            robotState.buddybotIP.isNotEmpty() &&
-            robotState.buddybotIP != ipAtConnectStart
-        ) {
+        if (wifiConnecting && robotState.buddybotIP.isNotEmpty()) {
+            // Accept IP even when unchanged (re-provision to same network)
+            val ipSeenInLogs = logs.any { it.contains("WIFI_IP:") }
+            if (ipSeenInLogs || robotState.buddybotIP != ipAtConnectStart) {
+                wifiConnecting = false
+                wifiFeedback = "Robot connected — IP ${robotState.buddybotIP}"
+            }
+        }
+    }
+
+    LaunchedEffect(logs, wifiConnecting) {
+        if (!wifiConnecting) return@LaunchedEffect
+        logs.firstOrNull {
+            it.contains("WIFI_FAIL", ignoreCase = true) ||
+                it.contains("[PICO] WiFi connect FAILED", ignoreCase = true)
+        }?.let {
             wifiConnecting = false
-            wifiFeedback = "Robot connected — IP ${robotState.buddybotIP}"
+            wifiFeedback = "Robot could not join WiFi — check password or router settings"
+        }
+        logs.firstOrNull { it.contains("[PICO] WiFi radio ready", ignoreCase = true) }?.let {
+            wifiFeedback = "Pico W WiFi radio started..."
+        }
+        logs.firstOrNull { it.contains("[PICO] WiFi joining", ignoreCase = true) }?.let {
+            wifiFeedback = "Pico W joining WiFi (up to 45s)..."
+        }
+        logs.firstOrNull { it.contains("DBG:WIFI_ST:", ignoreCase = true) }?.let { line ->
+            val code = line.substringAfter("DBG:WIFI_ST:").trim().takeWhile { it.isDigit() || it == '-' }
+            if (code == "JOINING") wifiFeedback = "Pico W joining WiFi..."
+            else if (code.isNotEmpty()) wifiFeedback = "Pico W WiFi status $code..."
+        }
+        logs.firstOrNull { it.contains("[PICO] WiFi OK", ignoreCase = true) }?.let { line ->
+            val ip = line.substringAfter("[PICO] WiFi OK").trim()
+                .takeWhile { it.isDigit() || it == '.' }
+            if (ip.isNotEmpty()) {
+                wifiConnecting = false
+                wifiFeedback = "Robot connected — IP $ip"
+            }
+        }
+        logs.firstOrNull { it.contains("WIFI_IP:") }?.let { line ->
+            val ip = line.substringAfter("WIFI_IP:").trim()
+                .takeWhile { it.isDigit() || it == '.' }
+            if (ip.isNotEmpty()) {
+                wifiConnecting = false
+                wifiFeedback = "Robot connected — IP $ip"
+            }
         }
     }
 
     LaunchedEffect(wifiConnecting) {
         if (wifiConnecting) {
-            delay(90_000)
+            delay(60_000)
             if (wifiConnecting) {
                 wifiConnecting = false
-                wifiFeedback = "Timed out — robot did not report an IP yet"
+                val hasV3 = logs.any { it.contains("PICO_FW:WIFI_V3") || it.contains("PICO_FW:WIFI_V2") }
+                val sawJoin = logs.any { it.contains("[PICO] WiFi joining") }
+                wifiFeedback = when {
+                    !hasV3 -> "Timed out — reflash Pico with WIFI_V3 build (board: Raspberry Pi Pico W)"
+                    !sawJoin -> "Timed out — Pico got credentials but WiFi never started (check board selection)"
+                    else -> "Timed out — Pico tried WiFi but no IP (check router or password)"
+                }
             }
         }
     }
@@ -875,8 +942,19 @@ private fun ConnectionCard(
                     Text("Enter network password", color = NeonCyan.copy(alpha = 0.3f), fontSize = 13.sp)
                 },
                 singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                visualTransformation = if (wifiPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = if (wifiPasswordVisible) KeyboardType.Text else KeyboardType.Password
+                ),
+                trailingIcon = {
+                    IconButton(onClick = { wifiPasswordVisible = !wifiPasswordVisible }) {
+                        Icon(
+                            imageVector = if (wifiPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = if (wifiPasswordVisible) "Hide password" else "Show password",
+                            tint = NeonCyan.copy(alpha = 0.7f)
+                        )
+                    }
+                },
                 modifier = Modifier.weight(1f),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = NeonCyan,
@@ -947,7 +1025,9 @@ private fun ConnectionCard(
                             wifiFeedback = "Error: ${e.message}"
                             false
                         }
-                        if (!ok) {
+                        if (ok) {
+                            wifiFeedback = "Credentials sent — waiting for robot..."
+                        } else {
                             wifiConnecting = false
                             if (wifiFeedback?.startsWith("Error:") != true) {
                                 wifiFeedback = "Failed to send credentials — check USB connection"
@@ -968,7 +1048,8 @@ private fun ConnectionCard(
             border = BorderStroke(1.dp, NeonGreen.copy(alpha = 0.6f))
         ) {
             if (wifiConnecting) {
-                CircularProgressIndicator(
+                // Material3 CircularProgressIndicator crashes on BOM 2024.01 (KeyframesSpec.at missing)
+                MaterialProgressIndicator(
                     modifier = Modifier.size(16.dp),
                     color = NeonGreen,
                     strokeWidth = 2.dp

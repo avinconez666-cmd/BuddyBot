@@ -29,6 +29,8 @@
     <usb-device vendor-id="11914" product-id="10" />
     <usb-device vendor-id="11914" product-id="12" />
     <usb-device vendor-id="11914" product-id="15" />
+    <!-- Pico W SDK default CDC PID 0xF00A (61450) — production boards -->
+    <usb-device vendor-id="11914" product-id="61450" />
     <!-- Generic USB CDC ACM (class 2, subclass 2) — catches unlisted Pico builds -->
     <usb-device class="2" subclass="2" />
 

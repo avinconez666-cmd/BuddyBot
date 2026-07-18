@@ -43,7 +43,8 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
         private const val ACTION_USB_PERM = "com.buddybot.USB_PERMISSION_ARDUINO"
         private const val ACTION_CAM_PERM = "com.buddybot.USB_PERMISSION_WEBCAM"
         private const val VID_PICO = 0x2E8A
-        private val PICO_PIDS = listOf(0x0009, 0x000A, 0x000B, 0x000C, 0x000F, 0xFEED)
+        // 0xF00A = SDK default CDC PID on production Pico W boards (seen on COM25 probe)
+        private val PICO_PIDS = listOf(0x0009, 0x000A, 0x000B, 0x000C, 0x000F, 0xF00A, 0xFEED)
         private const val BAUD = BuddyBotConfig.SERIAL_BAUD_RATE
         private const val READ_TIMEOUT  = 200
         private const val WRITE_TIMEOUT = 500
@@ -151,8 +152,24 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
 
     fun isArduino(device: UsbDevice): Boolean = isSerialDevice(device)
 
-    private fun isCamera(d: UsbDevice): Boolean =
-        d.deviceClass == 14 || (d.deviceClass == 239 && d.deviceSubclass == 2) || d.vendorId == 0x046D
+    /** True when [d] exposes a USB CDC ACM serial interface (Pico W reports device class 239/2). */
+    private fun hasCdcAcmInterface(d: UsbDevice): Boolean {
+        for (i in 0 until d.interfaceCount) {
+            val iface = d.getInterface(i)
+            if (iface.interfaceClass == 2 && iface.interfaceSubclass == 2) return true
+        }
+        return false
+    }
+
+    private fun isCamera(d: UsbDevice): Boolean {
+        // Pico W composite device is 239/2 at device level but "Pico Serial" is CDC ACM — not a webcam.
+        if (d.vendorId == VID_PICO || d.vendorId == 0x2341 || d.vendorId == 0x2A03 || d.vendorId == 0x1A86) return false
+        if (d.deviceClass == 14) return true
+        if (d.vendorId == 0x046D) return true
+        // 239/2 = IAD composite; only a camera when it lacks a CDC serial interface.
+        if (d.deviceClass == 239 && d.deviceSubclass == 2) return !hasCdcAcmInterface(d)
+        return false
+    }
     fun initialize(ip: String) {
         log("initialize(ip=$ip)")
         initializeUSBSerial()
@@ -178,8 +195,14 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
         }
         val drivers = mutableListOf<UsbSerialDriver>()
         devList.values.forEach { d ->
-            if (isCamera(d)) return@forEach
-            (prober.probeDevice(d) ?: UsbSerialProber.getDefaultProber().probeDevice(d))?.let { drivers.add(it) }
+            if (isCamera(d)) {
+                log("  skip camera VID=0x${d.vendorId.toString(16)} PID=0x${d.productId.toString(16)}")
+                return@forEach
+            }
+            val driver = prober.probeDevice(d)
+                ?: UsbSerialProber.getDefaultProber().probeDevice(d)
+                ?: if (d.vendorId == VID_PICO) CdcAcmSerialDriver(d) else null
+            driver?.let { drivers.add(it) }
         }
         if (drivers.isEmpty()) { log("No serial device found"); return }
         val driver = drivers.maxByOrNull { when (it.device.vendorId) { VID_PICO -> 100; 0x2341, 0x2A03 -> 50; 0x1A86 -> 40; else -> 10 } }!!
@@ -199,7 +222,9 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
         scope.launch(Dispatchers.IO) {
             try {
                 val usbMgr = context.getSystemService(Context.USB_SERVICE) as UsbManager
-                val driver = prober.probeDevice(device) ?: UsbSerialProber.getDefaultProber().probeDevice(device)
+                val driver = prober.probeDevice(device)
+                    ?: UsbSerialProber.getDefaultProber().probeDevice(device)
+                    ?: if (device.vendorId == VID_PICO) CdcAcmSerialDriver(device) else null
                     ?: run { log("ERROR: no driver for VID=0x${device.vendorId.toString(16)}"); return@launch }
                 val conn = usbMgr.openDevice(device) ?: run { log("ERROR: openDevice null"); return@launch }
                 val port = driver.ports.firstOrNull() ?: run { log("ERROR: no ports"); conn.close(); return@launch }
@@ -246,15 +271,47 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
         lineBuf.append(String(data, Charsets.UTF_8))
         var nl: Int
         while (lineBuf.indexOf("\n").also { nl = it } >= 0) {
-            val msg = normalise(lineBuf.substring(0, nl))
+            val rawLine = lineBuf.substring(0, nl)
             lineBuf.delete(0, nl + 1)
-            if (msg.isNotEmpty()) { log("[RECV] $msg"); onMessageReceived?.invoke(msg) }
+            splitGluedFrames(rawLine).forEach { frame ->
+                val msg = normalise(frame)
+                if (msg.isNotEmpty()) {
+                    log("[RECV] $msg")
+                    onMessageReceived?.invoke(msg)
+                }
+            }
         }
         if (lineBuf.length > 2048) { lineBuf.clear(); log("WARN: buf overflow") }
     }
 
+    /** USB serial flood can glue lines — split on embedded bridge tags. */
+    private fun splitGluedFrames(raw: String): List<String> {
+        val markers = listOf("[M->S9]", "[S9->M]", "[RX]", "[PICO]", "PICO_ALIVE|", "DBG:", "ACK|", "WIFI_IP:")
+        var frames = listOf(raw)
+        for (marker in markers) {
+            frames = frames.flatMap { piece ->
+                if (!piece.contains(marker)) listOf(piece)
+                else {
+                    val idx = piece.indexOf(marker)
+                    buildList {
+                        if (idx > 0) add(piece.substring(0, idx))
+                        add(piece.substring(idx))
+                    }
+                }
+            }
+        }
+        return frames.map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
     private fun normalise(raw: String): String {
         var s = raw.trim()
+        // Pico W serial bridge prefixes — strip so MessageRouter sees ACK| / WIFI_IP: etc.
+        for (prefix in listOf("[M->S9]", "[S9->M]", "[RX]")) {
+            if (s.startsWith(prefix)) {
+                s = s.substring(prefix.length).trim()
+                break
+            }
+        }
         val ci = s.indexOf("|CRC:"); if (ci > 0) s = s.substring(0, ci)
         return s.removeSuffix("|END").trim()
     }

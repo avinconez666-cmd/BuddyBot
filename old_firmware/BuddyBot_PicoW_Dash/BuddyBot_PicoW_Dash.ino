@@ -347,7 +347,14 @@ int           sndHead=0, sndTail=0, sndLen=0;
 unsigned long sndEndMs=0;
 
 void sndUpdate(){
-  if(sndLen==0||millis()<sndEndMs)return;
+  // BUGFIX: previously, once the queue drained the function returned here
+  // forever without ever silencing AUDIO_PIN, leaving the last tone's PWM
+  // running indefinitely (constant buzzing after any beep/click/sound).
+  if(sndLen==0){
+    if(sndEndMs!=0 && millis()>=sndEndMs){ analogWrite(AUDIO_PIN,0); sndEndMs=0; }
+    return;
+  }
+  if(millis()<sndEndMs)return;
   if(sndQ[sndHead].freq == 0){
     analogWrite(AUDIO_PIN, 0);
   } else {
@@ -854,7 +861,15 @@ void drawMain() {
 
 void refreshMainBody(){
   if(!spritesReady) return;
-  const int sy=62+118+8+118+8+54+8,bh=SCR_H-sy;
+  // BUGFIXES:
+  //  - sy/bh were computed from the button layout (104px tall) but the
+  //    sprite itself is only ever created at 56px tall (see drawMain),
+  //    so anything drawn below row ~56 was silently clipped off-screen.
+  //  - The "L:" (left ultrasonic) label at x=172 sat *underneath* the
+  //    auto-dock box (drawn afterwards, spanning x=162 to 312), so it was
+  //    painted over and invisible - only Front + Rear were ever visible.
+  //  - The Right ultrasonic reading (T.dRight) was never drawn at all.
+  const int bh=56, sy=SCR_H-bh;
   TFT_eSprite& s=bodSpr;
   for(int i=0;i<s.height();i++) s.drawFastHLine(0,i,SCR_W,blendCol(C_SURF,C_CYAN,5));
   s.drawFastHLine(0,0,SCR_W,C_CYAN); s.drawFastHLine(0,1,SCR_W,dimCol(C_CYAN,2));
@@ -867,7 +882,10 @@ void refreshMainBody(){
   s.setTextColor(cr,0x0000); s.setCursor(90,8); s.print(buf);
   uint16_t cl=T.dLeft<0?C_DGRAY:T.dLeft<30?C_RED:T.dLeft<80?C_ORANGE:C_GREEN;
   snprintf(buf,18,T.dLeft<0?"L:--":"L:%ldcm",T.dLeft);
-  s.setTextColor(cl,0x0000); s.setCursor(172,8); s.print(buf);
+  s.setTextColor(cl,0x0000); s.setCursor(6,32); s.print(buf);
+  uint16_t cri=T.dRight<0?C_DGRAY:T.dRight<30?C_RED:T.dRight<80?C_ORANGE:C_GREEN;
+  snprintf(buf,18,T.dRight<0?"Ri:--":"Ri:%ldcm",T.dRight);
+  s.setTextColor(cri,0x0000); s.setCursor(90,32); s.print(buf);
   uint16_t adC=T.autodock?C_GREEN:C_DGRAY;
   s.fillRoundRect(162,2,SCR_W-170,bh-4,6,T.autodock?blendCol(C_BG,C_GREEN,30):C_SURF);
   s.drawRoundRect(162,2,SCR_W-170,bh-4,6,adC);
@@ -879,7 +897,8 @@ void refreshMainBody(){
 
 void handleMainTouch(TouchPt& t) {
   const int BW=148,BH=118,PAD=8,ROW1=60,ROW2=ROW1+BH+PAD;
-  const int LY=ROW2+BH+PAD, LH=52, sy=LY+LH+8;
+  const int LY=ROW2+BH+PAD, LH=52;
+  const int sy=SCR_H-56;  // BUGFIX: must match refreshMainBody()'s actual sprite position
   if(t.y>=LY && t.y<LY+LH){ sndClick(); curScreen=SCR_LIGHTS; screenDirty=true; return; }
   if(t.y>=sy){ if(t.x>162){ T.autodock=!T.autodock; MEGA_SERIAL.println(T.autodock?"AUTODOCK:ON":"AUTODOCK:OFF"); sndClick(); requestBodyRefresh(); } return; }
   if(t.x>=PAD && t.x<PAD+BW){

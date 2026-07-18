@@ -24,7 +24,7 @@ object WiFiCredentialsStore {
     private const val KEY_LAST  = "last_ssid"
 
     const val MEGA_CMD_MAX_LEN  = 80
-    private const val OVERHEAD  = "CMD:WIFI|".length + 1
+    private const val OVERHEAD  = "WIFI|".length + 1   // +1 for the | before password
 
     private fun prefs(context: Context): SharedPreferences =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -60,7 +60,7 @@ object WiFiCredentialsStore {
     }
 
     fun validateMegaCommandLength(ssid: String, password: String): String? {
-        val total = "CMD:WIFI|$ssid|$password".length
+        val total = "WIFI|$ssid|$password".length
         if (total <= MEGA_CMD_MAX_LEN) return null
         val maxPass = (MEGA_CMD_MAX_LEN - OVERHEAD - ssid.length).coerceAtLeast(0)
         return "WiFi name + password too long ($total/$MEGA_CMD_MAX_LEN). Shorten password to $maxPass chars."

@@ -50,6 +50,13 @@
 #define TOUCH_CS -1
 
 // ── SPI speed ─────────────────────────────────────────────────────────
-// 40MHz is the ST7796S rated maximum. Drop to 27MHz if you see artefacts.
-#define SPI_FREQUENCY        10000000  // 10MHz — safe for ST7796S portrait, raise to 20MHz once confirmed clean  // Reduced from 40MHz — increase once display confirmed working
-#define SPI_READ_FREQUENCY   10000000
+// 40MHz is the ST7796S rated maximum. Drop to 20MHz if you see artefacts.
+// BUGFIX: this was left throttled down to 10MHz (a debug-safe value) and
+// never raised back up. At 10MHz, any sizeable fillRect/fillScreen call
+// (game redraws, the header sprite blit, etc.) takes long enough to be
+// visibly "scanned" onto the panel top-to-bottom instead of appearing
+// instantly. Raised to 27MHz, a commonly-safe rate for ST7796S — try
+// 40MHz first if you want to push it, and drop back to 20MHz if you see
+// tearing/garbage pixels.
+#define SPI_FREQUENCY        27000000
+#define SPI_READ_FREQUENCY   20000000

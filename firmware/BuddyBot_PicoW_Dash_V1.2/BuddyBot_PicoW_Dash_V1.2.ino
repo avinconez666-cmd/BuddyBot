@@ -1,0 +1,2443 @@
+﻿/*
+ * BuddyBot  Pico W-2023 Dashboard  V1.2  PORTRAIT 320x480  (UI refresh only —
+ * all V1.1 logic: bridge, telemetry, WiFi, web remote, watchdogs, audio,
+ * and all 6 games are unchanged. Only colors/layout/draw* functions updated.)
+ * Board : RP2040 Pico W-2023  TFT_eSPI  FT6336U touch  WiFiEspAT
+ * Audio : Keyestudio SC8002B Power Amplifier (GP14 IN)
+ *         Non-blocking hardware-PWM tone engine — receives BEEP:/BEEP:SEQ:
+ *         from Mega (Timer2 clash on Mega freed motor PWM pins 9/10).
+ * Serial: GP4(TX)/GP5(RX) <-> Mega Serial1 @ 115200 (UART1, GP0/GP1 are ESP8285)
+ *         S9 <-> USB CDC (Serial). Bridging via serial_bridge.h
+ *         Mega ↔ Pico ↔ S9 line-forwarding is inside bridgeLoop(); this
+ *         sketch implements onMegaLine() and onS9Line() callbacks.
+ */
+
+#include <TFT_eSPI.h>
+#include <Wire.h>
+#include <SPI.h>
+#include <math.h>
+// Standard Raspberry Pi Pico W (CYW43439) — native WiFi.h from arduino-pico core.
+// WiFiEspAT is for Keyestudio boards with a separate ESP8285 on GP0/GP1 only.
+#include <WiFi.h>
+#include "serial_bridge.h"    // S9↔Mega USB↔UART1 bridge (owns Serial2 GP4/GP5)
+extern volatile bool wifiOK;
+extern volatile bool webCmdReady;
+extern volatile char webCmd[64];
+void updateShared();
+
+TFT_eSPI tft = TFT_eSPI();
+
+
+struct TouchPt { int16_t x,y; bool pressed; };
+struct SSBullet { float x,y; bool alive; };
+struct SSBug    { float x,y,vx,vy; bool alive; uint16_t col; };
+struct SSStar   { int x,y; uint8_t br; };
+struct SSPart   { float x,y,vx,vy; uint8_t life; uint16_t col; };
+#define SS_STARS 40
+#define SS_PARTS 32
+SSStar ssStars[SS_STARS];
+SSPart ssParts[SS_PARTS];
+bool ssStarsInit=false;
+unsigned long lastTouchMs = 0;
+
+#define SCR_W    320
+#define SCR_H    480
+#define ROTATION   0
+#define AUDIO_PIN  14
+#define SND_QUEUE  12
+#define PIN_CTP_SDA  26
+#define PIN_CTP_SCL  27
+#define PIN_CTP_INT  28
+#define PIN_CTP_RST  15
+#define CTP_ADDR     0x38
+// FT6336U reports native portrait (x 0..319, y 0..479) — no flip needed for ROTATION 0
+#define TOUCH_FLIP_X false
+#define TOUCH_FLIP_Y false
+#define HDR_H        64
+#define GAME_TOP     48
+
+enum Screen : uint8_t {
+  SCR_MAIN, SCR_GAMES, SCR_SENSORS,
+  SCR_SENS_EYES, SCR_SENS_NOSE, SCR_SENS_BRAIN, SCR_SENS_TUMMY,
+  SCR_COMMS, SCR_SETTINGS, SCR_LIGHTS,
+  GAME_MARIO, GAME_PACMAN, GAME_STARSHIP, GAME_MEMORY, GAME_COLORMATCH, GAME_MATH
+};
+Screen curScreen = SCR_MAIN, prevScreen = SCR_MAIN;
+bool   screenDirty = true;
+bool   headerDirty = true;
+bool   bodyDirty   = true;
+Screen paintedScreen = (Screen)255;
+
+
+
+static void requestHeaderRefresh() { headerDirty = true; }
+static void requestBodyRefresh()   { if (curScreen < GAME_MARIO) bodyDirty = true; }
+static void requestFullRefresh()   { screenDirty = true; headerDirty = true; bodyDirty = true; }
+
+TouchPt readTouch() {
+  TouchPt t = {0, 0, false};
+  Wire1.beginTransmission(CTP_ADDR);
+  Wire1.write(0x02);
+  if (Wire1.endTransmission(false) != 0) return t;
+  if (Wire1.requestFrom(CTP_ADDR, (uint8_t)6) < 6) return t;
+  uint8_t n  = Wire1.read() & 0x0F;
+  uint8_t xh = Wire1.read();
+  uint8_t xl = Wire1.read();
+  uint8_t yh = Wire1.read();
+  uint8_t yl = Wire1.read();
+  Wire1.read();
+  if (n == 0 || n > 2) return t;
+  int16_t rx = ((xh & 0x0F) << 8) | xl;
+  int16_t ry = ((yh & 0x0F) << 8) | yl;
+  t.x = TOUCH_FLIP_X ? constrain((SCR_W - 1) - rx, 0, SCR_W - 1) : constrain(rx, 0, SCR_W - 1);
+  t.y = TOUCH_FLIP_Y ? constrain((SCR_H - 1) - ry, 0, SCR_H - 1) : constrain(ry, 0, SCR_H - 1);
+  t.pressed = true;
+  return t;
+}
+
+bool touchReady() { return (millis() - lastTouchMs > 100); }
+
+// Modern Cyberpunk & UI Color Palette Remap (RGB565) — V1.2
+#define C_BG     0x0821  // Ultra Deep Premium Obsidian Blue-Grey
+#define C_SURF   0x1105  // Polished Dark Steel Card Surface
+#define C_SURF2  0x1A2B  // Secondary Deep Tech Slate
+#define C_BORDER 0x2A6F  // Structured Holographic Cyan Border
+#define C_CYAN   0x07FF  // Laser Cyber Cyan
+#define C_GREEN  0x07E0  // Electric Mint Green
+#define C_PURPLE 0xA11F  // Neon Plasma Purple
+#define C_ORANGE 0xFD20  // Radiant Amber Orange
+#define C_PINK   0xF81F  // Synthetic Laser Pink Magenta
+#define C_YELLOW 0xFDE0  // High-Vis Tactical Yellow
+#define C_RED    0xF800  // Cyber Shock Crimson Red
+#define C_BLUE   0x1A1F  // Deep Virtual Blue Horizon
+#define C_WHITE  0xFFFF  // Pure Crystal White
+#define C_LGRAY  0xCE79  // Polished Aluminum Light Grey
+#define C_DGRAY  0x4A4F  // Matte Iron Dark Grey
+#define C_BLACK  0x0000  // Velvet Pitch Black
+// Retro Mario Palette Mapping
+#define C_MRED   0xDF00
+#define C_MBLUE  0x011F
+#define C_MSKIN  0xFE32
+#define C_MBROWN 0x9A60
+#define C_MPIPE  0x1D60
+#define C_MYELL  0xFEE0
+#define C_MSKY   0x547F
+#define C_MGRND  0x9A60
+
+// Telemetry
+struct Telem {
+  int   gas=0; float temp=0,hum=0,volt=0,amps=0; int pct=0;
+  long  dFront=-1,dRear=-1,dLeft=-1,dRight=-1;
+  bool  megaUartOk=false,wifiOk=false,s9ok=false,estop=false,autoM=false;
+  bool  irFront=false,irRear=false,pir=false,tilt=false;
+  char  fw[16]=""; char mode[16]="NORMAL";
+  bool  autodock=false; char dockSt[10]="IDLE";
+  float heading=-1; int gpsSats=0; bool cob=false;
+  char ledMode[10]="OFF"; char ledWhite[6]="OFF"; int ledBright=255;
+  bool  uvOn=false;   // UV light state — updated from Mega UV: messages
+} T;
+
+
+bool brainToggle[6]={true,true,true,true,true,true};
+const char* brainLabels[6]={"TEMP","GAS","VOLTAGE","ULTRASONICS","STATUS","MOTOR"};
+
+// MEGA_SERIAL — writes go directly to Serial2 (the bridge's UART).
+// The bridge owns bidirectional forwarding S9↔Mega; this alias exists so
+// legacy direct .print/.println() call sites still work without rewriting.
+#define MEGA_SERIAL Serial2
+
+// GP14: SC8002B audio amplifier input. Non-blocking hardware-PWM tone engine.
+#define AUDIO_PIN 14
+#define MEGA_BUF_LEN  320
+#define MEGA_PING_MS  5000
+#define MEGA_USB_ECHO 1
+char megaBuf[MEGA_BUF_LEN]; uint16_t megaBufLen=0;
+unsigned long lastMegaRx=0;
+unsigned long lastS9Rx=0;
+unsigned long lastPingTx=0;
+uint8_t pingSeq=0;
+bool megaLinked=false;
+
+// WiFi credentials — core0 only (arduino-pico LWIP must run on core 0, not loop1)
+char wifiSsid[33] = "OPTUS_8B4FC8N";
+char wifiPass[64] = "alter62635dx";
+volatile bool wifiReconnectPending = false;
+char pendingWifiSsid[33] = {0};
+char pendingWifiPass[64] = {0};
+volatile bool wifiIpReady = false;
+char pendingWifiIp[16] = {0};
+bool wifiRadioReady = false;
+bool webSrvStarted = false;
+enum WifiConnectState : uint8_t { WIFI_ST_IDLE, WIFI_ST_CONNECTING };
+WifiConnectState wifiConnectState = WIFI_ST_IDLE;
+unsigned long wifiConnectDeadline = 0;
+unsigned long wifiStatusLogMs = 0;
+WiFiServer webSrv(80);
+void handleWebClient(WiFiClient& cl);
+
+#define DBG_LINES 10
+#define DBG_LEN   48
+char   dbgLog[DBG_LINES][DBG_LEN];
+int    dbgHead = 0;
+
+void dbgPush(const char* msg) {
+  strncpy(dbgLog[dbgHead], msg, DBG_LEN-1);
+  dbgLog[dbgHead][DBG_LEN-1] = 0;
+  dbgHead = (dbgHead+1) % DBG_LINES;
+  Serial.println(msg);
+}
+
+static void trimInPlace(char* s) {
+  if (!s) return;
+  char* end = s + strlen(s);
+  while (end > s && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r')) {
+    *--end = 0;
+  }
+  char* p = s;
+  while (*p == ' ' || *p == '\t') p++;
+  if (p != s) memmove(s, p, strlen(p) + 1);
+}
+
+// Fixed credentials for the ESP32 remote to auto-connect (no router needed)
+#define RC_AP_SSID "BuddyBot-RC"
+#define RC_AP_PASS "BuddyBot2025"
+
+void ensureWifiRadio() {
+  if (wifiRadioReady) return;
+  wifiRadioReady = true;
+  // WIFI_AP_STA: concurrent softAP for the ESP32 remote + STA for home network
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.noLowPowerMode();
+  // Start softAP immediately — fixed IP 192.168.4.1, no router needed
+  if (WiFi.softAP(RC_AP_SSID, RC_AP_PASS)) {
+    dbgPush("[PICO] AP up: BuddyBot-RC / 192.168.4.1");
+    // webSrv handles connections from both AP and STA interfaces
+    if (!webSrvStarted) { webSrv.begin(); webSrvStarted = true; }
+  } else {
+    dbgPush("[PICO] WARN: softAP failed");
+  }
+  dbgPush("[PICO] WiFi radio ready");
+}
+
+// CYW43 radio init can disturb Wire1 on GP26/GP27 — re-probe touch after WiFi starts.
+static bool touchI2cOk = false;
+
+void restoreTouchI2c() {
+  Wire1.end();
+  delay(5);
+  Wire1.setSDA(PIN_CTP_SDA);
+  Wire1.setSCL(PIN_CTP_SCL);
+  Wire1.begin();
+  Wire1.setClock(400000);
+  delay(50);
+  Wire1.beginTransmission(CTP_ADDR);
+  int err = Wire1.endTransmission();
+  touchI2cOk = (err == 0);
+  if (touchI2cOk) {
+    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xA4); Wire1.write(0x00); Wire1.endTransmission();
+    dbgPush("[PICO] Touch I2C restored after WiFi radio");
+  } else {
+    dbgPush("[PICO] WARN: Touch I2C lost after WiFi radio");
+  }
+}
+
+void reportWifiSuccess() {
+  wifiOK = true;
+  if (!webSrvStarted) {
+    webSrv.begin();
+    webSrvStarted = true;
+  }
+  IPAddress ip = WiFi.localIP();
+  snprintf(pendingWifiIp, sizeof(pendingWifiIp), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+  wifiIpReady = true;
+  char buf[48];
+  snprintf(buf, sizeof(buf), "[PICO] WiFi OK %s", pendingWifiIp);
+  dbgPush(buf);
+  picoToS9(String(F("WIFI_IP:")) + pendingWifiIp);
+}
+
+void reportWifiFailure() {
+  wifiOK = false;
+  dbgPush("[PICO] WiFi connect FAILED");
+  picoToMega("WIFI_FAIL");
+  picoToS9("ACK|WIFI_FAIL|END");
+}
+
+void startWifiConnect() {
+  if (wifiConnectState == WIFI_ST_CONNECTING) return;
+  ensureWifiRadio();
+  restoreTouchI2c();
+  strncpy(wifiSsid, pendingWifiSsid, 32); wifiSsid[32] = 0;
+  strncpy(wifiPass, pendingWifiPass, 63); wifiPass[63] = 0;
+  trimInPlace(wifiSsid);
+  trimInPlace(wifiPass);
+  if (wifiSsid[0] == '\0' || wifiPass[0] == '\0') {
+    reportWifiFailure();
+    return;
+  }
+  WiFi.disconnect(true);
+  delay(50);
+  WiFi.beginNoBlock(wifiSsid, wifiPass);
+  wifiConnectState = WIFI_ST_CONNECTING;
+  wifiConnectDeadline = millis() + 45000;
+  wifiStatusLogMs = 0;
+  dbgPush("[PICO] WiFi joining...");
+  picoToS9("DBG:WIFI_ST:JOINING");
+}
+
+void handleWifiCore0() {
+  if (wifiReconnectPending) {
+    wifiReconnectPending = false;
+    startWifiConnect();
+  }
+
+  if (wifiConnectState == WIFI_ST_CONNECTING) {
+    WiFi.feedWatchdog();
+    if (WiFi.status() == WL_CONNECTED) {
+      wifiConnectState = WIFI_ST_IDLE;
+      reportWifiSuccess();
+    } else if ((long)(millis() - wifiConnectDeadline) >= 0) {
+      wifiConnectState = WIFI_ST_IDLE;
+      reportWifiFailure();
+    } else if (millis() - wifiStatusLogMs > 3000) {
+      wifiStatusLogMs = millis();
+      char st[40];
+      snprintf(st, sizeof(st), "[PICO] WiFi status=%d", (int)WiFi.status());
+      dbgPush(st);
+      picoToS9(String(F("DBG:WIFI_ST:")) + (int)WiFi.status());
+    }
+    return;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiOK = true;
+    if (!webSrvStarted) {
+      webSrv.begin();
+      webSrvStarted = true;
+    }
+    WiFiClient client = webSrv.accept();
+    if (client && client.connected()) handleWebClient(client);
+    return;
+  }
+
+  wifiOK = false;
+}
+
+void parseWifiConnect(const char* line) {
+  static unsigned long lastWifiReqMs = 0;
+  if (millis() - lastWifiReqMs < 3000) return;
+  lastWifiReqMs = millis();
+
+  const char* p = line + 5;
+  const char* sep = strchr(p, '|');
+  if (!sep) return;
+  int slen = (int)(sep - p);
+  if (slen <= 0 || slen > 32) return;
+  strncpy(pendingWifiSsid, p, slen);
+  pendingWifiSsid[slen] = 0;
+  strncpy(pendingWifiPass, sep + 1, 63);
+  pendingWifiPass[63] = 0;
+  trimInPlace(pendingWifiSsid);
+  trimInPlace(pendingWifiPass);
+  dbgPush("[PICO] WiFi connect requested");
+  startWifiConnect();
+}
+
+// Audio queue
+struct Note { uint16_t freq; uint16_t dur; };
+Note          sndQ[SND_QUEUE];
+int           sndHead=0, sndTail=0, sndLen=0;
+unsigned long sndEndMs=0;
+
+void sndUpdate(){
+  // BUGFIX: previously, once the queue drained the function returned here
+  // forever without ever silencing AUDIO_PIN, leaving the last tone's PWM
+  // running indefinitely (constant buzzing after any beep/click/sound).
+  if(sndLen==0){
+    if(sndEndMs!=0 && millis()>=sndEndMs){ analogWrite(AUDIO_PIN,0); sndEndMs=0; }
+    return;
+  }
+  if(millis()<sndEndMs)return;
+  if(sndQ[sndHead].freq == 0){
+    analogWrite(AUDIO_PIN, 0);
+  } else {
+    analogWriteFreq(sndQ[sndHead].freq);
+    analogWrite(AUDIO_PIN, 127);
+  }
+  sndEndMs=millis()+sndQ[sndHead].dur+8;
+  sndHead=(sndHead+1)%SND_QUEUE; sndLen--;
+}
+void sndQ1(uint16_t f,uint16_t d){
+  if(sndLen>=SND_QUEUE)return;
+  sndQ[sndTail]={f,d}; sndTail=(sndTail+1)%SND_QUEUE; sndLen++;
+  if(sndLen==1)sndUpdate();
+}
+void sndClear(){ sndLen=0; sndHead=sndTail=0; analogWrite(AUDIO_PIN,0); sndEndMs=0; }
+void sndClick()   { sndClear(); sndQ1(800,28); }
+void sndCoin()    { sndClear(); sndQ1(1047,45); sndQ1(1319,65); }
+void sndJump()    { sndClear(); sndQ1(523,22);  sndQ1(784,45); }
+void sndStomp()   { sndClear(); sndQ1(350,20);  sndQ1(175,35); }
+void sndDot()     { sndQ1(1200,12); }
+void sndPower()   { sndClear(); sndQ1(523,30); sndQ1(659,30); sndQ1(784,50); }
+void sndHit()     { sndClear(); sndQ1(220,35); sndQ1(110,55); }
+void sndBuzz()    { sndClear(); sndQ1(150,90); }
+void sndCorrect() { sndClear(); sndQ1(1047,55); sndQ1(1568,90); }
+void sndWrong()   { sndClear(); sndQ1(220,35);  sndQ1(165,60); }
+void sndMatch()   { sndClear(); sndQ1(1047,60); sndQ1(1319,90); }
+void sndDeath()   { sndClear(); sndQ1(392,60);  sndQ1(349,60); sndQ1(294,60); sndQ1(247,120); }
+void sndWin()     { sndClear(); sndQ1(523,80);  sndQ1(659,80); sndQ1(784,80); sndQ1(1047,160); }
+void sndGameOver(){ sndClear(); sndQ1(392,100); sndQ1(349,100); sndQ1(330,100); sndQ1(262,200); }
+void sndAlert()   { sndClear(); sndQ1(880,100); sndQ1(660,100); }
+void sndBoot()    { sndQ1(262,80); sndQ1(330,80); sndQ1(392,80); sndQ1(523,130); }
+
+// ─── Beep handler (V1.1) ─────────────────────────────────────────────────────
+//  Called by onMegaLine() when a BEEP: line arrives over Serial2.
+//  Wire protocol from Mega V37:
+//    BEEP:<hz>:<ms>              single tone (queued after any current beep)
+//    BEEP:SEQ:hz,ms,hz,ms,...    multi-tone chirp (queued in order)
+//  Zero-length or freq==0 is treated as silence (gap between tones).
+void handleBeep(const char* line){
+  // Skip leading "BEEP:"
+  const char* p = line + 5;
+
+  // Multi-tone sequence: "SEQ:hz,ms,hz,ms,..."
+  if (strncmp(p,"SEQ:",4)==0) {
+    p += 4;
+    while (*p) {
+      long f = strtol(p,(char**)&p,10);
+      if (*p==',') p++;
+      long d = strtol(p,(char**)&p,10);
+      if (d <= 0) break;
+      sndQ1((uint16_t)constrain(f,0,20000),(uint16_t)constrain(d,1,5000));
+      if (*p==',') p++;
+      else break;
+    }
+    return;
+  }
+
+  // Single tone: "hz:ms"
+  long f = strtol(p,(char**)&p,10);
+  if (*p==':') p++;
+  long d = strtol(p,NULL,10);
+  if (d <= 0) return;
+  sndQ1((uint16_t)constrain(f,0,20000),(uint16_t)constrain(d,1,5000));
+}
+
+// Parsers
+static void markTelemDirty(){
+  requestHeaderRefresh();
+  requestBodyRefresh();
+}
+
+static void markDirty(){
+  if (curScreen >= GAME_MARIO) return;
+  markTelemDirty();
+}
+
+bool parseStatFields(const char* s,char* fields[],int maxFields){
+  static char b[180];
+  strncpy(b,s,sizeof(b)-1); b[sizeof(b)-1]=0;
+  int n=0;
+  char* p=b;
+  while(n<maxFields){
+    fields[n++]=p;
+    char* col=strchr(p,':');
+    if(!col) break;
+    *col=0;
+    p=col+1;
+  }
+  return n>=maxFields;
+}
+
+void parseStat(const char* s){
+  char* f[10];
+  if(!parseStatFields(s+5,f,10)){
+    dbgPush("STAT:parse err");
+    return;
+  }
+  T.gas=atoi(f[0]);
+  T.temp=atof(f[1]);
+  T.hum=atof(f[2]);
+  T.estop=(atoi(f[3])>0);
+  T.pir=(f[4][0]=='1');
+  T.tilt=(f[5][0]=='1');
+  T.volt=atof(f[7]);
+  T.pct=atoi(f[8]);
+  T.amps=atof(f[9]);
+  markTelemDirty();
+  updateShared();
+}
+void parseIR(const char* s){
+  static char b[16]; static char* f[2]; int n=0;
+  strncpy(b,s+3,sizeof(b)-1); b[sizeof(b)-1]=0;
+  char* p=strtok(b,","); while(p&&n<2){f[n++]=p;p=strtok(NULL,",");}
+  if(n<2)return;
+  bool nf=(f[0][0]=='1'), nr=(f[1][0]=='1');
+  T.irFront=nf; T.irRear=nr;
+  markTelemDirty(); updateShared();
+}
+void parseUS(const char* s){
+  static char b[64]; static char* f[4]; int n=0;
+  strncpy(b,s+3,sizeof(b)-1); b[sizeof(b)-1]=0;
+  char* p=strtok(b,","); while(p&&n<4){f[n++]=p;p=strtok(NULL,",");}
+  if(n<4)return;
+  long nf=atol(f[0]),nr=atol(f[1]),nl2=atol(f[2]),nrr=atol(f[3]);
+  T.dFront=nf; T.dRear=nr; T.dLeft=nl2; T.dRight=nrr;
+  markTelemDirty(); updateShared();
+}
+void parseStatus(const char* s){
+  // V37 STATUS| — no R3/ESP fields; motors are on-board TB6612 on the Mega.
+  T.megaUartOk = megaLinked;
+  T.wifiOk     = wifiOK;
+  const char* tags[]={"S9:","ESTOP:","AUTO:"};
+  bool* vals[]={&T.s9ok,&T.estop,&T.autoM};
+  char trueChars[]={'O','Y','O'};
+  T.autodock=(strstr(s,"ADOCK:ON")!=NULL);
+  const char* ds=strstr(s,"DOCKST:");
+  if(ds){
+    ds+=7;
+    const char* de=strchr(ds,'|');
+    size_t l=de?(size_t)(de-ds):strlen(ds);
+    if(l>9) l=9;
+    char nd[10];
+    memcpy(nd,ds,l); nd[l]=0;
+    if(strncmp(nd,T.dockSt,10)) strncpy(T.dockSt,nd,10);
+  }
+  const char* mp=strstr(s,"MODE:");
+  if(mp){
+    char nm[16];
+    strncpy(nm,mp+5,15); nm[15]=0;
+    char* nl2=strchr(nm,'|'); if(nl2) *nl2=0;
+    if(strncmp(nm,T.mode,15)) strncpy(T.mode,nm,16);
+  }
+  const char* fp=strstr(s,"FW:");
+  if(fp){
+    char nfw[16];
+    strncpy(nfw,fp+3,15); nfw[15]=0;
+    char* nl2=strchr(nfw,'|'); if(nl2) *nl2=0;
+    if(strncmp(nfw,T.fw,15)) strncpy(T.fw,nfw,16);
+  }
+  for(int i=0;i<3;i++){
+    const char* pp=strstr(s,tags[i]);
+    if(pp) *(vals[i])=(*(pp+strlen(tags[i]))==trueChars[i]);
+  }
+  const char* hd=strstr(s,"HDG:"); if(hd) T.heading=atof(hd+4);
+  const char* gp=strstr(s,"SAT:"); if(gp) T.gpsSats=atoi(gp+4);
+  const char* bp=strstr(s,"BAT:"); if(bp) T.volt=atof(bp+4);
+  const char* pp=strstr(s,"PCT:"); if(pp) T.pct=atoi(pp+4);
+  markTelemDirty();
+  updateShared();
+}
+void parseHDG(const char* s){T.heading=atof(s+4);markTelemDirty();updateShared();}
+void parseGPS(const char* s){
+  static char buf[48];
+  strncpy(buf,s+4,47); buf[47]=0;
+  char* g[3]; int n=0;
+  char* p=buf;
+  while(n<3){
+    g[n++]=p;
+    char* comma=strchr(p,',');
+    if(!comma) break;
+    *comma=0; p=comma+1;
+  }
+  if(n>=3){ T.gpsSats=atoi(g[2]); markTelemDirty(); }
+  updateShared();
+}
+
+void parseLed(const char* s){
+  const char* m=strstr(s,"MODE:");
+  if(m){m+=5;const char* e=strchr(m,'|');size_t l=e?(size_t)(e-m):strlen(m);if(l>9)l=9;memcpy(T.ledMode,m,l);T.ledMode[l]=0;}
+  const char* w=strstr(s,"WHITE:");
+  if(w){w+=6;const char* e=strchr(w,'|');size_t l=e?(size_t)(e-w):strlen(w);if(l>5)l=5;memcpy(T.ledWhite,w,l);T.ledWhite[l]=0;}
+  const char* b=strstr(s,"BR:");
+  if(b)T.ledBright=atoi(b+3);
+  T.cob=(strcmp((const char*)T.ledWhite,"OFF")!=0);
+  markTelemDirty(); updateShared();
+}
+void handleMegaLine(const char* line){
+  if(!megaLinked){megaLinked=true;markTelemDirty();dbgPush("[PICO] Mega UART link OK");}
+  lastMegaRx=millis();
+  T.megaUartOk=true;
+  T.wifiOk=(bool)wifiOK;
+#if MEGA_USB_ECHO
+  Serial.print(F("[RX] ")); Serial.println(line);
+#endif
+  if(strncmp(line,"STAT:",5)!=0 && strncmp(line,"US:",3)!=0 &&
+     strncmp(line,"IR:",3)!=0 && strncmp(line,"STATUS|",7)!=0 &&
+     strncmp(line,"PONG_PICO:",10)!=0){
+    if(strncmp(line,"DBG:",4)==0) dbgPush(line+4);
+    else dbgPush(line);
+  }
+  if(strncmp(line,"STAT:",5)==0)parseStat(line);
+  else if(strncmp(line,"US:",3)==0)parseUS(line);
+  else if(strncmp(line,"IR:",3)==0)parseIR(line);
+  else if(strncmp(line,"STATUS|",7)==0||strncmp(line,"STATUS:",7)==0||strncmp(line,"SYSTEM|READY|",13)==0)parseStatus(line);
+  else if(strncmp(line,"HDG:",4)==0)parseHDG(line);
+  else if(strncmp(line,"GPS:",4)==0)parseGPS(line);
+  else if(strncmp(line,"LED|",4)==0)parseLed(line);
+  else if(strcmp(line,"AUTODOCK:ON")==0){T.autodock=true;requestBodyRefresh();}
+  else if(strcmp(line,"AUTODOCK:OFF")==0){T.autodock=false;requestBodyRefresh();}
+  else if(strncmp(line,"UV:",3)==0){
+    // UV:ACTIVE or UV:OFF from Mega
+    T.uvOn=(strncmp(line+3,"ACTIVE",6)==0);
+    requestBodyRefresh();   // refresh Lights screen if visible
+  }
+  else if(strncmp(line,"WIFI|",5)==0) parseWifiConnect(line);
+  else if(strncmp(line,"BEEP:",5)==0) handleBeep(line);
+}
+// ═══ V1.1 — Serial bridge integration ═══════════════════════════════════════
+//  All Mega-line reading now happens inside bridgeLoop() (serial_bridge.h).
+//  The bridge invokes these two callbacks for every line it parses:
+//
+//    onMegaLine(line) — every line received from Mega (Serial2 / UART1)
+//                      Bridge has already forwarded it to S9 over USB and
+//                      stripped the |CRC:XX suffix. We just process locally.
+//
+//    onS9Line(line)   — every line received from S9 (USB CDC).
+//                      Bridge has already forwarded non-PICO: lines to Mega.
+//                      We inspect for PICO:-prefixed commands aimed at us.
+//
+//  handleMegaSerial() kept as an empty stub for backwards compatibility with
+//  any legacy call sites; the actual work is inside bridgeLoop().
+// Legacy alias — all reads/forwards now happen in bridgeLoop().
+// Kept so waitMs() and other legacy call sites can still keep the pipe flowing.
+void handleMegaSerial(){ bridgeLoop(); }
+
+// Bridge callbacks — invoked by bridgeLoop() in serial_bridge.h
+void onMegaLine(const String& line){
+  handleMegaLine(line.c_str());
+}
+
+void onS9Line(const String& line){
+  // Any USB traffic from the S9 means the phone link is alive.
+  T.s9ok = true;
+  lastS9Rx = millis();
+  updateShared();
+
+  if (line.startsWith("PICO:")) {
+    dbgPush(line.c_str() + 5);
+    // Future: PICO:BEEP:..., PICO:DISPLAY:..., PICO:AUDIO:... etc.
+    return;
+  }
+  String cmd = line;
+  cmd.trim();
+  if (cmd.startsWith("CMD:")) {
+    cmd = cmd.substring(4);
+    cmd.trim();
+  }
+  if (cmd.startsWith("WIFI|")) {
+    parseWifiConnect(cmd.c_str());
+  }
+  // Non-PICO: lines are forwarded to Mega by bridgeLoop() before this callback.
+}
+
+void waitMs(unsigned ms){
+  unsigned long until=millis()+ms;
+  while((long)(millis()-until)<0){handleMegaSerial();delay(2);}
+}
+
+void sendMegaHeartbeat(){
+  if(millis()-lastPingTx<MEGA_PING_MS)return;
+  lastPingTx=millis();
+  MEGA_SERIAL.print(F("PING_PICO:"));
+  MEGA_SERIAL.println(pingSeq++);
+  MEGA_SERIAL.println(F("STATUS"));
+}
+
+// UI Primitives
+
+
+uint16_t dimCol(uint16_t c,uint8_t shift=1){
+  return (uint16_t)(((c>>11)>>shift)<<11)|(uint16_t)((((c>>5)&0x3F)>>shift)<<5)|(uint16_t)(((c&0x1F)>>shift));
+}
+uint16_t blendCol(uint16_t a,uint16_t b,uint8_t t){
+  uint8_t r=(((a>>11)*(255-t)+(b>>11)*t)>>8)&0x1F;
+  uint8_t g=(((((a>>5)&0x3F)*(255-t))+(((b>>5)&0x3F)*t))>>8)&0x3F;
+  uint8_t bl=((((a&0x1F)*(255-t))+((b&0x1F)*t))>>8)&0x1F;
+  return (r<<11)|(g<<5)|bl;
+}
+void gradientRect(int x,int y,int w,int h,uint16_t c1,uint16_t c2){
+  for(int i=0; i<h; i++) tft.drawFastHLine(x,y+i,w,blendCol(c1,c2,(uint8_t)((i*255)/max(h-1,1))));
+}
+void glowBox(int x,int y,int w,int h,uint16_t col,int r=8){
+  tft.drawRoundRect(x-2,y-2,w+4,h+4,r+2,dimCol(col,3));
+  tft.drawRoundRect(x-1,y-1,w+2,h+2,r+1,dimCol(col,2));
+  tft.drawRoundRect(x,y,w,h,r,col);
+}
+void shadowRect(int x,int y,int w,int h,uint16_t fill,uint16_t border,int r=8){
+  tft.fillRoundRect(x+3,y+4,w,h,r,0x0000);
+  tft.fillRoundRect(x,y,w,h,r,fill);
+  tft.drawRoundRect(x,y,w,h,r,border);
+}
+
+TFT_eSprite hdrSpr(&tft);
+TFT_eSprite bodSpr(&tft);
+bool spritesReady = false;
+
+struct PrevDisp {
+  int pct=-1; float volt=-99; bool linked=false;
+  long dF=-999,dR=-999,dL=-999,dRi=-999;
+  bool estop=false,autoM=false,s9=false,autodock=false,uv=false;
+  char mode[16]="?"; char dockSt[10]="?";
+} prev;
+
+bool telemChanged(){
+  bool c=false;
+  #define CHK(a,b) if((a)!=(b)){(b)=(a);c=true;}
+  CHK(T.pct,prev.pct) CHK(megaLinked,prev.linked) CHK(T.estop,prev.estop)
+  CHK(T.autoM,prev.autoM) CHK(T.s9ok,prev.s9) CHK(T.autodock,prev.autodock)
+  CHK(T.uvOn,prev.uv) CHK(T.dFront,prev.dF) CHK(T.dRear,prev.dR)
+  CHK(T.dLeft,prev.dL) CHK(T.dRight,prev.dRi)
+  #undef CHK
+  if(fabsf(T.volt-prev.volt)>0.05f){prev.volt=T.volt;c=true;}
+  if(strncmp(T.mode,prev.mode,15)){strncpy(prev.mode,T.mode,15);c=true;}
+  if(strncmp(T.dockSt,prev.dockSt,9)){strncpy(prev.dockSt,T.dockSt,9);c=true;}
+  return c;
+}
+
+uint8_t breathe(uint16_t pMs=2000){
+  uint32_t t=millis()%pMs;
+  return (uint8_t)(127.5f+sinf(t*6.2832f/pMs)*127.5f);
+}
+uint16_t breatheCol(uint16_t col,uint16_t pMs=2400){
+  return blendCol(dimCol(col,3),col,breathe(pMs));
+}
+void glassCard(int x,int y,int w,int h,uint16_t accent){
+  gradientRect(x+1,y+1,w-2,h-2,blendCol(C_SURF,accent,22),C_BG);
+  glowBox(x,y,w,h,accent,8);
+  tft.drawFastHLine(x+8,y+2,w-16,dimCol(accent,1));
+}
+void neonBox(int x,int y,int w,int h,uint16_t col,uint16_t bg=C_SURF){
+  tft.fillRoundRect(x+2,y+3,w,h,6,0x0000);
+  gradientRect(x+1,y+1,w-2,h-2,blendCol(bg,col,30),bg);
+  glowBox(x,y,w,h,col,6);
+}
+void glowText(int x,int y,const char* txt,uint16_t col,uint8_t sz=1){
+  tft.setTextSize(sz); tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(dimCol(col,3),C_BG); tft.setCursor(x+2,y+2); tft.print(txt);
+  tft.setTextColor(dimCol(col,1),C_BG); tft.setCursor(x+1,y+1); tft.print(txt);
+  tft.setTextColor(col,C_BG);           tft.setCursor(x,y);      tft.print(txt);
+}
+void centreText(int cx,int y,const char* txt,uint16_t col,uint8_t sz,uint16_t bg=C_BG){
+  tft.setTextSize(sz); tft.setTextColor(col,bg);
+  int16_t tw=strlen(txt)*6*sz; tft.setCursor(cx-tw/2,y); tft.print(txt);
+}
+void neonBtn(int x,int y,int w,int h,const char* icon,const char* label,uint16_t col,bool pressed=false){
+  uint16_t bg=pressed?blendCol(C_BG,col,90):C_SURF;
+  tft.fillRoundRect(x+3,y+4,w,h,12,C_BLACK);
+  gradientRect(x,y,w,h,blendCol(bg,col,pressed?50:25),bg);
+  glowBox(x,y,w,h,pressed?col:dimCol(col,1),12);
+  tft.setTextSize(3); tft.setTextColor(pressed?C_WHITE:blendCol(col,C_WHITE,80),0x0000);
+  int16_t iw=strlen(icon)*18; tft.setCursor(x+(w-iw)/2,y+h/2-24); tft.print(icon);
+  tft.setTextSize(2); tft.setTextColor(pressed?C_WHITE:blendCol(C_WHITE,col,60),0x0000);
+  int16_t lw=strlen(label)*12; tft.setCursor(x+(w-lw)/2,y+h/2+14); tft.print(label);
+}
+void statPill(int x,int y,int w,const char* lbl,const char* val,uint16_t col){
+  gradientRect(x,y,w,32,blendCol(C_SURF,col,30),C_SURF);
+  tft.fillRect(x,y,4,32,col); tft.drawRect(x,y,w,32,dimCol(col,1));
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(x+10,y+9); tft.print(lbl);
+  if(val&&strlen(val)>0){
+    tft.setTextColor(col,C_SURF); tft.setCursor(x+w-strlen(val)*6-8,y+9); tft.print(val);
+  }
+}
+void usBar(int x,int y,int w,long dist,const char* lbl){
+  gradientRect(x,y,w,38,0x0210,C_SURF); tft.drawRect(x,y,w,38,C_BORDER);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(x+6,y+5); tft.print(lbl);
+  if(dist<0){ tft.setTextColor(C_DGRAY,C_SURF); tft.setCursor(x+6,y+22); tft.print("NO SIGNAL"); return; }
+  long capped=min(dist,200L); int bw=(int)((capped*(w-12))/200);
+  uint16_t col=dist<20?C_RED:dist<50?C_ORANGE:dist<100?C_YELLOW:C_GREEN;
+  for(int i=0;i<bw;i+=6) tft.fillRect(x+6+i,y+20,4,12,blendCol(C_RED,C_GREEN,(uint8_t)((i*255)/max(bw,1))));
+  tft.drawRect(x+6,y+20,w-12,12,dimCol(col,1));
+  char buf[12]; snprintf(buf,12,"%ldcm",dist);
+  tft.setTextColor(C_WHITE,C_SURF); tft.setCursor(x+w-46,y+22); tft.print(buf);
+}
+void drawBack(uint16_t col=C_CYAN){
+  gradientRect(SCR_W-76,6,70,32,blendCol(C_SURF,col,45),C_SURF);
+  tft.drawRoundRect(SCR_W-76,6,70,32,8,col);
+  tft.setTextSize(2); tft.setTextColor(col,C_SURF); tft.setCursor(SCR_W-66,14); tft.print("< BCK");
+}
+void drawGameExitBtn(uint16_t col=C_CYAN){
+  gradientRect(6,6,86,36,blendCol(C_SURF,col,45),C_SURF);
+  tft.drawRoundRect(6,6,86,36,8,col);
+  tft.setTextSize(2); tft.setTextColor(col,C_SURF); tft.setCursor(14,16); tft.print("< EXIT");
+}
+static Screen gameChromeScreen = (Screen)255;
+void resetGameChrome() { gameChromeScreen = (Screen)255; }
+void drawGameChrome(uint16_t col=C_CYAN){ tft.fillRect(0,0,SCR_W,GAME_TOP,C_BLACK); drawGameExitBtn(col); }
+void paintGameChromeOnce(Screen id, uint16_t col){ if (gameChromeScreen != id) { drawGameChrome(col); gameChromeScreen = id; } }
+void paintGameHudLine(int x, int y, const char* text, uint16_t col){
+  tft.fillRect(x - 2, y - 4, SCR_W - x - 2, 20, C_BLACK);
+  tft.setTextSize(2); tft.setTextColor(col, C_BLACK); tft.setCursor(x, y); tft.print(text);
+}
+void hRule(int y,uint16_t col=C_CYAN){
+  tft.drawFastHLine(0,y,SCR_W,dimCol(col,2)); tft.drawFastHLine(0,y+1,SCR_W,col); tft.drawFastHLine(0,y+2,SCR_W,dimCol(col,1));
+}
+void drawHeader(){
+  if(!spritesReady) return;
+  TFT_eSprite& s=hdrSpr; s.fillSprite(C_BLACK);
+  gradientRect(0,0,SCR_W,HDR_H,0x0923,C_BLACK);
+  s.drawFastHLine(0,0,SCR_W,C_CYAN); s.drawFastHLine(0,HDR_H-1,SCR_W,dimCol(C_CYAN,2));
+  int tx=SCR_W/2-78; s.setTextSize(2);
+  s.setTextColor(dimCol(C_CYAN,2),0x0000); s.setCursor(tx+1,12); s.print("AJ2BUDDYCOMMS");
+  s.setTextColor(C_CYAN,0x0000);           s.setCursor(tx,11);   s.print("AJ2BUDDYCOMMS");
+  uint16_t lk=megaLinked?C_GREEN:C_RED; uint16_t lkA=megaLinked?breatheCol(C_GREEN,1500):C_RED;
+  s.fillCircle(16,46,6,dimCol(lk,2)); s.fillCircle(16,46,3,lkA);
+  s.setTextSize(1); s.setTextColor(lk,0x0000); s.setCursor(28,43); s.print(megaLinked?"LIVE":"WAIT");
+  char buf[12]; uint16_t bc=T.pct>50?C_GREEN:T.pct>20?C_ORANGE:C_RED;
+  snprintf(buf,10,"%d%%",T.pct); s.drawRoundRect(68,40,38,15,3,C_LGRAY);
+  int bf=constrain((int)(T.pct*34/100),0,34); if(bf>0) s.fillRoundRect(70,42,bf,11,1,bc);
+  s.setTextColor(bc,0x0000); s.setCursor(112,43); s.print(buf);
+  snprintf(buf,10,"%.1fV",T.volt); s.setTextColor(C_CYAN,0x0000); s.setCursor(154,43); s.print(buf);
+  int mw=strlen(T.mode)*6+14; int mx=SCR_W-mw-8;
+  s.fillRoundRect(mx,38,mw,21,5,blendCol(C_BLACK,C_PURPLE,40));
+  s.drawRoundRect(mx,38,mw,21,5,C_PURPLE);
+  s.setTextColor(C_PURPLE,0x0000); s.setCursor(mx+7,42); s.print(T.mode);
+  s.pushSprite(0,0);
+}
+
+// MAIN SCREEN
+void drawMain() {
+  tft.fillScreen(C_BG);
+  if(hdrSpr.createSprite(SCR_W,HDR_H)&&bodSpr.createSprite(SCR_W,60)) spritesReady=true; drawHeader();
+  const int BW=146,BH=114,PAD=10,ROW1=76,ROW2=ROW1+BH+PAD;
+  neonBtn(PAD,ROW1,BW,BH,">","GAMES",C_GREEN);
+  neonBtn(PAD+BW+PAD,ROW1,BW,BH,"o","SENSORS",C_CYAN);
+  neonBtn(PAD,ROW2,BW,BH,"~","COMMS",C_PURPLE);
+  neonBtn(PAD+BW+PAD,ROW2,BW,BH,"*","SETTINGS",C_ORANGE);
+  const int LY=ROW2+BH+PAD,LH=56;
+  neonBtn(PAD,LY,SCR_W-2*PAD,LH,"::","LIGHTS CONTROL SYSTEM",C_PINK);
+  refreshMainBody();
+}
+void refreshMainBody(){
+  if(!spritesReady) return;
+  const int sy=SCR_H-60, bh=60; TFT_eSprite& s=bodSpr; s.fillSprite(C_BLACK);
+  gradientRect(0,0,SCR_W,bh,0x0A93,C_SURF); s.drawFastHLine(0,0,SCR_W,C_CYAN);
+  char buf[18]; s.setTextSize(1);
+  uint16_t cf=T.dFront<0?C_DGRAY:T.dFront<30?C_RED:T.dFront<80?C_ORANGE:C_GREEN;
+  snprintf(buf,18,T.dFront<0?"F: --":"F: %ldcm",T.dFront); s.setTextColor(cf,0x0000); s.setCursor(10,12); s.print(buf);
+  uint16_t cr=T.dRear<0?C_DGRAY:T.dRear<30?C_RED:T.dRear<80?C_ORANGE:C_GREEN;
+  snprintf(buf,18,T.dRear<0?"R: --":"R: %ldcm",T.dRear); s.setTextColor(cr,0x0000); s.setCursor(90,12); s.print(buf);
+  uint16_t cl=T.dLeft<0?C_DGRAY:T.dLeft<30?C_RED:T.dLeft<80?C_ORANGE:C_GREEN;
+  snprintf(buf,18,T.dLeft<0?"L: --":"L: %ldcm",T.dLeft); s.setTextColor(cl,0x0000); s.setCursor(10,34); s.print(buf);
+  // BUGFIX: Right ultrasonic reading was received (T.dRight) but never drawn
+  // anywhere on the main screen - only F/Rear/Left were shown.
+  uint16_t cri=T.dRight<0?C_DGRAY:T.dRight<30?C_RED:T.dRight<80?C_ORANGE:C_GREEN;
+  snprintf(buf,18,T.dRight<0?"Ri:--":"Ri:%ldcm",T.dRight); s.setTextColor(cri,0x0000); s.setCursor(90,34); s.print(buf);
+  uint16_t adC=T.autodock?C_GREEN:C_DGRAY;
+  s.fillRoundRect(170,6,SCR_W-180,bh-12,8,T.autodock?blendCol(C_BLACK,C_GREEN,40):C_BLACK);
+  s.drawRoundRect(170,6,SCR_W-180,bh-12,8,adC);
+  s.setTextColor(adC,0x0000); s.setCursor(178,14); s.print("AUTO DOCK");
+  s.setTextColor(T.autodock?C_GREEN:C_RED,0x0000); s.setCursor(178,28); s.print(T.autodock?"ACTIVE":"OFFLINE");
+  s.setTextColor(C_LGRAY,0x0000); s.setCursor(178,42); s.print(T.dockSt);
+  s.pushSprite(0,sy);
+}
+void handleMainTouch(TouchPt& t) {
+  const int BW=146,BH=114,PAD=10,ROW1=76,ROW2=ROW1+BH+PAD;
+  const int LY=ROW2+BH+PAD, LH=56;
+  if(t.y>=LY && t.y<LY+LH){ sndClick(); curScreen=SCR_LIGHTS; screenDirty=true; return; }
+  if(t.y>=SCR_H-60){ if(t.x>170){ T.autodock=!T.autodock; MEGA_SERIAL.println(T.autodock?"AUTODOCK:ON":"AUTODOCK:OFF"); sndClick(); requestBodyRefresh(); } return; }
+  if(t.x>=PAD && t.x<PAD+BW){
+    if(t.y>=ROW1 && t.y<ROW1+BH){ sndClick(); curScreen=SCR_GAMES;  screenDirty=true; }
+    else if(t.y>=ROW2 && t.y<ROW2+BH){ sndClick(); curScreen=SCR_COMMS; screenDirty=true; }
+  } else if(t.x>=PAD+BW+PAD && t.x<PAD+BW+PAD+BW){
+    if(t.y>=ROW1 && t.y<ROW1+BH){ sndClick(); curScreen=SCR_SENSORS;  screenDirty=true; }
+    else if(t.y>=ROW2 && t.y<ROW2+BH){ sndClick(); curScreen=SCR_SETTINGS; screenDirty=true; }
+  }
+}
+
+// GAMES MENU
+void drawGames() {
+  tft.fillScreen(C_BG); drawHeader(); drawBack(C_GREEN);
+  glowText(24,76,"ARCADE GAME SELECTION",C_GREEN,2); hRule(100,C_GREEN);
+  const char* names[]={"SUPER MARIO BROS","PAC-MAN CLASSIC","STARSHIP COMMANDER","MATRIX MEMORY","COLOR MATCH ULTRA","MATH BLAST TERMINAL"};
+  uint16_t    cols[] ={C_RED,C_YELLOW,C_CYAN,C_PURPLE,C_ORANGE,C_GREEN};
+  for(int i=0;i<6;i++){
+    int bx=12, by=112+i*58, bw=SCR_W-24, bh=48;
+    tft.fillRoundRect(bx+2,by+3,bw,bh,8,C_BLACK);
+    gradientRect(bx,by,bw,bh,blendCol(C_SURF,cols[i],25),C_SURF);
+    glowBox(bx,by,bw,bh,cols[i],8);
+    tft.setTextSize(2); tft.setTextColor(blendCol(C_WHITE,cols[i],30),0x0000);
+    tft.setCursor(bx+16,by+16); tft.print(names[i]);
+    tft.setCursor(bx+bw-22,by+16); tft.print(">");
+  }
+}
+void handleGamesTouch(TouchPt& t) {
+  if(t.y<72 && t.x > SCR_W-80){ curScreen=SCR_MAIN; screenDirty=true; return; }
+  Screen games[]={GAME_MARIO,GAME_PACMAN,GAME_STARSHIP,GAME_MEMORY,GAME_COLORMATCH,GAME_MATH};
+  for(int i=0;i<6;i++){
+    int by=112+i*58; if(t.y>=by && t.y<by+48 && t.x>=12 && t.x<SCR_W-12){ sndClick(); prevScreen=SCR_GAMES; curScreen=games[i]; screenDirty=true; return; }
+  }
+}
+
+// SENSORS MENU
+void drawSensors() {
+  tft.fillScreen(C_BG); drawHeader(); drawBack(C_CYAN);
+  glowText(24,76,"TELEMETRY SENSORS",C_CYAN,2); hRule(100,C_CYAN);
+  const char* labels[]={"EYES ARRAYS","NOSE SENSOR","BRAIN CORE","TUMMY CELLS"};
+  const char* subs[]  ={"Ultrasonic Radar + IR Feed","Toxic Gas Monitoring System","System Architecture & Logs","Power Analysis & Runtime"};
+  uint16_t    cols[]  ={C_CYAN,C_GREEN,C_PURPLE,C_ORANGE};
+  for(int i=0;i<4;i++){
+    int by=112+i*88; neonBox(12,by,SCR_W-24,76,cols[i],C_SURF);
+    tft.setTextSize(2); tft.setTextColor(cols[i],C_SURF); tft.setCursor(24,by+14); tft.print(labels[i]);
+    tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(24,by+44); tft.print(subs[i]);
+  }
+}
+void handleSensorsTouch(TouchPt& t) {
+  if(t.y<72 && t.x > SCR_W-80){ curScreen=SCR_MAIN; screenDirty=true; return; }
+  Screen subs[]={SCR_SENS_EYES,SCR_SENS_NOSE,SCR_SENS_BRAIN,SCR_SENS_TUMMY};
+  for(int i=0;i<4;i++){
+    int by=112+i*88; if(t.y>=by && t.y<by+76 && t.x>=12 && t.x<SCR_W-12){ sndClick(); curScreen=subs[i]; screenDirty=true; return; }
+  }
+}
+
+// SENSOR EYES
+void drawSensEyes(bool fullLayoutFull=true) {
+  if(fullLayoutFull){ tft.fillScreen(C_BG); drawHeader(); drawBack(C_CYAN); glowText(24,76,"EYES ARRAY DETECTOR",C_CYAN,2); hRule(100,C_CYAN); }
+  int rx=SCR_W/2, ry=236;
+  tft.drawRoundRect(rx-26,ry-36,52,72,10,C_LGRAY); tft.fillCircle(rx-10,ry-46,3,C_CYAN); tft.fillCircle(rx+10,ry-46,3,C_CYAN);
+  char buf[16];
+  uint16_t fc=T.dFront<0?C_DGRAY:T.dFront<30?C_RED:T.dFront<80?C_ORANGE:C_GREEN;
+  uint16_t rc=T.dRear <0?C_DGRAY:T.dRear <30?C_RED:T.dRear <80?C_ORANGE:C_GREEN;
+  uint16_t lc=T.dLeft <0?C_DGRAY:T.dLeft <30?C_RED:T.dLeft <80?C_ORANGE:C_GREEN;
+  uint16_t rrc=T.dRight<0?C_DGRAY:T.dRight<30?C_RED:T.dRight<80?C_ORANGE:C_GREEN;
+  snprintf(buf,16,T.dFront<0?"--":"%ld cm",T.dFront); neonBox(rx-40,110,80,38,fc,C_SURF);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(rx-32,114); tft.print("FRONT");
+  tft.setTextSize(2); tft.setTextColor(fc,C_SURF); tft.setCursor(rx-strlen(buf)*6,126); tft.print(buf);
+  snprintf(buf,16,T.dRear<0?"--":"%ld cm",T.dRear); neonBox(rx-40,324,80,38,rc,C_SURF);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_SURF); tft.setCursor(rx-28,328); tft.print("REAR");
+  tft.setTextSize(2); tft.setTextColor(rc,C_SURF); tft.setCursor(rx-strlen(buf)*6,340); tft.print(buf);
+  snprintf(buf,16,T.dLeft<0?"--":"%ld cm",T.dLeft); neonBox(10,ry-18,74,38,lc,C_SURF);
+  tft.setTextSize(2); tft.setTextColor(lc,C_SURF); tft.setCursor(16,ry+2); tft.print(buf);
+  snprintf(buf,16,T.dRight<0?"--":"%ld cm",T.dRight); neonBox(SCR_W-84,ry-18,74,38,rrc,C_SURF);
+  tft.setTextSize(2); tft.setTextColor(rrc,C_SURF); tft.setCursor(SCR_W-76,ry+2); tft.print(buf);
+  hRule(384,C_CYAN);
+  uint16_t ilCol=T.irFront?C_RED:C_DGRAY; uint16_t irCol=T.irRear?C_RED:C_DGRAY;
+  tft.fillRoundRect(12,400,140,38,8,C_SURF); tft.drawRoundRect(12,400,140,38,8,ilCol);
+  tft.setTextColor(ilCol,C_SURF); tft.setTextSize(1); tft.setCursor(20,414); tft.print(T.irFront?"IR-F OBSTACLE":"IR-F CLEAR");
+  tft.fillRoundRect(168,400,140,38,8,C_SURF); tft.drawRoundRect(168,400,140,38,8,irCol);
+  tft.setTextColor(irCol,C_SURF); tft.setCursor(176,414); tft.print(T.irRear?"IR-R OBSTACLE":"IR-R CLEAR");
+}
+
+// SENSOR NOSE
+void drawSensNose(bool fullLayoutFull=true) {
+  if(fullLayoutFull){ tft.fillScreen(C_BG); drawHeader(); drawBack(C_GREEN); glowText(24,76,"GAS SPECTROMETER",C_GREEN,2); hRule(100,C_GREEN); }
+  int gasVal=T.gas; uint16_t gc= gasVal>700?C_RED:gasVal>400?C_ORANGE:gasVal>200?C_YELLOW:C_GREEN;
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(SCR_W/2-36,120); tft.print("GAS DENSITY");
+  char buf[12]; snprintf(buf,12,"%d",gasVal); tft.setTextSize(6); tft.setTextColor(gc,C_BG);
+  int16_t tw=strlen(buf)*36; tft.setCursor(SCR_W/2-tw/2,140); tft.print(buf);
+  tft.setTextSize(2); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(SCR_W/2-14,200); tft.print("ppm");
+  const char* status = gasVal>700?"HAZARDOUS!":gasVal>400?"ELEVATED CRIT":gasVal>200?"MODERATE":"SAFE ENVIRONMENT";
+  neonBox(SCR_W/2-90,230,180,42,gc,C_SURF); tft.setTextSize(2); tft.setTextColor(gc,C_SURF);
+  int16_t sl=strlen(status)*12; tft.setCursor(SCR_W/2-sl/2,244); tft.print(status);
+  hRule(296,gc); int bw=SCR_W-32; int filled=(int)((min(gasVal,1023)*bw)/1023);
+  tft.fillRect(16,312,bw,20,C_SURF); tft.fillRect(16,312,filled,20,gc); tft.drawRect(16,312,bw,20,C_BORDER);
+  hRule(356,C_ORANGE);
+  uint16_t tlCol=T.tilt?C_RED:C_GREEN; uint16_t pirCol=T.pir?C_CYAN:C_DGRAY;
+  tft.fillRoundRect(12,380,140,44,8,C_SURF); tft.drawRoundRect(12,380,140,44,8,tlCol);
+  tft.setTextSize(2); tft.setTextColor(tlCol,C_SURF); tft.setCursor(20,394); tft.print(T.tilt?"CHASSIS TILT":"LEVEL");
+  tft.fillRoundRect(168,380,140,44,8,C_SURF); tft.drawRoundRect(168,380,140,44,8,pirCol);
+  tft.setTextColor(pirCol,C_SURF); tft.setCursor(176,394); tft.print(T.pir?"MOTION DET":"STATIONARY");
+}
+
+// BRAIN LOG
+bool showBrainLog = false;
+void drawBrainLog() {
+  tft.fillScreen(C_BLACK); drawBack(C_PURPLE);
+  centreText(SCR_W/2, 14, "CORE DIAGNOSTIC KERNEL LOG", C_PURPLE, 2, C_BLACK); hRule(44, C_PURPLE);
+  for (int i = 0; i < DBG_LINES; i++) {
+    int idx = (dbgHead + i) % DBG_LINES; if (dbgLog[idx][0] == 0) continue;
+    int y = 56 + i * 40; gradientRect(4, y, SCR_W-8, 36, blendCol(C_SURF,C_PURPLE,20), C_SURF);
+    tft.drawRect(4, y, SCR_W-8, 36, dimCol(C_PURPLE, 2));
+    char buf[40]; strncpy(buf, dbgLog[idx], 38); buf[38]=0;
+    tft.setTextColor(C_CYAN, C_SURF); tft.setTextSize(1); tft.setCursor(10, y+12); tft.print(buf);
+  }
+}
+
+// SENSOR BRAIN
+void drawSensBrain(bool fullLayoutFull=true) {
+  if(fullLayoutFull){ tft.fillScreen(C_BG); drawHeader(); drawBack(C_PURPLE); glowText(24,76,"BRAIN SYSTEM INTERFACE",C_PURPLE,2); hRule(100,C_PURPLE); }
+  char buf[42]; int y=112;
+  if(brainToggle[0]) { snprintf(buf,42,"CORE TEMP: %.1f C  |  HUMIDITY: %.0f%%",T.temp,T.hum); statPill(12,y,SCR_W-24,buf,"",C_CYAN); y+=36; }
+  if(brainToggle[1]) { snprintf(buf,42,"ATMOSPHERE GAS SENSOR: %d ppm",T.gas); statPill(12,y,SCR_W-24,buf,"",C_GREEN); y+=36; }
+  if(brainToggle[2]) { snprintf(buf,42,"POWER: %.2f V | %.2f A | %d%%",T.volt,T.amps,T.pct); statPill(12,y,SCR_W-24,buf,"",C_ORANGE); y+=36; }
+  if(brainToggle[3]) { snprintf(buf,42,"SONAR: F%ld R%ld L%ld Rg%ld",T.dFront, T.dRear, T.dLeft, T.dRight); statPill(12,y,SCR_W-24,buf,"",C_YELLOW); y+=36; }
+  if(brainToggle[4]) { snprintf(buf,42,"MEGA:%s WIFI:%s S9:%s",T.megaUartOk?"OK":"ERR",T.wifiOk?"CONNECTED":"OFF",T.s9ok?"LINKED":"DEAD"); statPill(12,y,SCR_W-24,buf,"",C_RED); y+=36; }
+  if(brainToggle[5]) { snprintf(buf,42,"FIRMWARE CORE: %s | COMP: %s",T.mode,T.fw); statPill(12,y,SCR_W-24,buf,"",C_PURPLE); y+=36; }
+  hRule(y+6,C_PURPLE); y+=18;
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(12,y); tft.print("DATA MODULE MATRIX SELECTOR:"); y+=16;
+  for(int i=0;i<6;i++) {
+    int bx=12+(i%3)*(SCR_W/3-6), by=y+(i/3)*34; uint16_t tc=brainToggle[i]?C_PURPLE:C_DGRAY;
+    tft.fillRoundRect(bx,by,(SCR_W/3)-10,26,6,C_SURF); tft.drawRoundRect(bx,by,(SCR_W/3)-10,26,6,tc);
+    tft.setTextColor(tc,C_SURF); tft.setTextSize(1); tft.setCursor(bx+6,by+9); tft.print(brainLabels[i]);
+  }
+}
+void handleBrainTouch(TouchPt& t) {
+  if(t.y<72 && t.x<(SCR_W-80)){ curScreen=SCR_SENSORS; screenDirty=true; return; }
+  if(t.y<72){ showBrainLog=!showBrainLog; screenDirty=true; return; }
+  int used=0; for(int i=0;i<6;i++) if(brainToggle[i]) used++;
+  int firstToggleY = 112 + used*36 + 24;
+  for(int i=0;i<6;i++){
+    int bx=12+(i%3)*(SCR_W/3-6), by=firstToggleY+(i/3)*34;
+    if(t.x>=bx && t.x<bx+(SCR_W/3)-10 && t.y>=by && t.y<by+26){ brainToggle[i]=!brainToggle[i]; screenDirty=true; return; }
+  }
+}
+
+// SENSOR TUMMY
+void drawSensTummy(bool fullLayoutFull=true) {
+  if(fullLayoutFull){ tft.fillScreen(C_BG); drawHeader(); drawBack(C_ORANGE); glowText(24,76,"BATTERY MANAGEMENT",C_ORANGE,2); hRule(100,C_ORANGE); }
+  char buf[20]; uint16_t vc=T.volt>7.5?C_GREEN:T.volt>7.0?C_ORANGE:C_RED;
+  uint16_t pc=T.pct>50?C_GREEN:T.pct>20?C_ORANGE:C_RED;
+  snprintf(buf,20,"%.2f V",T.volt); tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(40,120); tft.print("CELL VOLTAGE");
+  tft.setTextSize(4); tft.setTextColor(vc,C_BG); tft.setCursor(40,136); tft.print(buf);
+  snprintf(buf,20,"%.2f A",T.amps); tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(40,186); tft.print("CURRENT DRAW");
+  tft.setTextSize(4); tft.setTextColor(C_ORANGE,C_BG); tft.setCursor(40,202); tft.print(buf);
+  snprintf(buf,20,"%d %%",T.pct); tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(40,252); tft.print("STATE OF CHARGE");
+  tft.setTextSize(4); tft.setTextColor(C_GREEN,C_BG); tft.setCursor(40,268); tft.print(buf);
+  int bw=SCR_W-40; tft.fillRect(20,326,bw,24,C_SURF); int filled=(int)(T.pct*bw/100);
+  for(int x=0;x<filled;x+=4) { uint16_t col=x<bw/3?C_RED:x<2*bw/3?C_ORANGE:C_GREEN; tft.fillRect(20+x,328,2,20,col); }
+  tft.drawRect(20,326,bw,24,C_BORDER);
+  float watts=T.volt*T.amps;
+  snprintf(buf,20,"%.1f W",watts);
+  hRule(374,C_ORANGE);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(8,382); tft.print("POWER DRAW:");
+  tft.setTextSize(3); tft.setTextColor(C_ORANGE,C_BG);
+  int16_t tw=strlen(buf)*18; tft.setCursor(SCR_W-tw-8,378); tft.print(buf);
+  float mAh=2000.0f;
+  float runtimeH = (T.amps>0.1) ? (mAh/1000.0f)*(T.pct/100.0f)/T.amps : 0;
+  int rMin=(int)(runtimeH*60);
+  snprintf(buf,20,"%dm left",rMin);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(8,420); tft.print("EST RUNTIME:");
+  tft.setTextSize(2); tft.setTextColor(pc,C_BG);
+  tw=strlen(buf)*12; tft.setCursor(SCR_W-tw-8,416); tft.print(buf);
+}
+
+
+
+void refreshCommsBody(){
+  int y=112; const char* labels[]={"MEGA BUS CHANNEL","PROPULSION CORE","NATIVE SYSTEM WIFI","ANDROID INTERFACE"};
+  bool states[]={megaLinked, megaLinked&&!T.estop, T.wifiOk, T.s9ok};
+  uint16_t cols[]={C_CYAN,C_GREEN,C_ORANGE,C_PURPLE};
+  for(int i=0;i<4;i++){
+    bool ok=states[i]; uint16_t c=ok?cols[i]:C_DGRAY;
+    neonBox(12,y,SCR_W-24,68,c,C_SURF); uint16_t dot=ok?breatheCol(c,1500):C_DGRAY;
+    tft.fillCircle(32,y+34,8,dimCol(dot,2)); tft.fillCircle(32,y+34,4,dot);
+    tft.setTextSize(2); tft.setTextColor(ok?C_WHITE:C_DGRAY,0x0000); tft.setCursor(56,y+14); tft.print(labels[i]);
+    tft.setTextSize(1); tft.setTextColor(ok?c:C_DGRAY,0x0000); tft.setCursor(56,y+40); tft.print(ok?"SYSTEM CHANNEL SECURE & STABLE":"BUS INTERRUPT / OFFLINE DETECTED");
+    y+=78;
+  }
+  tft.fillRect(0,y+4,SCR_W,SCR_H-y-4,C_BG);
+  hRule(y+4,C_PURPLE);
+  char buf[40]; unsigned long since=(millis()-lastMegaRx)/1000;
+  snprintf(buf,40,"Last Mega RX: %lus ago",since);
+  tft.setTextSize(1); tft.setTextColor(since>10?C_RED:C_GREEN,C_BG);
+  tft.setCursor(8,y+12); tft.print(buf);
+}
+
+void refreshScreenBody(){
+  switch(curScreen){
+    case SCR_MAIN:        refreshMainBody(); break;
+    case SCR_COMMS:       refreshCommsBody(); break;
+    case SCR_SENS_EYES:   tft.fillRect(0,102,SCR_W,SCR_H-102,C_BG); drawSensEyes(false); break;
+    case SCR_SENS_NOSE:   tft.fillRect(0,102,SCR_W,SCR_H-102,C_BG); drawSensNose(false); break;
+    case SCR_SENS_BRAIN:  tft.fillRect(0,102,SCR_W,SCR_H-102,C_BG); if(showBrainLog) drawBrainLog(); else drawSensBrain(false); break;
+    case SCR_SENS_TUMMY:  tft.fillRect(0,102,SCR_W,SCR_H-102,C_BG); drawSensTummy(false); break;
+    default: break;
+  }
+}
+
+// COMMS SCREEN
+void drawComms() { tft.fillScreen(C_BG); drawHeader(); drawBack(C_PURPLE); glowText(24,76,"COMMUNICATION CONTROL",C_PURPLE,2); hRule(100,C_PURPLE); refreshCommsBody(); }
+
+// SETTINGS SCREEN
+void drawSettings() {
+  tft.fillScreen(C_BG); drawHeader(); drawBack(C_ORANGE); glowText(24,76,"HARDWARE SETTINGS",C_ORANGE,2); hRule(100,C_ORANGE);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG);
+  tft.setCursor(16,112); tft.print("Dash Architecture Node Core v1.2");
+  tft.setCursor(16,128); tft.print("USART Hardware Interface Protocol Configured.");
+  const char* cmds[]={"PING HARDWARE BUS","FORCE STATUS REQ","FLUSH SENSORS","EMERGENCY STOP (ESTOP)"};
+  uint16_t cc[]={C_CYAN,C_GREEN,C_ORANGE,C_RED};
+  for(int i=0;i<4;i++){ neonBox(12,156+i*70,SCR_W-24,58,cc[i],C_SURF); tft.setTextSize(2); tft.setTextColor(cc[i],C_SURF); tft.setCursor(24,176+i*70); tft.print(cmds[i]); }
+}
+
+void drainMegaSerial(unsigned ms=300){
+  unsigned long until=millis()+ms;
+  while((long)(millis()-until)<0) handleMegaSerial();
+}
+
+void handleSettingsTouch(TouchPt& t) {
+  if(t.y<72 && t.x > SCR_W-80){ curScreen=SCR_MAIN; screenDirty=true; return; }
+  const char* megaCmds[]={"PING","STATUS","SENSOR_STATUS","ESTOP"};
+  for(int i=0;i<4;i++){
+    if(t.y>=156+i*70 && t.y<214+i*70 && t.x>=12 && t.x<SCR_W-12){
+      MEGA_SERIAL.println(megaCmds[i]); sndAlert(); neonBox(12,156+i*70,SCR_W-24,58,C_WHITE,C_WHITE);
+      drainMegaSerial(350); requestHeaderRefresh(); requestBodyRefresh(); drawHeader(); if(i==1 || i==2) refreshScreenBody();
+    }
+  }
+}
+
+// LIGHTS CONTROL SCREEN
+void sendLed(const char* a){ MEGA_SERIAL.print("LED:"); MEGA_SERIAL.println(a); }
+bool isLedMode(const char* m){ return strcmp((const char*)T.ledMode,m)==0; }
+void litCell(int x,int y,int w,int h,const char* label,uint16_t col,bool active){
+  uint16_t bg = active ? col : C_SURF; neonBox(x,y,w,h,col,bg);
+  tft.setTextSize(2); tft.setTextColor(active?C_BLACK:col,bg);
+  int16_t tw=strlen(label)*12; tft.setCursor(x+(w-tw)/2, y+(h-16)/2); tft.print(label);
+}
+#define LIT_EFW 94
+void drawLights(){
+  tft.fillScreen(C_BG); drawHeader(); drawBack(C_PINK); glowText(24,76,"LED ILLUMINATION ARRAY",C_PINK,2); hRule(100,C_PINK);
+  const char* en[]={"OFF","POLICE","ALERT","RAINBOW","BREATHE","PARTY"}; uint16_t ec[]={C_LGRAY,C_RED,C_ORANGE,C_CYAN,C_GREEN,C_PURPLE};
+  for(int i=0;i<6;i++){ int cx=i%3, rw=i/3; int x=12+cx*(LIT_EFW+6), y=116+rw*50; litCell(x,y,LIT_EFW,42,en[i],ec[i],isLedMode(en[i])); }
+  uint16_t sw[]={C_RED,C_GREEN,C_BLUE,C_CYAN,C_PURPLE,C_ORANGE,C_YELLOW};
+  for(int i=0;i<7;i++){ int x=12+i*42, y=230; tft.fillRoundRect(x,y,38,38,8,sw[i]); tft.drawRoundRect(x,y,38,38,8,C_WHITE); }
+  char wl[20]; snprintf(wl,20,"WHITE MATRIX:%s",(const char*)T.ledWhite); bool won=(strcmp((const char*)T.ledWhite,"OFF")!=0);
+  litCell(12,286,180,40,wl,C_WHITE,won); litCell(200,286,108,40,"ISOLATE",C_YELLOW,false);
+  litCell(12,342,64,40,"DIM-",C_CYAN,false); litCell(244,342,64,40,"BRT+",C_CYAN,false);
+  int bw=148, bx=84, by=342; tft.drawRoundRect(bx,by,bw,40,6,C_CYAN);
+  int fill=(int)((long)(bw-4)*T.ledBright/255); if(fill>0) tft.fillRect(bx+2,by+2,fill,36,dimCol(C_CYAN,1));
+  char bb[8]; snprintf(bb,8,"%d",T.ledBright); tft.setTextSize(2); tft.setTextColor(C_WHITE,C_BG);
+  int16_t tw=strlen(bb)*12; tft.setCursor(bx+(bw-tw)/2,by+12); tft.print(bb);
+  hRule(396,C_PINK); uint16_t uvCol = T.uvOn ? 0xAFE5 : C_LGRAY; uint16_t uvBg = T.uvOn ? 0x2808 : 0x1084;
+  tft.fillRoundRect(12,410,SCR_W-24,42,8,uvBg); tft.drawRoundRect(12,410,SCR_W-24,42,8,uvCol);
+  tft.setTextSize(2); tft.setTextColor(uvCol,uvBg); tft.setCursor(110,423); tft.print(T.uvOn ? "UV EMITTER: ON" : "UV EMITTER: OFF");
+}
+void handleLightsTouch(TouchPt& t){
+  if(t.y<72 && t.x > SCR_W-80){ curScreen=SCR_MAIN; screenDirty=true; return; }
+  const char* en[]={"OFF","POLICE","ALERT","RAINBOW","BREATHE","PARTY"};
+  for(int i=0;i<6;i++){
+    int cx=i%3, rw=i/3; int x=12+cx*(LIT_EFW+6), y=116+rw*50;
+    if(t.x>=x&&t.x<x+LIT_EFW&&t.y>=y&&t.y<y+42){ sndClick(); sendLed(en[i]); screenDirty=true; return; }
+  }
+  const char* cn[]={"RED","GREEN","BLUE","CYAN","PURPLE","ORANGE","YELLOW"};
+  for(int i=0;i<7;i++){ int x=12+i*42, y=230; if(t.x>=x&&t.x<x+38&&t.y>=y&&t.y<y+38){ sndClick(); sendLed(cn[i]); screenDirty=true; return; } }
+  if(t.y>=286&&t.y<326){
+    if(t.x>=12&&t.x<192){
+      const char* nx; if(strcmp((const char*)T.ledWhite,"OFF")==0) nx="WHITE:ON"; else if(strcmp((const char*)T.ledWhite,"ON")==0) nx="WHITE:AUTO"; else nx="WHITE:OFF";
+      sndClick(); sendLed(nx); screenDirty=true; return;
+    }
+    if(t.x>=200&&t.x<308){ sndClick(); sendLed("WHITE:SOLO"); screenDirty=true; return; }
+  }
+  if(t.y>=342&&t.y<382){
+    char bb[16];
+    if(t.x>=12&&t.x<76){ int nb=constrain(T.ledBright-32,16,255); snprintf(bb,16,"BRIGHT:%d",nb); sndClick(); sendLed(bb); screenDirty=true; return; }
+    if(t.x>=244&&t.x<308){ int nb=constrain(T.ledBright+32,16,255); snprintf(bb,16,"BRIGHT:%d",nb); sndClick(); sendLed(bb); screenDirty=true; return; }
+  }
+  if(t.y>=410&&t.y<452){ sndClick(); MEGA_SERIAL.println(T.uvOn ? "UV:OFF" : "UV:ON"); T.uvOn = !T.uvOn; screenDirty = true; return; }
+}
+
+// GAME: SUPER MARIO
+#define MARIO_GRAV  0.5f
+#define MARIO_JUMP -9.0f
+#define MARIO_SPD   3.0f
+#define GROUND_Y   420
+#define NUM_PLAT    5
+#define NUM_COIN    6
+#define NUM_ENEMY   3
+
+struct Platform { int x,y,w; };
+struct Coin     { int x,y; bool alive; };
+struct Enemy    { float x,y,vx; bool alive; };
+
+struct MarioGame {
+  float  px=60,py=GROUND_Y-24,pvx=0,pvy=0;
+  bool   onGround=false, jumping=false;
+  int    score=0, lives=3;
+  int    prevScore=-1, prevLives=-1;
+  float  camX=0;
+  bool   running=false, gameOver=false;
+  unsigned long lastFrame=0;
+  Platform plats[NUM_PLAT]={{0,GROUND_Y,3200},{200,300,120},{400,240,100},{650,280,140},{900,200,160}};
+  Coin     coins[NUM_COIN]={{220,268,true},{260,268,true},{420,208,true},{670,248,true},{920,168,true},{1000,168,true}};
+  Enemy    enemies[NUM_ENEMY]={{400,GROUND_Y-16,1.0f,true},{700,GROUND_Y-16,-1.0f,true},{960,220-16,1.0f,true}};
+} M;
+
+void marioReset() {
+  M.px=60; M.py=GROUND_Y-24; M.pvx=0; M.pvy=0;
+  M.onGround=false; M.score=0; M.lives=3; M.prevScore=-1; M.prevLives=-1; M.camX=0; M.gameOver=false;
+  for(auto& c:M.coins) c.alive=true;
+  for(auto& e:M.enemies){ e.alive=true; }
+  M.enemies[0].x=400; M.enemies[1].x=700; M.enemies[2].x=960;
+}
+
+void drawMario(int sx,int sy,bool flip) {
+  tft.fillRect(sx+2,sy,12,4,C_MRED);
+  tft.fillRect(sx,sy+4,16,5,C_MSKIN);
+  tft.fillRect(sx+(flip?3:9),sy+5,3,3,C_BLACK);
+  tft.fillRect(sx+2,sy+9,12,7,C_MRED);
+  tft.fillRect(sx,sy+9,4,5,C_MBLUE);
+  tft.fillRect(sx+12,sy+9,4,5,C_MBLUE);
+  tft.fillRect(sx+2,sy+14,12,5,C_MBLUE);
+  int wa=(millis()/120)%2;
+  tft.fillRect(sx+(wa?0:6),sy+19,6,4,C_MBROWN);
+  tft.fillRect(sx+(wa?10:4),sy+19,6,4,C_MBROWN);
+}
+
+void drawMarioGame() {
+  tft.startWrite();
+  tft.fillRect(0,GAME_TOP,SCR_W,SCR_H-GAME_TOP,C_MSKY);
+  if(M.gameOver) {
+    glowText(SCR_W/2-48,200,"GAME OVER",C_RED,3);
+    char buf[20]; snprintf(buf,20,"Score: %d",M.score);
+    centreText(SCR_W/2,260,buf,C_WHITE,2,C_MSKY);
+    centreText(SCR_W/2,300,"Tap to restart",C_YELLOW,2,C_MSKY);
+    paintGameChromeOnce(GAME_MARIO, C_GREEN);
+    tft.endWrite();
+    return;
+  }
+  int camX=(int)M.camX;
+  tft.fillRect(0,GROUND_Y,SCR_W,SCR_H-GROUND_Y,C_MGRND);
+  tft.fillRect(0,GROUND_Y,SCR_W,8,0x0300);
+  for(auto& p:M.plats){
+    int sx=p.x-camX, sw=p.w;
+    if(sx+sw<0||sx>SCR_W) continue;
+    tft.fillRect(sx,p.y,sw,14,C_MPIPE);
+    tft.fillRect(sx,p.y,sw,4,0x0700);
+  }
+  for(auto& c:M.coins){
+    if(!c.alive) continue;
+    int sx=c.x-camX;
+    if(sx<0||sx>SCR_W) continue;
+    tft.fillCircle(sx,c.y,6,C_MYELL);
+    tft.fillCircle(sx,c.y,3,C_ORANGE);
+  }
+  for(auto& e:M.enemies){
+    if(!e.alive) continue;
+    int sx=(int)e.x-camX;
+    if(sx<-20||sx>SCR_W+20) continue;
+    tft.fillRect(sx,  (int)e.y,16,6,C_MBROWN);
+    tft.fillRect(sx+2,(int)e.y+6,12,8,C_MBROWN);
+    tft.fillRect(sx+1,(int)e.y+2,4,4,C_BLACK);
+    tft.fillRect(sx+11,(int)e.y+2,4,4,C_BLACK);
+  }
+  int msx=(int)(M.px-camX);
+  drawMario(msx,(int)M.py, M.pvx<0);
+  paintGameChromeOnce(GAME_MARIO, C_GREEN);
+  if (M.score != M.prevScore || M.lives != M.prevLives) {
+    char buf[32]; snprintf(buf,32,"SC:%05d LV:%d",M.score,M.lives);
+    paintGameHudLine(90, 12, buf, C_WHITE);
+    M.prevScore = M.score; M.prevLives = M.lives;
+  }
+  tft.endWrite();
+}
+
+void updateMario() {
+  unsigned long now=millis();
+  if(now-M.lastFrame<33) return;
+  M.lastFrame=now;
+  TouchPt t; bool tpressed=false;
+  if(touchReady()){ t=readTouch(); tpressed=t.pressed; if(tpressed) lastTouchMs=millis(); }
+  if (tpressed && handleGameBack(t)) return;
+  if(tpressed) {
+    if(t.y>GAME_TOP) {
+      if(t.x<SCR_W/3) M.pvx=-MARIO_SPD;
+      else if(t.x>2*SCR_W/3) M.pvx=MARIO_SPD;
+      else if(M.onGround) { M.pvy=MARIO_JUMP; M.onGround=false; sndJump(); }
+    }
+  } else {
+    M.pvx*=0.8f;
+  }
+  M.pvy+=MARIO_GRAV;
+  M.py+=M.pvy; M.px+=M.pvx;
+  if(M.px<0) M.px=0;
+  M.onGround=false;
+  for(auto& p:M.plats){
+    if(M.px+14>p.x && M.px<p.x+p.w && M.py+24>=p.y && M.py+24<=p.y+16 && M.pvy>=0){
+      M.py=p.y-24; M.pvy=0; M.onGround=true;
+    }
+  }
+  for(auto& c:M.coins){
+    if(!c.alive) continue;
+    if(abs((int)M.px+8-c.x)<12 && abs((int)M.py+12-c.y)<12){ c.alive=false; M.score+=100; sndCoin(); }
+  }
+  for(auto& e:M.enemies){
+    if(!e.alive) continue;
+    e.x+=e.vx;
+    if(e.x<0||e.x>1200) e.vx*=-1;
+    if(abs((int)M.px+8-(int)e.x+8)<14 && abs((int)M.py+24-(int)e.y)<14){
+      if(M.pvy>0){ e.alive=false; M.score+=200; M.pvy=-6; sndStomp(); }
+      else { M.lives--; M.px=60; M.py=GROUND_Y-24; M.pvy=0; M.camX=0; sndDeath(); if(M.lives<=0){ M.gameOver=true; sndGameOver(); } }
+    }
+  }
+  M.camX=M.px-SCR_W/3;
+  if(M.camX<0) M.camX=0;
+  if(M.py>SCR_H+40){ M.lives--; M.px=60; M.py=GROUND_Y-24; M.pvy=0; M.camX=0; sndDeath(); if(M.lives<=0){ M.gameOver=true; sndGameOver(); } }
+  drawMarioGame();
+}
+
+// GAME: PACMAN
+#define PM_COLS  16
+#define PM_ROWS  20
+#define PM_CELL  14
+#define PM_OX    ((SCR_W-PM_COLS*PM_CELL)/2)
+#define PM_OY    (GAME_TOP+10)
+#define PM_FRAME_MS  150
+#define PM_SPEED     0.35f
+#define PM_SNAP      0.20f
+#define PM_TURN_TOL  0.38f
+#define PM_GHOST_SPD 0.22f
+#define PM_BTN_SZ    46
+#define PM_BTN_GAP   10
+#define PM_BTN_CY    (PM_OY + PM_ROWS*PM_CELL + 62)
+#define PM_BTN_CX    (SCR_W/2)
+#define PM_SPR_PAD   16
+
+const uint8_t pmMaze[PM_ROWS][PM_COLS] PROGMEM = {
+  {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+  {1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1},
+  {1,3,1,1,0,1,0,1,1,0,1,0,1,1,3,1},
+  {1,0,1,1,0,1,0,0,0,0,1,0,1,1,0,1},
+  {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+  {1,0,1,1,0,1,1,1,1,1,1,0,1,1,0,1},
+  {1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1},
+  {1,1,1,1,0,1,0,0,0,0,1,0,1,1,1,1},
+  {2,2,2,1,0,1,0,2,2,0,1,0,1,2,2,2},
+  {1,1,1,1,0,1,0,2,2,0,1,0,1,1,1,1},
+  {2,2,2,2,0,0,0,2,2,0,0,0,2,2,2,2},
+  {1,1,1,1,0,1,0,2,2,0,1,0,1,1,1,1},
+  {2,2,2,1,0,1,0,2,2,0,1,0,1,2,2,2},
+  {1,1,1,1,0,1,1,1,1,1,1,0,1,1,1,1},
+  {1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1},
+  {1,3,1,0,0,0,0,0,0,0,0,0,0,1,3,1},
+  {1,0,1,0,1,1,0,1,1,0,1,1,0,1,0,1},
+  {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
+  {1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1},
+  {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
+};
+
+struct PacGame {
+  uint8_t maze[PM_ROWS][PM_COLS];
+  float px,py,pvx,pvy;
+  float prevPx,prevPy;
+  int   dx,dy;
+  int   score; int lives; int dots;
+  int   prevScore,prevLives;
+  bool  gameOver, win;
+  float gx[2],gy[2];
+  float prevGx[2],prevGy[2];
+  int gdx[2],gdy[2];
+  uint16_t gcol[2];
+  unsigned long lastFrame;
+  bool powered; unsigned long powerEnd;
+  bool mazeDrawn;
+} PM;
+
+void pacReset(){
+  for(int r=0;r<PM_ROWS;r++) for(int c=0;c<PM_COLS;c++) PM.maze[r][c]=pgm_read_byte(&pmMaze[r][c]);
+  PM.px=1; PM.py=1; PM.pvx=0; PM.pvy=0; PM.dx=1; PM.dy=0;
+  PM.score=0; PM.lives=3; PM.gameOver=false; PM.win=false; PM.powered=false;
+  PM.gx[0]=7; PM.gy[0]=8; PM.gdx[0]=1; PM.gdy[0]=0;
+  PM.gx[1]=8; PM.gy[1]=8; PM.gdx[1]=-1;PM.gdy[1]=0;
+  PM.gcol[0]=C_RED; PM.gcol[1]=C_PINK;
+  PM.dots=0;
+  for(int r=0;r<PM_ROWS;r++) for(int c=0;c<PM_COLS;c++) if(PM.maze[r][c]==0||PM.maze[r][c]==3) PM.dots++;
+  PM.prevPx=PM.px; PM.prevPy=PM.py;
+  PM.prevGx[0]=PM.gx[0]; PM.prevGy[0]=PM.gy[0];
+  PM.prevGx[1]=PM.gx[1]; PM.prevGy[1]=PM.gy[1];
+  PM.prevScore=-1; PM.prevLives=-1;
+  PM.mazeDrawn=false;
+}
+
+void pacDrawCell(int c,int r){
+  int x=PM_OX+c*PM_CELL, y=PM_OY+r*PM_CELL;
+  uint8_t cell=PM.maze[r][c];
+  if(cell==1){ tft.fillRect(x,y,PM_CELL,PM_CELL,0x000D); tft.drawRect(x,y,PM_CELL,PM_CELL,C_BLUE); }
+  else if(cell==0) tft.fillCircle(x+PM_CELL/2,y+PM_CELL/2,2,C_YELLOW);
+  else if(cell==3) tft.fillCircle(x+PM_CELL/2,y+PM_CELL/2,5,C_WHITE);
+  else tft.fillRect(x,y,PM_CELL,PM_CELL,C_BLACK);
+}
+
+void pacToPix(float gx,float gy,int& px,int& py){
+  px=PM_OX+(int)(gx*PM_CELL)+PM_CELL/2;
+  py=PM_OY+(int)(gy*PM_CELL)+PM_CELL/2;
+}
+
+void pacRestoreMazeRect(int x0,int y0,int x1,int y1){
+  int mazeBot=PM_OY+PM_ROWS*PM_CELL;
+  if(y0<PM_OY) y0=PM_OY;
+  if(y1>mazeBot) y1=mazeBot;
+  if(x0<PM_OX) x0=PM_OX;
+  if(x1>PM_OX+PM_COLS*PM_CELL) x1=PM_OX+PM_COLS*PM_CELL;
+  int c0=max(0,(x0-PM_OX)/PM_CELL), c1=min(PM_COLS-1,(x1-PM_OX-1)/PM_CELL);
+  int r0=max(0,(y0-PM_OY)/PM_CELL), r1=min(PM_ROWS-1,(y1-PM_OY-1)/PM_CELL);
+  for(int r=r0;r<=r1;r++) for(int c=c0;c<=c1;c++) pacDrawCell(c,r);
+}
+
+void pacEraseSprite(float gx,float gy){
+  int px,py; pacToPix(gx,gy,px,py);
+  int x0=px-PM_SPR_PAD, y0=py-PM_SPR_PAD, w=PM_SPR_PAD*2, h=PM_SPR_PAD*2;
+  tft.fillRect(x0,y0,w,h,C_BLACK);
+  pacRestoreMazeRect(x0,y0,x0+w,y0+h);
+}
+
+void pacDrawPacSprite(){
+  int pac_px=PM_OX+(int)(PM.px*PM_CELL)+PM_CELL/2;
+  int pac_py=PM_OY+(int)(PM.py*PM_CELL)+PM_CELL/2;
+  int mouth=(millis()/100)%2?30:5;
+  tft.fillCircle(pac_px,pac_py,6,C_YELLOW);
+  if(mouth>10) tft.fillTriangle(pac_px,pac_py,pac_px+8*(PM.dx?PM.dx:1),pac_py-4,pac_px+8*(PM.dx?PM.dx:1),pac_py+4,C_BLACK);
+}
+
+void pacDrawGhostSprite(int i){
+  int gx=PM_OX+(int)(PM.gx[i]*PM_CELL)+PM_CELL/2;
+  int gy=PM_OY+(int)(PM.gy[i]*PM_CELL)+PM_CELL/2;
+  uint16_t gc=PM.powered?C_BLUE:PM.gcol[i];
+  tft.fillCircle(gx,gy,6,gc);
+  tft.fillRect(gx-6,gy,12,6,gc);
+}
+
+void pacGetBtnRect(int dir,int& bx,int& by,int& bw,int& bh){
+  int cx=PM_BTN_CX, cy=PM_BTN_CY, b=PM_BTN_SZ, g=PM_BTN_GAP;
+  bw=bh=b;
+  if(dir==0){ bx=cx-b/2; by=cy-b-g; }
+  else if(dir==1){ bx=cx-b/2; by=cy+g; }
+  else if(dir==2){ bx=cx-b-g; by=cy-b/2; }
+  else { bx=cx+g; by=cy-b/2; }
+}
+
+void pacDrawButtons(){
+  const char* labels[]={"^","v","<",">"};
+  for(int i=0;i<4;i++){
+    int bx,by,bw,bh; pacGetBtnRect(i,bx,by,bw,bh);
+    neonBox(bx,by,bw,bh,C_YELLOW,C_SURF2);
+    tft.setTextSize(2); tft.setTextColor(C_YELLOW,C_SURF2);
+    int16_t tw=strlen(labels[i])*12;
+    tft.setCursor(bx+(bw-tw)/2, by+(bh-16)/2); tft.print(labels[i]);
+  }
+}
+
+bool pacBtnHit(const TouchPt& t,int bx,int by,int bw,int bh){
+  return t.x>=bx && t.x<bx+bw && t.y>=by && t.y<by+bh;
+}
+
+bool pacHandleDirTouch(const TouchPt& t){
+  if(t.y<GAME_TOP) return false;
+  static const int dirs[4][2]={{0,-1},{0,1},{-1,0},{1,0}};
+  for(int i=0;i<4;i++){
+    int bx,by,bw,bh; pacGetBtnRect(i,bx,by,bw,bh);
+    if(pacBtnHit(t,bx,by,bw,bh)){
+      PM.dx=dirs[i][0]; PM.dy=dirs[i][1]; sndClick(); return true;
+    }
+  }
+  return false;
+}
+
+bool pacCellFree(int c,int r){
+  return c>=0 && c<PM_COLS && r>=0 && r<PM_ROWS && PM.maze[r][c]!=1;
+}
+
+int pacCol(){ return (int)(PM.px+0.5f); }
+int pacRow(){ return (int)(PM.py+0.5f); }
+
+bool pacAlignedH(){
+  int rr=pacRow();
+  return abs(PM.py-rr) < PM_TURN_TOL;
+}
+
+bool pacAlignedV(){
+  int cc=pacCol();
+  return abs(PM.px-cc) < PM_TURN_TOL;
+}
+
+void pacSnapTunnel(){
+  int cc=pacCol(), rr=pacRow();
+  if(abs(PM.px-cc) < PM_SNAP) PM.px=cc;
+  if(abs(PM.py-rr) < PM_SNAP) PM.py=rr;
+}
+
+void pacUpdateVelocity(){
+  int cc=pacCol(), rr=pacRow();
+  PM.pvx=0; PM.pvy=0;
+  if(PM.dx!=0 && pacCellFree(cc+PM.dx,rr) && pacAlignedH()){
+    PM.pvx=PM.dx*PM_SPEED;
+    return;
+  }
+  if(PM.dy!=0 && pacCellFree(cc,rr+PM.dy) && pacAlignedV()){
+    PM.pvy=PM.dy*PM_SPEED;
+    return;
+  }
+  if(PM.dx!=0 && pacCellFree(cc+PM.dx,rr))
+    PM.pvx=PM.dx*PM_SPEED;
+  else if(PM.dy!=0 && pacCellFree(cc,rr+PM.dy))
+    PM.pvy=PM.dy*PM_SPEED;
+}
+
+bool pacTryMove(){
+  bool moved=false;
+  if(PM.pvx!=0.0f){
+    float nx=PM.px+PM.pvx;
+    int tc=(int)(nx+0.5f), tr=pacRow();
+    if(pacCellFree(tc,tr)){ PM.px=nx; moved=true; }
+    else { PM.px=pacCol(); PM.pvx=0; }
+  }
+  if(PM.pvy!=0.0f){
+    float ny=PM.py+PM.pvy;
+    int tc=pacCol(), tr=(int)(ny+0.5f);
+    if(pacCellFree(tc,tr)){ PM.py=ny; moved=true; }
+    else { PM.py=pacRow(); PM.pvy=0; }
+  }
+  return moved;
+}
+
+void pacDrawMaze(){
+  tft.fillRect(0,GAME_TOP,SCR_W,SCR_H-GAME_TOP,C_BLACK);
+  for(int r=0;r<PM_ROWS;r++) for(int c=0;c<PM_COLS;c++) pacDrawCell(c,r);
+  pacDrawButtons();
+  PM.mazeDrawn=true;
+}
+
+void pacDrawHud(){
+  paintGameChromeOnce(GAME_PACMAN, C_YELLOW);
+  if(PM.score!=PM.prevScore||PM.lives!=PM.prevLives){
+    char buf[24]; snprintf(buf,24,"SC:%d LV:%d",PM.score,PM.lives);
+    paintGameHudLine(90,12,buf,C_YELLOW);
+    PM.prevScore=PM.score; PM.prevLives=PM.lives;
+  }
+}
+
+void pacDrawFrame(){
+  tft.startWrite();
+  if(!PM.mazeDrawn) pacDrawMaze();
+  pacEraseSprite(PM.prevPx,PM.prevPy);
+  for(int i=0;i<2;i++) pacEraseSprite(PM.prevGx[i],PM.prevGy[i]);
+  pacDrawPacSprite();
+  for(int i=0;i<2;i++) pacDrawGhostSprite(i);
+  PM.prevPx=PM.px; PM.prevPy=PM.py;
+  for(int i=0;i<2;i++){ PM.prevGx[i]=PM.gx[i]; PM.prevGy[i]=PM.gy[i]; }
+  pacDrawHud();
+  tft.endWrite();
+}
+
+void drawPacGame(){
+  tft.startWrite();
+  pacDrawMaze();
+  pacDrawPacSprite();
+  for(int i=0;i<2;i++) pacDrawGhostSprite(i);
+  PM.prevPx=PM.px; PM.prevPy=PM.py;
+  for(int i=0;i<2;i++){ PM.prevGx[i]=PM.gx[i]; PM.prevGy[i]=PM.gy[i]; }
+  pacDrawHud();
+  if(PM.gameOver){ centreText(SCR_W/2,200,"GAME OVER!",C_RED,3,C_BLACK); centreText(SCR_W/2,240,"Tap restart",C_WHITE,2,C_BLACK); }
+  if(PM.win)     { centreText(SCR_W/2,200,"YOU WIN!",C_GREEN,3,C_BLACK); }
+  tft.endWrite();
+}
+
+void updatePacman(){
+  unsigned long now=millis();
+  if(now-PM.lastFrame<PM_FRAME_MS) return; PM.lastFrame=now;
+  if(PM.gameOver||PM.win) { if(touchReady()){readTouch();lastTouchMs=millis();pacReset();drawPacGame();} return; }
+  if(touchReady()){
+    TouchPt t=readTouch(); lastTouchMs=millis();
+    if(t.pressed && handleGameBack(t)) return;
+    if(t.pressed) pacHandleDirTouch(t);
+  }
+  pacSnapTunnel();
+  pacUpdateVelocity();
+  pacTryMove();
+  int cr=pacRow(), cc=pacCol();
+  if(cr>=0&&cr<PM_ROWS&&cc>=0&&cc<PM_COLS){
+    if(PM.maze[cr][cc]==0){ PM.maze[cr][cc]=2; PM.score+=10; PM.dots--; sndDot(); if(PM.dots<=0) PM.win=true; }
+    if(PM.maze[cr][cc]==3){ PM.maze[cr][cc]=2; PM.score+=50; PM.powered=true; sndPower(); PM.powerEnd=now+6000; }
+  }
+  if(PM.powered&&now>PM.powerEnd) PM.powered=false;
+  for(int i=0;i<2;i++){
+    int gr=(int)(PM.gy[i]+0.5f), gc2=(int)(PM.gx[i]+0.5f);
+    int nr2=gr+PM.gdy[i], nc2=gc2+PM.gdx[i];
+    if(nr2<0||nr2>=PM_ROWS||nc2<0||nc2>=PM_COLS||PM.maze[nr2][nc2]==1||random(14)==0){
+      int dirs[4][2]={{1,0},{-1,0},{0,1},{0,-1}};
+      int tries=0;
+      do{ int d=random(4); PM.gdx[i]=dirs[d][0]; PM.gdy[i]=dirs[d][1]; tries++; }
+      while(tries<8&&(PM.maze[gr+PM.gdy[i]][gc2+PM.gdx[i]]==1));
+    }
+    PM.gx[i]+=PM.gdx[i]*PM_GHOST_SPD; PM.gy[i]+=PM.gdy[i]*PM_GHOST_SPD;
+    if(abs(PM.gx[i]-PM.px)<1.2f&&abs(PM.gy[i]-PM.py)<1.2f){
+      if(PM.powered){ PM.gx[i]=7; PM.gy[i]=8; PM.score+=200; sndHit(); }
+      else{ PM.lives--; PM.px=1; PM.py=1; PM.pvx=0; PM.pvy=0; sndDeath(); if(PM.lives<=0){ PM.gameOver=true; sndGameOver(); } }
+    }
+  }
+  if(PM.gameOver||PM.win) drawPacGame();
+  else pacDrawFrame();
+}
+
+// GAME: STARSHIP
+#define SS_MAX_BULLETS 10
+#define SS_MAX_BUGS    15
+
+struct StarShip {
+  float sx, prevSx;
+  SSBullet bullets[SS_MAX_BULLETS];
+  SSBullet prevBullets[SS_MAX_BULLETS];
+  SSBug    bugs[SS_MAX_BUGS];
+  SSBug    prevBugs[SS_MAX_BUGS];
+  int  score, lives, wave;
+  int  prevScore, prevLives, prevWave;
+  bool gameOver;
+  bool bgDrawn;
+  unsigned long lastFrame, lastShot;
+  int  bugsAlive;
+} ship;
+
+void ssInitStars(){
+  for(int i=0;i<SS_STARS;i++) ssStars[i]={(int)random(SCR_W),(int)random(GAME_TOP,SCR_H),(uint8_t)random(50,255)};
+  ssStarsInit=true;
+}
+void ssDrawStars(){
+  for(int i=0;i<SS_STARS;i++){
+    tft.drawPixel(ssStars[i].x,ssStars[i].y,blendCol(C_BG,C_WHITE,ssStars[i].br));
+    ssStars[i].br=(uint8_t)constrain((int)ssStars[i].br+(int)random(5)-2,30,240);
+  }
+}
+void ssSpawnPart(float x,float y,uint16_t col){
+  for(int i=0;i<SS_PARTS;i++) if(ssParts[i].life==0){
+    float a=(float)random(628)/100.0f,sp=(float)random(20,50)/10.0f;
+    ssParts[i]={x,y,cosf(a)*sp,sinf(a)*sp,60,col}; return;
+  }
+}
+void ssUpdateParts(){
+  for(int i=0;i<SS_PARTS;i++){
+    if(!ssParts[i].life) continue;
+    tft.drawPixel((int)ssParts[i].x,(int)ssParts[i].y,C_BG);
+    ssParts[i].x+=ssParts[i].vx; ssParts[i].y+=ssParts[i].vy;
+    ssParts[i].vy+=0.12f; ssParts[i].vx*=0.95f; ssParts[i].vy*=0.95f;
+    ssParts[i].life--;
+    if(ssParts[i].life&&ssParts[i].x>0&&ssParts[i].x<SCR_W&&ssParts[i].y>GAME_TOP&&ssParts[i].y<SCR_H)
+      tft.fillRect((int)ssParts[i].x,(int)ssParts[i].y,2,2,blendCol(C_BG,ssParts[i].col,(uint8_t)(ssParts[i].life*4)));
+  }
+}
+
+void ssReset(){
+  ship.sx=SCR_W/2; ship.prevSx=ship.sx; ship.score=0; ship.lives=3; ship.wave=1; ship.gameOver=false; ship.bugsAlive=0;
+  ship.prevScore=-1; ship.prevLives=-1; ship.prevWave=-1; ship.bgDrawn=false;
+  for(auto& b:ship.bullets) b.alive=false;
+  for(int i=0;i<SS_MAX_BUGS;i++){
+    ship.bugs[i]={(float)(20+i*18),(float)(GAME_TOP+12+(i/8)*32),(float)(random(3)-1)*0.8f,0.3f,true,(uint16_t)(i%2?C_RED:C_GREEN)};
+    ship.bugsAlive++;
+  }
+  ssInitStars();
+  for(int i=0;i<SS_PARTS;i++) ssParts[i].life=0;
+}
+
+void ssDrawShip(float sx){
+  int shipY=SCR_H-40;
+  tft.fillTriangle((int)sx,shipY-20,(int)sx-14,shipY+10,(int)sx+14,shipY+10,C_CYAN);
+  tft.fillRect((int)sx-3,shipY+8,6,8,C_ORANGE);
+}
+
+void ssEraseShip(float sx){
+  int shipY=SCR_H-40;
+  tft.fillRect((int)sx-16,shipY-22,32,34,C_BG);
+}
+
+void ssDrawBullet(const SSBullet& b){
+  if(!b.alive)return;
+  tft.fillRect((int)b.x-1,(int)b.y-6,3,10,C_YELLOW);
+}
+
+void ssEraseBullet(const SSBullet& b){
+  if(!b.alive)return;
+  tft.fillRect((int)b.x-2,(int)b.y-7,5,12,C_BG);
+}
+
+void ssDrawBug(const SSBug& b){
+  if(!b.alive)return;
+  tft.fillCircle((int)b.x,(int)b.y,8,b.col);
+  tft.drawLine((int)b.x-8,(int)b.y-4,(int)b.x-14,(int)b.y-8,b.col);
+  tft.drawLine((int)b.x+8,(int)b.y-4,(int)b.x+14,(int)b.y-8,b.col);
+}
+
+void ssEraseBug(const SSBug& b){
+  if(!b.alive)return;
+  tft.fillRect((int)b.x-16,(int)b.y-12,32,24,C_BG);
+}
+
+void ssDrawHud(){
+  paintGameChromeOnce(GAME_STARSHIP, C_CYAN);
+  if(ship.score!=ship.prevScore||ship.lives!=ship.prevLives||ship.wave!=ship.prevWave){
+    char buf[32]; snprintf(buf,32,"SC:%05d LV:%d W:%d",ship.score,ship.lives,ship.wave);
+    paintGameHudLine(90,12,buf,C_CYAN);
+    ship.prevScore=ship.score; ship.prevLives=ship.lives; ship.prevWave=ship.wave;
+  }
+}
+
+void ssDrawFrame(){
+  tft.startWrite();
+  if(!ship.bgDrawn){
+    tft.fillRect(0,GAME_TOP,SCR_W,SCR_H-GAME_TOP,C_BG);
+    ship.bgDrawn=true;
+  }
+  ssEraseShip(ship.prevSx);
+  for(int i=0;i<SS_MAX_BULLETS;i++) ssEraseBullet(ship.prevBullets[i]);
+  for(int i=0;i<SS_MAX_BUGS;i++) ssEraseBug(ship.prevBugs[i]);
+  ssDrawStars();
+  ssUpdateParts();
+  for(int i=0;i<SS_MAX_BULLETS;i++) ssDrawBullet(ship.bullets[i]);
+  for(int i=0;i<SS_MAX_BUGS;i++) ssDrawBug(ship.bugs[i]);
+  ssDrawShip(ship.sx);
+  ship.prevSx=ship.sx;
+  for(int i=0;i<SS_MAX_BULLETS;i++) ship.prevBullets[i]=ship.bullets[i];
+  for(int i=0;i<SS_MAX_BUGS;i++) ship.prevBugs[i]=ship.bugs[i];
+  ssDrawHud();
+  tft.endWrite();
+}
+
+void drawStarship(){
+  tft.startWrite();
+  tft.fillRect(0,GAME_TOP,SCR_W,SCR_H-GAME_TOP,C_BG);
+  ship.bgDrawn=true;
+  if(ship.gameOver){
+    glowText(SCR_W/2-48,180,"GAME OVER",C_RED,3);
+    char buf[24]; snprintf(buf,24,"SCORE: %d",ship.score);
+    centreText(SCR_W/2,230,buf,C_WHITE,2,C_BG);
+    centreText(SCR_W/2,270,"Tap to play again",C_CYAN,1,C_BG);
+    paintGameChromeOnce(GAME_STARSHIP, C_CYAN);
+    tft.endWrite();
+    return;
+  }
+  for(int i=0;i<SS_MAX_BULLETS;i++) ssDrawBullet(ship.bullets[i]);
+  for(int i=0;i<SS_MAX_BUGS;i++) ssDrawBug(ship.bugs[i]);
+  ssDrawShip(ship.sx);
+  ship.prevSx=ship.sx;
+  for(int i=0;i<SS_MAX_BULLETS;i++) ship.prevBullets[i]=ship.bullets[i];
+  for(int i=0;i<SS_MAX_BUGS;i++) ship.prevBugs[i]=ship.bugs[i];
+  ssDrawHud();
+  tft.endWrite();
+}
+
+void updateStarship(){
+  unsigned long now=millis();
+  if(now-ship.lastFrame<40)return; ship.lastFrame=now;
+  if(ship.gameOver){if(touchReady()){readTouch();lastTouchMs=millis();ssReset();drawStarship();}return;}
+  if(touchReady()){TouchPt t=readTouch();lastTouchMs=millis(); if (t.pressed && handleGameBack(t)) return; if(t.y>GAME_TOP)ship.sx=t.x;}
+  ship.sx=constrain(ship.sx,16,SCR_W-16);
+  if(now-ship.lastShot>250){
+    ship.lastShot=now;
+    for(auto& b:ship.bullets){if(!b.alive){b={ship.sx,SCR_H-50,true};break;}}
+  }
+  for(auto& b:ship.bullets){if(b.alive){b.y-=8;if(b.y<GAME_TOP+8)b.alive=false;}}
+  for(auto& b:ship.bugs){
+    if(!b.alive)continue;
+    b.x+=b.vx; b.y+=b.vy;
+    if(b.x<8||b.x>SCR_W-8)b.vx*=-1;
+    if(b.y>SCR_H-50){ship.lives--;b.alive=false;ship.bugsAlive--;sndDeath();for(int p=0;p<5;p++)ssSpawnPart(b.x,SCR_H-50,C_RED);if(ship.lives<=0){ship.gameOver=true;sndGameOver();}}
+    for(auto& blt:ship.bullets){if(!blt.alive)continue;if(abs(blt.x-b.x)<12&&abs(blt.y-b.y)<12){blt.alive=false;b.alive=false;ship.bugsAlive--;ship.score+=100;sndHit();for(int p=0;p<8;p++)ssSpawnPart(b.x,b.y,b.col);}}
+  }
+  if(ship.bugsAlive<=0){
+    ship.wave++; ship.bugsAlive=0;
+    for(int i=0;i<SS_MAX_BUGS;i++) ship.bugs[i].alive=false;
+    for(int i=0;i<min(SS_MAX_BUGS,8+ship.wave*2);i++){
+      ship.bugs[i]={(float)(16+i*20),(float)(GAME_TOP+30+(i/8)*28),(float)(random(3)-1)*(0.8f+ship.wave*0.2f),0.25f+ship.wave*0.05f,true,(uint16_t)(i%3==0?C_RED:i%3==1?C_PURPLE:C_ORANGE)};
+      ship.bugsAlive++;
+    }
+    drawStarship();
+    return;
+  }
+  ssDrawFrame();
+}
+
+// GAME: MEMORY
+#define MEM_COLS 4
+#define MEM_ROWS 4
+#define MEM_CW   70
+#define MEM_CH   58
+#define MEM_PAD  4
+#define MEM_OX   ((SCR_W-(MEM_COLS*(MEM_CW+MEM_PAD)-MEM_PAD))/2)
+#define MEM_OY   (GAME_TOP+15)
+
+uint16_t memColors[8]={C_RED,C_GREEN,C_BLUE,C_YELLOW,C_PURPLE,C_ORANGE,C_PINK,C_CYAN};
+
+struct MemGame {
+  uint8_t cards[MEM_ROWS][MEM_COLS];
+  bool    flipped[MEM_ROWS][MEM_COLS];
+  bool    matched[MEM_ROWS][MEM_COLS];
+  int     firstR,firstC,secondR,secondC,state,score,pairs;
+  bool    win;
+  unsigned long checkStart;
+} MEM;
+
+void memShuffle(){
+  uint8_t vals[16]; for(int i=0;i<16;i++) vals[i]=i/2;
+  for(int i=15;i>0;i--){int j=random(i+1);uint8_t t=vals[i];vals[i]=vals[j];vals[j]=t;}
+  for(int r=0;r<MEM_ROWS;r++) for(int c=0;c<MEM_COLS;c++){
+    MEM.cards[r][c]=vals[r*MEM_COLS+c]; MEM.flipped[r][c]=MEM.matched[r][c]=false;
+  }
+  MEM.state=0; MEM.score=0; MEM.pairs=0; MEM.win=false;
+}
+
+void drawMemCard(int r,int c){
+  int x=MEM_OX+c*(MEM_CW+MEM_PAD),y=MEM_OY+r*(MEM_CH+MEM_PAD);
+  bool fl=MEM.flipped[r][c],ma=MEM.matched[r][c];
+  uint16_t col=ma?dimCol(memColors[MEM.cards[r][c]],2):fl?memColors[MEM.cards[r][c]]:C_SURF;
+  uint16_t brd=ma?dimCol(col,1):fl?col:C_PURPLE;
+  tft.fillRoundRect(x+2,y+3,MEM_CW,MEM_CH,8,0x0000);
+  if(fl||ma) gradientRect(x,y,MEM_CW,MEM_CH,blendCol(C_BG,col,fl?35:15),C_BG);
+  else       gradientRect(x,y,MEM_CW,MEM_CH,blendCol(C_SURF,C_PURPLE,20),C_SURF);
+  glowBox(x,y,MEM_CW,MEM_CH,brd,8);
+  if(!fl&&!ma){
+    for(int dy=14;dy<MEM_CH-8;dy+=10) for(int dx=10;dx<MEM_CW-6;dx+=10)
+      tft.drawPixel(x+dx,y+dy,dimCol(C_PURPLE,2));
+    return;
+  }
+  if(ma){tft.setTextSize(2);tft.setTextColor(brd,0x0000);tft.setCursor(x+MEM_CW/2-12,y+MEM_CH/2-10);tft.print("OK");return;}
+  char v[4]; snprintf(v,4,"%d",MEM.cards[r][c]+1);
+  tft.setTextSize(3); int16_t tw=strlen(v)*18;
+  tft.setTextColor(dimCol(col,2),0x0000); tft.setCursor(x+(MEM_CW-tw)/2+2,y+MEM_CH/2-8); tft.print(v);
+  tft.setTextColor(C_WHITE,0x0000);       tft.setCursor(x+(MEM_CW-tw)/2,y+MEM_CH/2-10);  tft.print(v);
+}
+
+void drawMemGame(){
+  tft.startWrite();
+  tft.fillRect(0,GAME_TOP,SCR_W,SCR_H-GAME_TOP,C_BG);
+  char buf[24]; snprintf(buf,24,"MEMORY  Pairs:%d/8",MEM.pairs);
+  centreText(SCR_W/2,GAME_TOP+4,buf,C_PURPLE,2,C_BG);
+  hRule(GAME_TOP+30,C_PURPLE);
+  for(int r=0;r<MEM_ROWS;r++) for(int c=0;c<MEM_COLS;c++) drawMemCard(r,c);
+  snprintf(buf,24,"Score: %d",MEM.score);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(8,460); tft.print(buf);
+  tft.setTextColor(C_DGRAY,C_BG); tft.setCursor(SCR_W-88,460); tft.print("[top-left=back]");
+  if(MEM.win){glowText(SCR_W/2-48,420,"YOU WIN!",C_GREEN,3);}
+  paintGameChromeOnce(GAME_MEMORY, C_PURPLE);
+  paintGameHudLine(90,12,"MEMORY",C_PURPLE);
+  tft.endWrite();
+}
+
+void updateMemory(){
+  if(MEM.win){if(touchReady()){readTouch();lastTouchMs=millis();memShuffle();drawMemGame();}return;}
+  if(MEM.state==2){
+    if(millis()-MEM.checkStart>900){
+      bool ok=(MEM.cards[MEM.firstR][MEM.firstC]==MEM.cards[MEM.secondR][MEM.secondC]);
+      if(ok){MEM.matched[MEM.firstR][MEM.firstC]=MEM.matched[MEM.secondR][MEM.secondC]=true;MEM.score+=100;MEM.pairs++;sndMatch();if(MEM.pairs==8){MEM.win=true;sndWin();}}
+      else  {MEM.flipped[MEM.firstR][MEM.firstC]=MEM.flipped[MEM.secondR][MEM.secondC]=false;sndBuzz();}
+      MEM.state=0; drawMemGame();
+    }
+    return;
+  }
+  if(!touchReady())return;
+  TouchPt t=readTouch(); lastTouchMs=millis();
+  if (handleGameBack(t)) return;
+  int c=(t.x-MEM_OX)/(MEM_CW+MEM_PAD), r=(t.y-MEM_OY)/(MEM_CH+MEM_PAD);
+  if(r<0||r>=MEM_ROWS||c<0||c>=MEM_COLS)return;
+  if(MEM.flipped[r][c]||MEM.matched[r][c])return;
+  MEM.flipped[r][c]=true; sndClick();
+  if(MEM.state==0){MEM.firstR=r;MEM.firstC=c;MEM.state=1;}
+  else{MEM.secondR=r;MEM.secondC=c;MEM.state=2;MEM.checkStart=millis();}
+  drawMemCard(r,c);
+}
+
+// GAME: COLOR MATCH
+uint16_t cmPalette[]={C_RED,C_GREEN,C_BLUE,C_YELLOW,C_PURPLE,C_ORANGE,C_PINK,C_CYAN};
+const char* cmNames[]={"RED","GREEN","BLUE","YELLOW","PURPLE","ORANGE","PINK","CYAN"};
+
+struct ColMatch {
+  uint16_t targetCol; const char* targetName;
+  uint16_t options[4]; const char* names[4];
+  int correct, score, streak;
+  unsigned long roundStart;
+} CM;
+
+void cmNewRound(){
+  int ti=random(8); CM.targetCol=cmPalette[ti]; CM.targetName=cmNames[ti];
+  CM.correct=random(4);
+  bool used[8]={0}; used[ti]=true;
+  CM.options[CM.correct]=CM.targetCol; CM.names[CM.correct]=CM.targetName;
+  for(int i=0;i<4;i++){
+    if(i==CM.correct)continue;
+    int ci; do{ci=random(8);}while(used[ci]);
+    used[ci]=true; CM.options[i]=cmPalette[ci]; CM.names[i]=cmNames[ci];
+  }
+  CM.roundStart=millis();
+}
+
+void drawColMatch(){
+  tft.startWrite();
+  tft.fillRect(0,GAME_TOP,SCR_W,SCR_H-GAME_TOP,C_BG);
+  unsigned long el=millis()-CM.roundStart;
+  float pct=1.0f-(float)el/5000.0f; if(pct<0)pct=0;
+  int bw=(int)(pct*(SCR_W-24));
+  uint16_t tc=pct>0.5f?C_GREEN:pct>0.2f?C_ORANGE:C_RED;
+  tft.fillRoundRect(10,GAME_TOP+38,SCR_W-20,10,4,C_SURF);
+  tft.drawRoundRect(10,GAME_TOP+38,SCR_W-20,10,4,dimCol(tc,2));
+  if(bw>4) tft.fillRoundRect(12,GAME_TOP+40,bw,6,3,tc);
+  tft.fillRoundRect(50,GAME_TOP+52,SCR_W-100,108,10,CM.targetCol);
+  tft.setTextSize(3); tft.setTextColor(C_WHITE,CM.targetCol);
+  int16_t tw=strlen(CM.targetName)*18;
+  tft.setCursor(50+(SCR_W-100-tw)/2,GAME_TOP+88); tft.print(CM.targetName);
+  tft.setTextSize(1); centreText(SCR_W/2,GAME_TOP+170,"TAP THE MATCHING COLOR",C_LGRAY,1,C_BG);
+  const int BW=(SCR_W-28)/2,BH=96;
+  for(int i=0;i<4;i++){
+    int bx=8+(i%2)*(BW+12),by=GAME_TOP+180+(i/2)*(BH+10);
+    tft.fillRoundRect(bx,by,BW,BH,8,CM.options[i]);
+    tft.drawRoundRect(bx,by,BW,BH,8,C_WHITE);
+    tft.setTextSize(2); tft.setTextColor(C_WHITE,CM.options[i]);
+    tw=strlen(CM.names[i])*12; tft.setCursor(bx+(BW-tw)/2,by+BH/2-8); tft.print(CM.names[i]);
+  }
+  char buf[32]; snprintf(buf,32,"Score:%d  Streak:%d",CM.score,CM.streak);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(8,392); tft.print(buf);
+  paintGameChromeOnce(GAME_COLORMATCH, C_ORANGE);
+  paintGameHudLine(90,12,"COLOR MATCH",C_ORANGE);
+  tft.endWrite();
+}
+
+void drawColMatchTimer(){
+  unsigned long el=millis()-CM.roundStart;
+  int bw=(int)((max(0UL,5000-el)*(SCR_W-20))/5000);
+  tft.fillRect(10,GAME_TOP+38,SCR_W-20,8,C_SURF);
+  tft.fillRect(10,GAME_TOP+38,bw,8,el<3500?C_GREEN:C_RED);
+}
+
+void updateColMatch(){
+  if(millis()-CM.roundStart>5000){CM.streak=0;cmNewRound();drawColMatch();return;}
+  static unsigned long lastTimer=0;
+  if(millis()-lastTimer>120){lastTimer=millis();drawColMatchTimer();}
+  if(!touchReady())return;
+  TouchPt t=readTouch(); lastTouchMs=millis();
+  if (handleGameBack(t)) return;
+  const int BW=(SCR_W-28)/2,BH=96;
+  for(int i=0;i<4;i++){
+    int bx=8+(i%2)*(BW+12),by=GAME_TOP+180+(i/2)*(BH+10);
+    if(t.x>=bx&&t.x<bx+BW&&t.y>=by&&t.y<by+BH){
+      if(i==CM.correct){CM.score+=10+CM.streak*5;CM.streak++;sndCorrect();}else{CM.streak=0;sndBuzz();}
+      cmNewRound(); drawColMatch(); return;
+    }
+  }
+}
+
+// GAME: MATH QUIZ
+struct MathGame {
+  int a,b,op,answer,choices[4],correct,score,streak,lives;
+  bool gameOver;
+  unsigned long roundStart;
+} MQ;
+
+void mqNewRound(){
+  MQ.op=random(3);
+  if(MQ.op==0){MQ.a=random(1,21);MQ.b=random(1,21);MQ.answer=MQ.a+MQ.b;}
+  else if(MQ.op==1){MQ.a=random(2,21);MQ.b=random(1,MQ.a);MQ.answer=MQ.a-MQ.b;}
+  else{MQ.a=random(2,13);MQ.b=random(2,11);MQ.answer=MQ.a*MQ.b;}
+  MQ.correct=random(4); MQ.choices[MQ.correct]=MQ.answer;
+  bool used[4]={0}; used[MQ.correct]=true;
+  for(int i=0;i<4;i++){
+    if(i==MQ.correct)continue;
+    int v; int tries=0;
+    do{v=MQ.answer+(random(11)-5);tries++;} while((v==MQ.answer||v<0)&&tries<30);
+    MQ.choices[i]=v;
+  }
+  MQ.roundStart=millis();
+}
+
+void drawMathGame(){
+  tft.startWrite();
+  tft.fillRect(0,GAME_TOP,SCR_W,SCR_H-GAME_TOP,C_BG);
+  if(MQ.gameOver){
+    glowText(SCR_W/2-48,180,"GAME OVER!",C_RED,3);
+    char b[24]; snprintf(b,24,"Score: %d",MQ.score);
+    centreText(SCR_W/2,240,b,C_WHITE,2,C_BG);
+    centreText(SCR_W/2,280,"Tap to play again",C_CYAN,1,C_BG);
+    paintGameChromeOnce(GAME_MATH, C_GREEN);
+    tft.endWrite();
+    return;
+  }
+  char buf[32]; const char* ops[]={"+","-","x"};
+  snprintf(buf,32,"%d %s %d = ?",MQ.a,ops[MQ.op],MQ.b);
+  tft.setTextSize(4); tft.setTextColor(C_YELLOW,C_BG);
+  int16_t tw=strlen(buf)*24; tft.setCursor(SCR_W/2-tw/2,GAME_TOP+48); tft.print(buf);
+  unsigned long el=millis()-MQ.roundStart;
+  int bw2=(int)((max(0UL,8000-el)*(SCR_W-20))/8000);
+  tft.fillRect(10,GAME_TOP+112,SCR_W-20,8,C_SURF); tft.fillRect(10,GAME_TOP+112,bw2,8,el<5000?C_GREEN:C_RED);
+  const int BW=(SCR_W-28)/2,BH=92;
+  uint16_t cc[]={C_CYAN,C_PURPLE,C_ORANGE,C_GREEN};
+  for(int i=0;i<4;i++){
+    int bx=8+(i%2)*(BW+12),by=GAME_TOP+128+(i/2)*(BH+10);
+    neonBox(bx,by,BW,BH,cc[i],C_SURF);
+    snprintf(buf,8,"%d",MQ.choices[i]);
+    tft.setTextSize(4); tft.setTextColor(cc[i],C_SURF);
+    tw=strlen(buf)*24; tft.setCursor(bx+(BW-tw)/2,by+BH/2-16); tft.print(buf);
+  }
+  snprintf(buf,32,"Sc:%d Str:%d Lv:%d",MQ.score,MQ.streak,MQ.lives);
+  tft.setTextSize(1); tft.setTextColor(C_LGRAY,C_BG); tft.setCursor(8,390); tft.print(buf);
+  paintGameChromeOnce(GAME_MATH, C_GREEN);
+  paintGameHudLine(90,12,"MATH QUIZ",C_GREEN);
+  tft.endWrite();
+}
+
+void drawMathTimer(){
+  unsigned long el=millis()-MQ.roundStart;
+  float pct=1.0f-(float)el/8000.0f; if(pct<0)pct=0;
+  int bw2=(int)(pct*(SCR_W-24));
+  uint16_t tc=pct>0.6f?C_GREEN:pct>0.25f?C_YELLOW:C_RED;
+  tft.fillRoundRect(10,GAME_TOP+112,SCR_W-20,10,4,C_SURF);
+  tft.drawRoundRect(10,GAME_TOP+112,SCR_W-20,10,4,dimCol(tc,2));
+  if(bw2>4) tft.fillRoundRect(12,GAME_TOP+114,bw2,6,3,tc);
+}
+
+void updateMath(){
+  if(!MQ.gameOver && millis()-MQ.roundStart>8000){
+    MQ.lives--;MQ.streak=0;
+    if(MQ.lives<=0){MQ.gameOver=true;sndGameOver();drawMathGame();}
+    else{mqNewRound();drawMathGame();}
+    return;
+  }
+  static unsigned long lastTimer=0;
+  if(!MQ.gameOver && millis()-lastTimer>120){lastTimer=millis();drawMathTimer();}
+  if(MQ.gameOver){if(touchReady()){readTouch();lastTouchMs=millis();MQ.score=0;MQ.streak=0;MQ.lives=3;MQ.gameOver=false;mqNewRound();drawMathGame();}return;}
+  if(!touchReady())return;
+  TouchPt t=readTouch(); lastTouchMs=millis();
+  if (handleGameBack(t)) return;
+  const int BW=(SCR_W-28)/2,BH=92;
+  for(int i=0;i<4;i++){
+    int bx=8+(i%2)*(BW+12),by=GAME_TOP+128+(i/2)*(BH+10);
+    if(t.x>=bx&&t.x<bx+BW&&t.y>=by&&t.y<by+BH){
+      if(i==MQ.correct){MQ.score+=10+MQ.streak*5;MQ.streak++;sndCorrect();}
+      else{MQ.lives--;MQ.streak=0;sndWrong();if(MQ.lives<=0){MQ.gameOver=true;sndGameOver();drawMathGame();return;}}
+      mqNewRound(); drawMathGame(); return;
+    }
+  }
+}
+
+// SCREEN ROUTER
+void initScreen(Screen s) {
+  handleMegaSerial();
+  if (s >= GAME_MARIO) resetGameChrome();
+  switch(s) {
+    case SCR_MAIN:        drawMain();         break;
+    case SCR_GAMES:       drawGames();        break;
+    case SCR_SENSORS:     drawSensors();      break;
+    case SCR_SENS_EYES:   drawSensEyes();     break;
+    case SCR_SENS_NOSE:   drawSensNose();     break;
+    case SCR_SENS_BRAIN:  if(showBrainLog) drawBrainLog(); else drawSensBrain(); break;
+    case SCR_SENS_TUMMY:  drawSensTummy();    break;
+    case SCR_COMMS:       drawComms();        break;
+    case SCR_SETTINGS:    drawSettings();     break;
+    case SCR_LIGHTS:      drawLights();       break;
+    case GAME_MARIO:      marioReset();       drawMarioGame();  break;
+    case GAME_PACMAN:     pacReset();         drawPacGame();    break;
+    case GAME_STARSHIP:   ssReset();          drawStarship();   break;
+    case GAME_MEMORY:     memShuffle();       drawMemGame();    break;
+    case GAME_COLORMATCH: cmNewRound();       drawColMatch();   break;
+    case GAME_MATH:       MQ.score=0;MQ.streak=0;MQ.lives=3;MQ.gameOver=false;mqNewRound(); drawMathGame(); break;
+    default: break;
+  }
+  paintedScreen = s;
+  handleMegaSerial();
+}
+
+void handleTouch(TouchPt& t) {
+  switch(curScreen) {
+    case SCR_MAIN:       handleMainTouch(t);     break;
+    case SCR_GAMES:      handleGamesTouch(t);    break;
+    case SCR_SENSORS:    handleSensorsTouch(t);  break;
+    case SCR_SENS_BRAIN: handleBrainTouch(t);    break;
+    case SCR_SETTINGS:   handleSettingsTouch(t); break;
+    case SCR_LIGHTS:     handleLightsTouch(t);   break;
+    case SCR_SENS_EYES:
+    case SCR_SENS_NOSE:
+    case SCR_SENS_TUMMY:
+      if(t.y<72){curScreen=SCR_SENSORS;screenDirty=true;}
+      break;
+    case SCR_COMMS:
+      if(t.y<72){curScreen=SCR_MAIN;screenDirty=true;}
+      break;
+    default: break;
+  }
+}
+
+void setup() {
+  delay(200);
+  // bridgeSetup() initialises USB CDC (S9) + Serial2 UART1 (Mega GP4/GP5).
+  bridgeSetup();
+  Serial.println(F("[PICO] BuddyBot Dash booting..."));
+  Serial.println(F("PICO_FW:WIFI_V4"));
+  tft.init();
+  tft.setRotation(ROTATION);
+  tft.invertDisplay(false);
+  tft.fillScreen(C_BG);
+  pinMode(22, OUTPUT); digitalWrite(22, HIGH);
+  centreText(SCR_W/2, SCR_H/2-24, "AJ2BUDDYCOMMS", C_CYAN, 2, C_BG);
+  centreText(SCR_W/2, SCR_H/2+8,  "PicoW Dash v1.2",  C_LGRAY,1, C_BG);
+  waitMs(1200);
+  sndBoot();
+  pinMode(AUDIO_PIN, OUTPUT);
+  digitalWrite(AUDIO_PIN, LOW);
+  pinMode(PIN_CTP_RST, OUTPUT);
+  digitalWrite(PIN_CTP_RST, LOW);  waitMs(50);
+  digitalWrite(PIN_CTP_RST, HIGH); waitMs(300);
+  Wire1.setSDA(PIN_CTP_SDA);
+  Wire1.setSCL(PIN_CTP_SCL);
+  Wire1.begin();
+  Wire1.setClock(400000);
+  waitMs(50);
+  pinMode(PIN_CTP_INT, INPUT_PULLUP);
+
+  Wire1.beginTransmission(CTP_ADDR);
+  int err = Wire1.endTransmission();
+  touchI2cOk = (err == 0);
+  if (touchI2cOk) {
+    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0x00); Wire1.write(0x00); Wire1.endTransmission(); delay(5);
+    Wire1.beginTransmission(CTP_ADDR); Wire1.write(0xA4); Wire1.write(0x00); Wire1.endTransmission(); delay(5);
+    Serial.println(F("[PICO] Touch OK — FT6336U polling mode"));
+  } else {
+    Serial.print(F("[PICO] Touch init FAIL — I2C err=")); Serial.println(err);
+    Serial.println(F("[PICO] Check: SDA on GP26, SCL on GP27, RST on GP15, INT on GP28, VCC 3.3V"));
+  }
+  // Do NOT init WiFi radio at boot — CYW43 init breaks FT6336U Wire1 I2C on Pico W.
+  // WiFi radio starts only when the app sends WIFI|ssid|pass.
+  MEGA_SERIAL.println("PING");
+  waitMs(400);
+  MEGA_SERIAL.println("STATUS");
+  waitMs(1200);
+  initScreen(SCR_MAIN);
+  screenDirty = false;
+  headerDirty = true;
+  bodyDirty = true;
+  Serial.println("[PICO] Ready.");
+}
+
+bool isGameScreen() {
+  return (curScreen==GAME_MARIO || curScreen==GAME_PACMAN ||
+          curScreen==GAME_STARSHIP || curScreen==GAME_MEMORY ||
+          curScreen==GAME_COLORMATCH || curScreen==GAME_MATH);
+}
+
+bool gameDirty = true;
+
+bool handleGameBack(const TouchPt& t) {
+  if (t.pressed && t.y <= GAME_TOP && t.x <= 96) {
+    sndClick();
+    curScreen = SCR_GAMES;
+    requestFullRefresh();
+    return true;
+  }
+  return false;
+}
+
+void loop() {
+  sndUpdate();
+  bridgeLoop();               // V1.1: S9↔Mega bidirectional line forwarding
+  handleWifiCore0();          // WiFi/LWIP on core 0 (non-blocking — touch keeps running)
+  // USB heartbeat — visible on PC serial monitor to confirm Pico firmware is alive
+  static unsigned long lastUsbHb = 0;
+  if (millis() - lastUsbHb > 5000) {
+    lastUsbHb = millis();
+    Serial.print(F("PICO_ALIVE|Mega="));
+    Serial.print(megaLinked ? 'Y' : 'N');
+    Serial.print(F("|LastRx="));
+    Serial.print((millis() - lastMegaRx) / 1000);
+    Serial.println('s');
+  }
+  sendMegaHeartbeat();
+  if (wifiIpReady) {
+    wifiIpReady = false;
+    picoToMega(String(F("WIFI_IP:")) + pendingWifiIp);
+    dbgPush("[PICO] Sent WiFi IP to Mega");
+  }
+  if (webCmdReady) {
+    char wc[64]; strncpy(wc,(char*)webCmd,63); wc[63]=0; webCmdReady=false;
+    if (strncmp(wc,"GAME:",5)==0) {
+      // Game commands from ESP32 remote — handled by Pico locally, not sent to Mega
+      const char* g=wc+5;
+      if      (!strcmp(g,"UP"))    { /* inject up/fwd into active game */ }
+      else if (!strcmp(g,"DOWN"))  { /* inject down */ }
+      else if (!strcmp(g,"LEFT"))  { /* inject left */ }
+      else if (!strcmp(g,"RIGHT")) { /* inject right */ }
+      else if (!strcmp(g,"FIRE") || !strcmp(g,"SELECT")) { /* inject action */ }
+      else if (!strcmp(g,"START")) { /* navigate to games menu */ curScreen=SCR_GAMES; screenDirty=true; }
+      else if (!strcmp(g,"EXIT"))  { /* navigate back to main */ curScreen=SCR_MAIN;  screenDirty=true; }
+    } else {
+      // All other commands (MOTOR:, SPEED:, UV:, AUTO:, etc.) forwarded to Mega
+      picoToMega(String(wc));
+    }
+  }
+  bridgeLoop();
+  if (megaLinked && millis()-lastMegaRx > 12000) {
+    megaLinked = false;
+    T.megaUartOk = false;
+    if (!isGameScreen()) markDirty();
+  }
+  if (millis() - lastS9Rx > 30000) {
+    T.s9ok = false;
+  }
+  if (isGameScreen()) {
+    if      (curScreen==GAME_MARIO)      updateMario();
+    else if (curScreen==GAME_PACMAN)     updatePacman();
+    else if (curScreen==GAME_STARSHIP)   updateStarship();
+    else if (curScreen==GAME_MEMORY)     updateMemory();
+    else if (curScreen==GAME_COLORMATCH) updateColMatch();
+    else if (curScreen==GAME_MATH)       updateMath();
+    if (!isGameScreen()) {
+      screenDirty = false;
+      headerDirty = false;
+      bodyDirty = false;
+      initScreen(curScreen);
+    }
+  } else {
+    bool _ch=telemChanged();
+    if(_ch) requestBodyRefresh();
+    static unsigned long lastHdrAnim=0;
+    if(_ch||(spritesReady&&millis()-lastHdrAnim>200)){
+      lastHdrAnim=millis(); requestHeaderRefresh();
+    }
+    if (screenDirty || curScreen != paintedScreen) {
+      screenDirty = false;
+      headerDirty = false;
+      bodyDirty = false;
+      initScreen(curScreen);
+    } else {
+      if (headerDirty) {
+        headerDirty = false;
+        drawHeader();
+      }
+      if (bodyDirty) {
+        bodyDirty = false;
+        refreshScreenBody();
+      }
+    }
+    if (millis()-lastTouchMs > 100) {
+      TouchPt t=readTouch();
+      if (t.pressed) {
+        lastTouchMs=millis();
+        Screen prev=curScreen;
+        handleTouch(t);
+        if (curScreen != prev) {
+          screenDirty = false;
+          headerDirty = false;
+          bodyDirty = false;
+          initScreen(curScreen);
+        }
+      }
+    }
+  }
+}
+
+// WIFI shared state (serviced on core 0 via handleWifiCore0)
+volatile uint32_t sharedSeq = 0;
+volatile int   sh_gas=0,  sh_pct=0;
+volatile float sh_temp=0,sh_hum=0,sh_volt=0,sh_amps=0;
+volatile long  sh_dFront=-1,sh_dRear=-1,sh_dLeft=-1,sh_dRight=-1;
+volatile bool  sh_estop=false,sh_autoM=false,sh_megaOk=false,sh_s9ok=false;
+volatile bool  sh_pir=false,sh_irFront=false,sh_irRear=false,sh_tilt=false;
+volatile char  sh_mode[16]="NORMAL";
+volatile char  sh_fw[16]="";
+volatile char  sh_ledMode[10]="OFF";
+volatile char  sh_ledWhite[6]="OFF";
+volatile int   sh_ledBright=255;
+volatile bool  wifiOK=false;
+volatile char webCmd[64]={0};
+volatile bool webCmdReady=false;
+
+void updateShared(){
+  sharedSeq++;
+  sh_gas=T.gas; sh_pct=T.pct; sh_temp=T.temp; sh_hum=T.hum;
+  sh_volt=T.volt; sh_amps=T.amps;
+  sh_dFront=T.dFront; sh_dRear=T.dRear; sh_dLeft=T.dLeft; sh_dRight=T.dRight;
+  sh_estop=T.estop; sh_autoM=T.autoM; sh_megaOk=T.megaUartOk; sh_s9ok=T.s9ok;
+  sh_pir=T.pir; sh_irFront=T.irFront; sh_irRear=T.irRear; sh_tilt=T.tilt;
+  strncpy((char*)sh_mode,T.mode,15); ((char*)sh_mode)[15]=0;
+  strncpy((char*)sh_fw,  T.fw,  15); ((char*)sh_fw  )[15]=0;
+  strncpy((char*)sh_ledMode, T.ledMode, 9); ((char*)sh_ledMode)[9]=0;
+  strncpy((char*)sh_ledWhite,T.ledWhite,5); ((char*)sh_ledWhite)[5]=0;
+  sh_ledBright=T.ledBright;
+  sharedSeq++;
+}
+
+const char* batTierStr(){
+  if(sh_volt<6.8f)return"CRIT";
+  if(sh_volt<7.0f)return"LOW";
+  if(sh_volt<7.4f)return"WARN";
+  return"OK";
+}
+
+static const char HTML_A[] =
+"<!DOCTYPE html><html>"
+"<head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+"<title>BuddyBot</title><style>"
+"*{box-sizing:border-box;margin:0;padding:0}"
+"body{font-family:Arial,sans-serif;background:#1a1a2e;color:#fff;text-align:center;padding:12px}"
+"h1{color:#00d4ff;font-size:22px;margin-bottom:10px}"
+".card{background:#16213e;border-radius:12px;padding:12px;margin:8px 0}"
+".status-row{display:flex;justify-content:space-around;font-size:13px}"
+".status-row span{color:#00d4ff;font-weight:bold}"
+".grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:280px;margin:12px auto}"
+"button{padding:22px 0;width:100%;font-size:20px;font-weight:bold;border:none;border-radius:12px;cursor:pointer}"
+"button:active{opacity:.7}"
+".fwd{background:#00d4ff;color:#000;grid-column:2;grid-row:1}"
+".left{background:#ff9500;color:#000;grid-column:1;grid-row:2}"
+".stp{background:#ff3333;color:#fff;grid-column:2;grid-row:2;font-size:13px}"
+".right{background:#ff9500;color:#000;grid-column:3;grid-row:2}"
+".bwd{background:#00d4ff;color:#000;grid-column:2;grid-row:3}"
+".auto{background:#33ff33;color:#000;grid-column:1;grid-row:3;font-size:13px}"
+".dance{background:#ff00ff;color:#fff;grid-column:3;grid-row:3;font-size:13px}"
+".spd{background:#16213e;color:#00d4ff;border:2px solid #00d4ff;padding:10px;margin:4px;font-size:13px;border-radius:8px}"
+".spd.active{background:#00d4ff;color:#000}"
+".sensors{text-align:left;font-size:12px}"
+".row{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #0d1b2a}"
+".row span:last-child{color:#00d4ff}"
+"#wifiip{font-size:11px;color:#888;margin-top:4px}"
+".st{display:inline-block;padding:3px 8px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;margin:1px}"
+".on{background:#004400;color:#33ff33;border:1px solid #33ff33}"
+".off{background:#440000;color:#ff4444;border:1px solid #ff4444}"
+"details summary{cursor:pointer;color:#00d4ff;font-size:12px;margin-top:8px}"
+".lgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-width:300px;margin:8px auto}"
+".lbtn{padding:14px 0;font-size:13px;background:#16213e;color:#fff;border:2px solid #445;border-radius:10px}"
+".lbtn.active{box-shadow:inset 0 0 0 3px #fff}"
+".lpolice{border-color:#ff3b3b;color:#ff7a7a}"
+".lalert{border-color:#ff7a00;color:#ffae5a}"
+".cgrid{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:8px auto}"
+".sw{width:34px;height:34px;border-radius:8px;border:2px solid #000;cursor:pointer}"
+".wbtn{padding:11px 14px;font-size:13px;background:#16213e;color:#00d4ff;border:2px solid #00d4ff;border-radius:10px;margin:3px}"
+".lstat{font-size:12px;color:#9aa;margin-top:6px}"
+".lrng{width:82%}"
+"</style></head><body>";
+
+static const char HTML_B[] =
+"<h1>&#129302; BuddyBot</h1>"
+"<div class=\"card\"><div class=\"status-row\">"
+"<div>Status<br><span id=\"sts\">--</span></div>"
+"<div>Battery<br><span id=\"bat\">--</span></div>"
+"<div>Mode<br><span id=\"mod\">--</span></div>"
+"</div><div id=\"wifiip\"></div></div>"
+"<div class=\"grid\">"
+"<button class=\"fwd\" ontouchstart=\"c('F')\" onmousedown=\"c('F')\">&#9650;</button>"
+"<button class=\"left\" ontouchstart=\"c('L')\" onmousedown=\"c('L')\">&#9664;</button>"
+"<button class=\"stp\" ontouchstart=\"c('S')\" onmousedown=\"c('S')\">STOP</button>"
+"<button class=\"right\" ontouchstart=\"c('R')\" onmousedown=\"c('R')\">&#9654;</button>"
+"<button class=\"bwd\" ontouchstart=\"c('B')\" onmousedown=\"c('B')\">&#9660;</button>"
+"<button class=\"auto\" ontouchstart=\"c('AUTO')\" onmousedown=\"c('AUTO')\">AUTO</button>"
+"<button class=\"dance\" ontouchstart=\"c('DANCE')\" onmousedown=\"c('DANCE')\">DANCE</button>"
+"</div>"
+"<div>"
+"<button class=\"spd\" id=\"ss\" onclick=\"c('SLOW')\">SLOW</button>"
+"<button class=\"spd active\" id=\"sn\" onclick=\"c('NORMAL')\">NORMAL</button>"
+"<button class=\"spd\" id=\"sf\" onclick=\"c('FAST')\">FAST</button>"
+"</div>"
+"<div class=\"card\">"
+"<div style=\"color:#ff7af0;font-size:15px;font-weight:bold;margin-bottom:6px\">&#128161; LIGHTS</div>"
+"<div class=\"lgrid\">"
+"<button class=\"lbtn\" id=\"le_OFF\" onclick=\"c('LED:OFF')\">OFF</button>"
+"<button class=\"lbtn lpolice\" id=\"le_POLICE\" onclick=\"c('LED:POLICE')\">POLICE</button>"
+"<button class=\"lbtn lalert\" id=\"le_ALERT\" onclick=\"c('LED:ALERT')\">ALERT</button>"
+"<button class=\"lbtn\" id=\"le_RAINBOW\" onclick=\"c('LED:RAINBOW')\">RAINBOW</button>"
+"<button class=\"lbtn\" id=\"le_BREATHE\" onclick=\"c('LED:BREATHE')\">BREATHE</button>"
+"<button class=\"lbtn\" id=\"le_PARTY\" onclick=\"c('LED:PARTY')\">PARTY</button>"
+"</div>"
+"<div class=\"cgrid\">"
+"<div class=\"sw\" style=\"background:#f00\" onclick=\"c('LED:RED')\"></div>"
+"<div class=\"sw\" style=\"background:#0f0\" onclick=\"c('LED:GREEN')\"></div>"
+"<div class=\"sw\" style=\"background:#00f\" onclick=\"c('LED:BLUE')\"></div>"
+"<div class=\"sw\" style=\"background:#0ff\" onclick=\"c('LED:CYAN')\"></div>"
+"<div class=\"sw\" style=\"background:#a0f\" onclick=\"c('LED:PURPLE')\"></div>"
+"<div class=\"sw\" style=\"background:#f50\" onclick=\"c('LED:ORANGE')\"></div>"
+"<div class=\"sw\" style=\"background:#fc0\" onclick=\"c('LED:YELLOW')\"></div>"
+"</div>"
+"<div><button class=\"wbtn\" id=\"wbtn\" onclick=\"wcyc()\">WHITE: --</button>"
+"<button class=\"wbtn\" onclick=\"c('LED:WHITE:SOLO')\">W-SOLO</button></div>"
+"<div style=\"margin-top:6px;font-size:12px\">Brightness "
+"<input type=\"range\" min=\"16\" max=\"255\" value=\"255\" id=\"lbr\" class=\"lrng\" oninput=\"c('LED:BRIGHT:'+this.value)\"></div>"
+"<div class=\"lstat\" id=\"lstat\">Mode: -- | White: -- | Bright: --</div>"
+"</div>"
+"<div class=\"card sensors\" style=\"margin-top:10px\">"
+"<div class=\"row\"><span>Front</span><span id=\"fr\">--</span></div>"
+"<div class=\"row\"><span>Rear</span><span id=\"re\">--</span></div>"
+"<div class=\"row\"><span>Temp</span><span id=\"tp\">--</span></div>"
+"<div class=\"row\"><span>Gas</span><span id=\"ga\">--</span></div>"
+"<details><summary>Sensor toggles</summary><div id=\"sc\">"
+"<span class=\"st\" id=\"d0\" onclick=\"ts('DHT')\">DHT</span>"
+"<span class=\"st\" id=\"d1\" onclick=\"ts('LIGHT')\">Light</span>"
+"<span class=\"st\" id=\"d2\" onclick=\"ts('SOUND')\">Sound</span>"
+"<span class=\"st\" id=\"d3\" onclick=\"ts('GAS')\">Gas</span>"
+"<span class=\"st\" id=\"d4\" onclick=\"ts('PIR')\">PIR</span>"
+"<span class=\"st\" id=\"d5\" onclick=\"ts('TILT')\">Tilt</span>"
+"<span class=\"st\" id=\"d6\" onclick=\"ts('IR')\">IR</span>"
+"<span class=\"st\" id=\"d7\" onclick=\"ts('US')\">US</span>"
+"<span class=\"st\" id=\"d8\" onclick=\"ts('CURRENT')\">Current</span>"
+"<span class=\"st\" id=\"d9\" onclick=\"ts('GPS')\">GPS</span>"
+"</div></details></div>";
+
+static const char HTML_C[] =
+"<script>"
+"const sn={'DHT':'d0','LIGHT':'d1','SOUND':'d2','GAS':'d3','PIR':'d4','TILT':'d5','IR':'d6','US':'d7','CURRENT':'d8','GPS':'d9'};"
+"const ss={DHT:1,LIGHT:1,SOUND:1,GAS:1,PIR:1,TILT:1,IR:1,US:1,CURRENT:1,GPS:1};"
+"function ui(id,on){const e=document.getElementById(sn[id]);if(e)e.className='st '+(on?'on':'off');}"
+"function ts(id){ss[id]=!ss[id];ui(id,ss[id]);fetch('/cmd?c=TOGGLE_SENSOR:'+id+':'+(ss[id]?'ON':'OFF')).catch(()=>{});}"
+"function c(v){fetch('/cmd?c='+v).catch(()=>{});}"
+"let LWS=['OFF','ON','AUTO'];let LWI=0;"
+"function wcyc(){LWI=(LWI+1)%3;c('LED:WHITE:'+LWS[LWI]);}"
+"function poll(){fetch('/status').then(r=>r.json()).then(d=>{"
+"document.getElementById('sts').textContent=d.status;"
+"document.getElementById('bat').textContent=d.battery+'V ('+d.pct+'%)';"
+"document.getElementById('mod').textContent=d.mode;"
+"document.getElementById('fr').textContent=d.front+'cm';"
+"document.getElementById('re').textContent=d.rear+'cm';"
+"document.getElementById('tp').textContent=d.temp+'C';"
+"document.getElementById('ga').textContent=d.gas;"
+"const wi=document.getElementById('wifiip');if(wi&&d.wip)wi.textContent='PicoW: '+d.wip;"
+"if(d.led){document.querySelectorAll('.lbtn').forEach(b=>b.classList.remove('active'));var ae=document.getElementById('le_'+d.led);if(ae)ae.classList.add('active');}"
+"var wb=document.getElementById('wbtn');if(wb&&d.white){wb.textContent='WHITE: '+d.white;var k=LWS.indexOf(d.white);if(k>=0)LWI=k;}"
+"var lb=document.getElementById('lbr');if(lb&&document.activeElement!==lb)lb.value=d.lbr;"
+"var ls=document.getElementById('lstat');if(ls)ls.textContent='Mode: '+d.led+' | White: '+d.white+' | Bright: '+d.lbr;"
+"}).catch(()=>{})}"
+"setInterval(poll,1500);poll();"
+"Object.keys(ss).forEach(id=>ui(id,ss[id]));"
+"</script></body></html>";
+
+void sendHTTPHeaders(WiFiClient& cl, const char* st, const char* ct) {
+  cl.print("HTTP/1.1 "); cl.print(st);
+  cl.print("\r\nContent-Type: "); cl.print(ct);
+  cl.print("\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n");
+}
+
+void serveStatus(WiFiClient& cl) {
+  char json[512], ipBuf[20]="0.0.0.0";
+  if (wifiOK) {
+    IPAddress ip=WiFi.localIP();
+    snprintf(ipBuf,sizeof(ipBuf),"%d.%d.%d.%d",ip[0],ip[1],ip[2],ip[3]);
+  }
+  snprintf(json,sizeof(json),
+    "{\"status\":\"%s\",\"battery\":\"%.1f\",\"pct\":%d,\"bat_tier\":\"%s\","
+    "\"mode\":\"%s\",\"front\":%ld,\"rear\":%ld,"
+    "\"temp\":\"%.1f\",\"gas\":\"%d\","
+    "\"wip\":\"%s\",\"fw\":\"%s\","
+    "\"led\":\"%s\",\"white\":\"%s\",\"lbr\":%d}",
+    sh_estop?"ESTOP":sh_autoM?"AUTO":sh_megaOk?"IDLE":"WAIT",
+    sh_volt,sh_pct,batTierStr(),(char*)sh_mode,
+    sh_dFront<0?0L:sh_dFront, sh_dRear<0?0L:sh_dRear,
+    sh_temp,sh_gas,ipBuf,(char*)sh_fw,
+    (char*)sh_ledMode,(char*)sh_ledWhite,sh_ledBright);
+  sendHTTPHeaders(cl,"200 OK","application/json");
+  cl.print(json);
+}
+
+void serveCmd(WiFiClient& cl, const char* req) {
+  const char* ci=strstr(req,"c=");
+  if (ci && !webCmdReady) {
+    ci+=2;
+    const char* end=strchr(ci,' ');
+    size_t len=end?(size_t)(end-ci):strlen(ci);
+    if (len>0 && len<63) {
+      memcpy((char*)webCmd,ci,len);
+      ((char*)webCmd)[len]=0;
+      webCmdReady=true;
+    }
+  }
+  sendHTTPHeaders(cl,"200 OK","text/plain");
+  cl.print("OK");
+}
+
+void handleWebClient(WiFiClient& cl) {
+  char req[256]={0}; int ri=0;
+  unsigned long t0=millis();
+  while (cl.connected() && millis()-t0<600) {
+    if (cl.available()) {
+      char ch=cl.read();
+      if (ri<255) req[ri++]=ch;
+      if (ri>=4 && req[ri-4]=='\r'&&req[ri-3]=='\n'&&req[ri-2]=='\r'&&req[ri-1]=='\n') break;
+    }
+  }
+  if      (strncmp(req,"GET / "    ,6 )==0||strncmp(req,"GET /index",10)==0) {
+    sendHTTPHeaders(cl,"200 OK","text/html");
+    cl.print(HTML_A); cl.print(HTML_B); cl.print(HTML_C);
+  }
+  else if (strncmp(req,"GET /status",11)==0) serveStatus(cl);
+  else if (strncmp(req,"GET /cmd"  , 8)==0)  serveCmd(cl,req);
+  else { sendHTTPHeaders(cl,"404 Not Found","text/plain"); cl.print("404"); }
+  delay(5);
+  cl.stop();
+}
+
+// WiFi runs on core 0 via handleWifiCore0() — arduino-pico LWIP is not safe on core 1.
