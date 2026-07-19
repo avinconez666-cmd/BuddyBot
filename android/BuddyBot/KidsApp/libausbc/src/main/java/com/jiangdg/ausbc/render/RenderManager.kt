@@ -185,9 +185,9 @@ class RenderManager(
                 } catch (e: IllegalStateException) {
                     Logger.e(TAG, "Camera SurfaceTexture lost (device disconnected): ${e.message}")
                     // Remove all pending draw messages to stop the crash loop
-                    removeMessages(MSG_GL_DRAW)
+                    mRenderHandler?.removeMessages(MSG_GL_DRAW)
                     // Signal the camera client to close so it doesn't keep trying to render
-                    EventBus.getDefault().post(BusKey.KEY_CAMERA_ERROR, "SurfaceTexture lost")
+                    EventBus.with<String>(BusKey.KEY_CAMERA_ERROR).postMessage("SurfaceTexture lost")
                 }
             }
             MSG_GL_ADD_EFFECT -> {
