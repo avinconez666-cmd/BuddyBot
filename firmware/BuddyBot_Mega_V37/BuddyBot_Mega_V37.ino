@@ -131,7 +131,7 @@ const float CURRENT_VREF        = 5.0f;
 
 // ── Analog sensors ───────────────────────────────────────────────────────────
 #define VOLTAGE_SENSOR    A9
-#define TEMP_SENSOR_1     A7
+#define TEMP_SENSOR_1     A2
 #define HEAD_TEMP_SENSOR  A8    // confirmed via HeadTempPinFinder: 41.8°C stable ±11 counts
 #define LDR_AO            A10
 #define SOUND_AO          A12
@@ -158,9 +158,9 @@ const float CURRENT_VREF        = 5.0f;
 #define PIR_PIN           6    // moved from 10
 #define DHT_PIN           -1
 #define GAS_DO            -1
-#define CURRENT_SENSOR    A3
+#define CURRENT_SENSOR    A14
 #define CHARGE_DETECT_PIN -1
-#define TSOP_LEFT         42    // moved from 34
+#define TSOP_LEFT         42    
 #define TSOP_CENTRE       43
 #define TSOP_RIGHT        47
 #define HALL_DOCK         -1
@@ -169,8 +169,8 @@ const float CURRENT_VREF        = 5.0f;
 // ── IR obstacle sensors (LOW = obstacle detected) ────────────────────────────
 #define REAR_IR   41
 #define FRONT_IR  -1
-#define LEFT_IR   A2    // moved from 30
-#define RIGHT_IR  -1    // disabled — wire being traced, re-enable when confirmed
+#define LEFT_IR   A3
+#define RIGHT_IR  A1    
 
 // ── Ultrasonic sensors ───────────────────────────────────────────────────────
 #define FRONT_TRIG  24

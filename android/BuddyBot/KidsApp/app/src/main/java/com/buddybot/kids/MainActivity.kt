@@ -124,7 +124,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
 
     // V37: telemetry is owned by MessageRouter via MainViewModel.
     // These StateFlows delegate to the ViewModel so all UI observers stay compatible.
-    private val telemetry: StateFlow<TelemetryData> get() = viewModel.telemetry
+    // FIX: Use a default MutableStateFlow so setupComposeUI() doesn't crash before
+    // viewModel is initialized in initializeApp().
+    private val _defaultTelemetry = MutableStateFlow(TelemetryData())
+    private val telemetry: StateFlow<TelemetryData> get() = if (::viewModel.isInitialized) viewModel.telemetry else _defaultTelemetry
 
     private val _commLogs = mutableStateListOf<String>()
 
@@ -500,11 +503,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
 
             // ── AIRouter — factored AI fallback chain ─────────────────────────
             try {
-                aiRouter = AIRouter { service ->
-                    runOnUiThread {
-                        _robotState.value = _robotState.value.copy(aiService = service)
+                aiRouter = AIRouter(
+                    httpClientProvider = { this.httpClient },
+                    onProviderChanged = { service ->
+                        runOnUiThread {
+                            _robotState.value = _robotState.value.copy(aiService = service)
+                        }
                     }
-                }
+                )
                 Log.d(TAG, "initializeApp: AIRouter ready (Groq→Gemini→Claude→Offline)")
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing AIRouter", e)

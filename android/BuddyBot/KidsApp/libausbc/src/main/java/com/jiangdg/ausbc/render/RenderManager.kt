@@ -156,25 +156,39 @@ class RenderManager(
                 }
             }
             MSG_GL_DRAW -> {
-                //Render camera data to SurfaceTexture
-                //Set the correction matrix of the image at the same time
-                mCameraSurfaceTexture?.updateTexImage()
-                mCameraSurfaceTexture?.getTransformMatrix(mTransformMatrix)
-                mCameraRender?.setTransformMatrix(mTransformMatrix)
-                val textureId = mEOSTextureId?.let { mCameraRender?.drawFrame(it) }
-                //Filter FBO and rendering
-                textureId?.let { fboId ->
-                    var effectId = fboId
-                    mEffectList.forEach { effectRender ->
-                        effectId = effectRender.drawFrame(effectId)
+                // FIX: Wrap in try/catch to prevent the entire GL render loop from
+                // crashing when the USB camera is disconnected (e.g. hub reset). The
+                // SurfaceTexture becomes invalid and updateTexImage() throws
+                // IllegalStateException "Unable to update texture contents", which
+                // kills the gl_render HandlerThread and leaves the camera watchdog
+                // permanently broken with no recovery.
+                try {
+                    //Render camera data to SurfaceTexture
+                    //Set the correction matrix of the image at the same time
+                    mCameraSurfaceTexture?.updateTexImage()
+                    mCameraSurfaceTexture?.getTransformMatrix(mTransformMatrix)
+                    mCameraRender?.setTransformMatrix(mTransformMatrix)
+                    val textureId = mEOSTextureId?.let { mCameraRender?.drawFrame(it) }
+                    //Filter FBO and rendering
+                    textureId?.let { fboId ->
+                        var effectId = fboId
+                        mEffectList.forEach { effectRender ->
+                            effectId = effectRender.drawFrame(effectId)
+                        }
+                        effectId
+                    }?.also { id ->
+                        mScreenRender?.drawFrame(id)
+                        drawFrame2Capture(id)
+                        drawFrame2Codec(id, mCameraSurfaceTexture?.timestamp ?: 0)
                     }
-                    effectId
-                }?.also { id ->
-                    mScreenRender?.drawFrame(id)
-                    drawFrame2Capture(id)
-                    drawFrame2Codec(id, mCameraSurfaceTexture?.timestamp ?: 0)
+                    mScreenRender?.swapBuffers(mCameraSurfaceTexture?.timestamp ?: 0)
+                } catch (e: IllegalStateException) {
+                    Logger.e(TAG, "Camera SurfaceTexture lost (device disconnected): ${e.message}")
+                    // Remove all pending draw messages to stop the crash loop
+                    removeMessages(MSG_GL_DRAW)
+                    // Signal the camera client to close so it doesn't keep trying to render
+                    EventBus.getDefault().post(BusKey.KEY_CAMERA_ERROR, "SurfaceTexture lost")
                 }
-                mScreenRender?.swapBuffers(mCameraSurfaceTexture?.timestamp ?: 0)
             }
             MSG_GL_ADD_EFFECT -> {
                 (msg.obj as? AbstractEffect)?.let { effect->

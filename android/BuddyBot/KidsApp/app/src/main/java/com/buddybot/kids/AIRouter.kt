@@ -9,7 +9,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
 /**
  * AIRouter — child-safe LLM fallback chain.
@@ -24,15 +23,10 @@ import java.util.concurrent.TimeUnit
  *  - Single shared OkHttpClient with sane timeouts
  */
 class AIRouter(
+    private val httpClientProvider: () -> OkHttpClient,
     private val onProviderChanged: (AIService) -> Unit
 ) {
     companion object { private const val TAG = "AIRouter" }
-
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .build()
 
     private val systemPrompt = """
         You are BuddyBot, a friendly robot companion for AJ, a 3-year-old child.
@@ -97,7 +91,7 @@ class AIRouter(
             .post(body)
             .build()
 
-        http.newCall(req).execute().use { resp ->
+        httpClientProvider().newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw RuntimeException("Groq HTTP ${resp.code}")
             val json = JSONObject(resp.body?.string() ?: throw RuntimeException("empty body"))
             return json.getJSONArray("choices").getJSONObject(0)
@@ -122,7 +116,7 @@ class AIRouter(
             .post(body)
             .build()
 
-        http.newCall(req).execute().use { resp ->
+        httpClientProvider().newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw RuntimeException("Gemini HTTP ${resp.code}")
             val json = JSONObject(resp.body?.string() ?: throw RuntimeException("empty body"))
             return json.getJSONArray("candidates").getJSONObject(0)
@@ -148,7 +142,7 @@ class AIRouter(
             .post(body)
             .build()
 
-        http.newCall(req).execute().use { resp ->
+        httpClientProvider().newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw RuntimeException("Claude HTTP ${resp.code}")
             val json = JSONObject(resp.body?.string() ?: throw RuntimeException("empty body"))
             return json.getJSONArray("content").getJSONObject(0).getString("text").trim()

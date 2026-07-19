@@ -76,18 +76,10 @@ static void requestFullRefresh()   { screenDirty = true; headerDirty = true; bod
 
 TouchPt readTouch() {
   TouchPt t = {0, 0, false};
-  // FIX: Add I2C timeout to prevent the touch controller from locking up the
-  // entire UI when the CYW43 WiFi radio transmits. The CYW43's radio activity
-  // on the Pico W shares internal buses with Wire1 (GP26/GP27), causing I2C
-  // transactions to hang indefinitely. A 5ms timeout ensures the display stays
-  // responsive even when WiFi is active.
-  unsigned long i2cDeadline = millis() + 5;
   Wire1.beginTransmission(CTP_ADDR);
   Wire1.write(0x02);
   if (Wire1.endTransmission(false) != 0) return t;
-  if (millis() > i2cDeadline) return t;
   if (Wire1.requestFrom(CTP_ADDR, (uint8_t)6) < 6) return t;
-  if (millis() > i2cDeadline) return t;
   uint8_t n  = Wire1.read() & 0x0F;
   uint8_t xh = Wire1.read();
   uint8_t xl = Wire1.read();
@@ -2117,11 +2109,7 @@ bool handleGameBack(const TouchPt& t) {
 
 void loop() {
   sndUpdate();
-  // FIX: bridgeLoop() called ONLY ONCE per loop iteration. The original code
-  // called it twice (here and after webCmd handling), which doubled serial
-  // traffic — every line from S9 was transmitted to Mega twice, overflowing
-  // the Mega's serial buffer and freezing the entire robot control path.
-  bridgeLoop();               // V1.1: S9↔Mega bidirectional line forwarding (single call)
+  bridgeLoop();               // V1.1: S9↔Mega bidirectional line forwarding
   handleWifiCore0();          // WiFi/LWIP on core 0 (non-blocking — touch keeps running)
   // USB heartbeat — visible on PC serial monitor to confirm Pico firmware is alive
   static unsigned long lastUsbHb = 0;
@@ -2156,7 +2144,7 @@ void loop() {
       picoToMega(String(wc));
     }
   }
-  // FIX: REMOVED duplicate bridgeLoop() call here
+  bridgeLoop();
   if (megaLinked && millis()-lastMegaRx > 12000) {
     megaLinked = false;
     T.megaUartOk = false;
