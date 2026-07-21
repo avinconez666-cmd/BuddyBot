@@ -198,9 +198,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     private var lastSensorSentMs = 0L
     private val SENSOR_SEND_INTERVAL_MS = 500L
 
-    // HTTP fallback to Pico W WiFi (when USB serial unavailable)
-    private var httpConnectJob: Job? = null
-
     // Permissions required for core function — app cannot run without these
     private val CRITICAL_PERMISSIONS = setOf(
         Manifest.permission.RECORD_AUDIO,   // wake word + command capture
@@ -402,20 +399,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                 // mode-change / mode-request emissions) into MainActivity's local _robotState.
                 lifecycleScope.launch {
                     viewModel.robotState.collect { vmState ->
-                        val prev = _robotState.value
-                        _robotState.value = prev.copy(
+                        _robotState.value = _robotState.value.copy(
                             currentMode         = vmState.currentMode,
                             communicationMode   = vmState.communicationMode,
                             showPinEntry        = vmState.showPinEntry,
                             requestedMode       = vmState.requestedMode,
-                            buddybotIP          = vmState.buddybotIP,
                             wifiSetupPhase      = vmState.wifiSetupPhase
                         )
-                        if (vmState.buddybotIP.isNotEmpty() && vmState.buddybotIP != prev.buddybotIP) {
-                            getSharedPreferences("buddybot", MODE_PRIVATE)
-                                .edit { putString("buddybotIP", vmState.buddybotIP) }
-                            logComm("COMM", "Robot IP from telemetry: ${vmState.buddybotIP}")
-                        }
                     }
                 }
                 // Also register the local handleArduinoMessage for Activity-side side effects
@@ -481,13 +471,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
             }
             
             try {
-                val prefs = getSharedPreferences("buddybot", MODE_PRIVATE)
-                val savedIP = prefs.getString("buddybotIP", "") ?: ""
-                if (savedIP.isNotEmpty()) {
-                    _robotState.value = _robotState.value.copy(buddybotIP = savedIP)
-                    Log.d(TAG, "Loaded saved IP: $savedIP")
-                    logComm("COMM", "✅ Loaded saved IP: $savedIP")
-                }
                 arduinoComms.onUsbPermissionRequested = {
                     runOnUiThread {
                         Toast.makeText(
@@ -520,7 +503,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                         runOnUiThread { handleArduinoMessage(msg) }
                     }
                 }
-                arduinoComms.initialize(_robotState.value.buddybotIP)
+                arduinoComms.initialize()
                 Log.d(TAG, "initializeApp: Arduino communications initialized")
                 
                 // Monitor communication status
@@ -531,7 +514,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                             _robotState.value = _robotState.value.copy(communicationMode = mode)
                             when (mode) {
                                 CommunicationMode.USB_SERIAL -> logComm("COMM", "USB Serial CONNECTED")
-                                CommunicationMode.HTTP_PICO_W -> logComm("COMM", "HTTP (PicoW) CONNECTED")
                                 CommunicationMode.DISCONNECTED -> logComm("COMM", "Communication DISCONNECTED")
                             }
                         }
@@ -1000,7 +982,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                             onClose = { showSettings = false },
                             onModeChange = { setRobotMode(it) },
                             onMotorCommand = { arduinoComms.sendCommand(it) },
-                            onIPChange = { updateIP(it) },
                             onConnectRobotWifi = { ssid, password ->
                                 try {
                                     connectRobotToWifi(ssid, password)
@@ -1016,22 +997,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                             onToggleCommunication = {
                                 val currentMode = _robotState.value.communicationMode
                                 val newMode = when (currentMode) {
-                                    CommunicationMode.USB_SERIAL  -> CommunicationMode.HTTP_PICO_W
-                                    CommunicationMode.HTTP_PICO_W -> CommunicationMode.USB_SERIAL
+                                    CommunicationMode.USB_SERIAL  -> CommunicationMode.DISCONNECTED
                                     CommunicationMode.DISCONNECTED -> CommunicationMode.USB_SERIAL
                                 }
                                 _robotState.value = _robotState.value.copy(communicationMode = newMode)
                                 logComm("COMM", "Toggling: $currentMode -> $newMode")
                                 when (newMode) {
-                                    CommunicationMode.HTTP_PICO_W -> {
-                                        val ip = _robotState.value.buddybotIP
-                                        if (ip.isNotEmpty()) {
-                                            logComm("COMM", "Connecting HTTP to $ip")
-                                            arduinoComms.initializeHttp(ip)
-                                        } else {
-                                            logComm("COMM", "No IP configured for HTTP")
-                                        }
-                                    }
                                     CommunicationMode.USB_SERIAL -> {
                                         logComm("COMM", "Attempting USB serial reconnection")
                                         arduinoComms.initializeUSBSerial()
@@ -1045,16 +1016,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
                                 logComm("TEST", "Testing USB Serial...")
                                 arduinoComms.initializeUSBSerial()
                             },
-                            // Phase 2: Test HTTP to PicoW – re-runs WS connection and logs result
-                            onTestHttp = {
-                                val ip = _robotState.value.buddybotIP
-                                if (ip.isNotEmpty()) {
-                                    logComm("TEST", "Testing HTTP to $ip...")
-                                    arduinoComms.initializeHttp(ip)
-                                } else {
-                                    logComm("TEST", "No IP set - configure IP first")
-                                }
-                            }
                         )
                     }
 
@@ -2046,18 +2007,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         return saved
     }
 
-    private fun updateIP(ip: String) {
-        val trimmed = ip.trim()
-        if (trimmed.isEmpty()) return
-        _robotState.value = _robotState.value.copy(buddybotIP = trimmed)
-        getSharedPreferences("buddybot", MODE_PRIVATE).edit { putString("buddybotIP", trimmed) }
-        logComm("COMM", "IP saved: $trimmed — connecting HTTP…")
-        lifecycleScope.launch {
-            delay(300)
-            arduinoComms.initializeHttp(trimmed)
-        }
-    }
-
     private fun logComm(source: String, message: String) {
         val entry = "[${System.currentTimeMillis() % 100000}] $source: $message"
         val append = {
@@ -2151,7 +2100,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         // Phase 4: dismiss Call Daddy overlay so it doesn't leak after activity is destroyed
         callOverlayManager?.dismiss()
         callOverlayManager = null
-        httpConnectJob?.cancel()
         super.onDestroy()
         releaseResources()
         faceCoordinator.release()

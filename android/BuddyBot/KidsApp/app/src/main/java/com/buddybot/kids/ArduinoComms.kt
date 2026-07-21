@@ -30,9 +30,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
@@ -67,14 +64,6 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
 
     private val writeQueue = Channel<String>(32, BufferOverflow.DROP_OLDEST)
     private var writeJob: Job? = null
-
-    private var httpIp = ""
-    private var httpRetry = 0
-    private var httpRetryJob: Job? = null
-    private var httpPollJob: Job? = null
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS).build()
 
     @Volatile private var lastRxMs = System.currentTimeMillis()
     private var healthJob: Job? = null
@@ -131,7 +120,7 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
         }
         ContextCompat.registerReceiver(context, usbReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED)
         ContextCompat.registerReceiver(context, camReceiver, IntentFilter(ACTION_CAM_PERM), ContextCompat.RECEIVER_EXPORTED)
-        log("ArduinoComms init — mik3y USB serial")
+        log("ArduinoComms init — mik3y USB serial only (HTTP removed)")
     }
 
     fun isSerialDevice(device: UsbDevice): Boolean {
@@ -170,18 +159,19 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
         if (d.deviceClass == 239 && d.deviceSubclass == 2) return !hasCdcAcmInterface(d)
         return false
     }
-    fun initialize(ip: String) {
-        log("initialize(ip=$ip)")
+
+    /**
+     * Initializes USB Serial only. HTTP fallback has been removed — the phone
+     * must use USB Serial for ALL Pico W communication.
+     */
+    fun initialize() {
+        log("initialize() — USB Serial only")
         initializeUSBSerial()
         scope.launch {
             delay(3_000); if (communicationMode.value == CommunicationMode.DISCONNECTED) initializeUSBSerial()
             delay(3_000)
             if (communicationMode.value == CommunicationMode.DISCONNECTED) {
                 initializeUSBSerial()
-                delay(2_000)
-                if (communicationMode.value == CommunicationMode.DISCONNECTED && ip.isNotEmpty()) {
-                    log("USB not found — HTTP fallback to $ip"); initializeHttp(ip)
-                }
             }
         }
     }
@@ -353,61 +343,11 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
         log("Serial closed")
     }
 
-    fun initializeHttp(ip: String) {
-        if (ip.isBlank()) return
-        log("HTTP: $ip"); httpRetry = 0; httpIp = ip; httpRetryJob?.cancel()
-        scope.launch(Dispatchers.IO) {
-            try {
-                val resp = http.newCall(Request.Builder().url("http://$ip/health").build()).execute()
-                if (resp.isSuccessful) { log("HTTP OK"); communicationMode.value = CommunicationMode.HTTP_PICO_W; startHttpPolling(ip) }
-                else scheduleHttpRetry(ip)
-            } catch (e: Exception) { log("HTTP init: ${e.message}"); scheduleHttpRetry(ip) }
-        }
-    }
-
-    private fun startHttpPolling(ip: String) {
-        httpPollJob?.cancel()
-        httpPollJob = scope.launch(Dispatchers.IO) {
-            while (isActive && communicationMode.value == CommunicationMode.HTTP_PICO_W) {
-                try {
-                    val resp = http.newCall(Request.Builder().url("http://$ip/status").build()).execute()
-                    if (resp.isSuccessful) parseHttpStatus(resp.body?.string() ?: "")
-                } catch (e: Exception) { log("HTTP poll: ${e.message}") }
-                delay(1_500)
-            }
-        }
-    }
-
-    private fun parseHttpStatus(json: String) {
-        if (json.isBlank()) return
-        try {
-            val o = JSONObject(json)
-            o.optString("mode").takeIf { it.isNotBlank() }?.let { onMessageReceived?.invoke("MODE:$it") }
-            val f = o.optInt("front",-1); val r = o.optInt("rear",-1); val l = o.optInt("left",-1); val ri = o.optInt("right",-1)
-            if (f>=0||r>=0||l>=0||ri>=0) onMessageReceived?.invoke("US:$f,$r,$l,$ri")
-            onMessageReceived?.invoke("TELE:${o.optString("battery","0.0")},${o.optString("pct","0")},0")
-            if (o.optInt("flame",0)==1) onMessageReceived?.invoke("ALERT:FLAME_DETECTED")
-        } catch (e: Exception) { log("HTTP parse: ${e.message}") }
-    }
-
-    private fun scheduleHttpRetry(ip: String) {
-        if (httpRetry >= 10) return
-        val ms = (1000L * (1L shl httpRetry++)).coerceAtMost(30_000L)
-        httpRetryJob?.cancel()
-        httpRetryJob = scope.launch { delay(ms); if (communicationMode.value == CommunicationMode.DISCONNECTED) initializeHttp(ip) }
-    }
-
     fun sendCommand(command: String) {
         val clean = command.trimEnd('\r', '\n'); if (clean.isEmpty()) return
         when (communicationMode.value) {
             CommunicationMode.USB_SERIAL -> {
                 if (writeQueue.trySend("$clean\n").isSuccess) log("[SEND] USB $clean") else log("WARN: queue full: $clean")
-            }
-            CommunicationMode.HTTP_PICO_W -> scope.launch(Dispatchers.IO) {
-                try {
-                    val enc = java.net.URLEncoder.encode(clean, "UTF-8")
-                    http.newCall(Request.Builder().url("http://$httpIp/cmd?c=$enc").build()).execute()
-                } catch (e: Exception) { Log.e(TAG, "HTTP send: ${e.message}") }
             }
             CommunicationMode.DISCONNECTED -> log("WARN: disconnected, dropped: $clean")
         }
@@ -427,7 +367,7 @@ class ArduinoComms(private val context: Context, private val scope: CoroutineSco
     }
 
     fun close() {
-        closeSerial(); healthJob?.cancel(); httpRetryJob?.cancel(); httpPollJob?.cancel(); httpIp = ""
+        closeSerial(); healthJob?.cancel()
         log("ArduinoComms closed")
     }
 

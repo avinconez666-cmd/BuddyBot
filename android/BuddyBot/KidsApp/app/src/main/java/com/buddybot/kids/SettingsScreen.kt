@@ -95,14 +95,12 @@ fun SettingsMenu(
     onClose: () -> Unit,
     onModeChange: (RobotMode) -> Unit,
     onMotorCommand: (String) -> Unit,
-    onIPChange: (String) -> Unit,
     onToggleCommunication: () -> Unit,
     onNetworkPreferenceChange: (NetworkPreference) -> Unit = {},
     onConnectRobotWifi: (ssid: String, password: String) -> Boolean = { _, _ -> false },
     onSaveWifiPassword: (ssid: String, password: String) -> Boolean = { _, _ -> false },
     webcamClient: CameraClient? = null,
-    onTestSerial: (() -> Unit)? = null,
-    onTestHttp: (() -> Unit)? = null
+    onTestSerial: (() -> Unit)? = null
 ) {
     // Slide-in animation
     AnimatedVisibility(
@@ -139,7 +137,6 @@ fun SettingsMenu(
                             robotState = robotState,
                             telemetry = telemetry,
                             onTestSerial = onTestSerial,
-                            onTestHttp = onTestHttp,
                             // Phase 3: pass live mic state for glowing indicator
                             isListening = robotState.isListening,
                             isSpeaking = robotState.isSpeaking
@@ -152,7 +149,6 @@ fun SettingsMenu(
                             robotState = robotState,
                             logs = logs,
                             onToggleCommunication = onToggleCommunication,
-                            onIPChange = onIPChange,
                             onConnectRobotWifi = onConnectRobotWifi,
                             onSaveWifiPassword = onSaveWifiPassword
                         )
@@ -352,14 +348,12 @@ private fun StatusCard(
     robotState: RobotState,
     telemetry: TelemetryData,
     onTestSerial: (() -> Unit)?,
-    onTestHttp: (() -> Unit)?,
     // Phase 3: mic state for glowing indicator
     isListening: Boolean = false,
     isSpeaking: Boolean = false
 ) {
     // Feedback states for test buttons
     var serialFeedback by remember { mutableStateOf<String?>(null) }
-    var wsFeedback     by remember { mutableStateOf<String?>(null) }
 
     GlassCard(accentColor = NeonGreen) {
         CardHeader("System Status", Icons.Default.Dashboard, NeonGreen)
@@ -367,7 +361,6 @@ private fun StatusCard(
         // Communication mode pill
         val (modeLabel, modeColor) = when (robotState.communicationMode) {
             CommunicationMode.USB_SERIAL  -> "USB SERIAL" to NeonGreen
-            CommunicationMode.HTTP_PICO_W   -> "WEBSOCKET"  to NeonCyan
             CommunicationMode.DISCONNECTED -> "OFFLINE"   to NeonRed
         }
         val pulse by rememberInfiniteTransition(label = "modePulse").animateFloat(
@@ -414,7 +407,7 @@ private fun StatusCard(
 
         Spacer(Modifier.height(12.dp))
 
-        // Test buttons row
+        // Test button — only USB Serial now (HTTP removed)
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxWidth()
@@ -429,32 +422,15 @@ private fun StatusCard(
                 onClick = {
                     serialFeedback = "⏳ Testing..."
                     onTestSerial?.invoke()
-                    // Auto-clear feedback after 3s
                 }
             )
-            // test HTTP
-            NeonTestButton(
-                label = "TEST WS",
-                icon = Icons.Default.Wifi,
-                accentColor = NeonCyan,
-                feedback = wsFeedback,
-                modifier = Modifier.weight(1f),
-                onClick = {
-                    wsFeedback = "⏳ Testing..."
-                    onTestHttp?.invoke()
-                }
-            )
+            // HTTP test button removed — USB Serial only
         }
 
         // Auto-clear feedback
         LaunchedEffect(serialFeedback) {
             if (serialFeedback != null && serialFeedback != "⏳ Testing...") {
                 delay(3000); serialFeedback = null
-            }
-        }
-        LaunchedEffect(wsFeedback) {
-            if (wsFeedback != null && wsFeedback != "⏳ Testing...") {
-                delay(3000); wsFeedback = null
             }
         }
 
@@ -464,12 +440,8 @@ private fun StatusCard(
                 CommunicationMode.USB_SERIAL -> {
                     if (serialFeedback == "⏳ Testing...") serialFeedback = "✅ Serial LIVE"
                 }
-                CommunicationMode.HTTP_PICO_W -> {
-                    if (wsFeedback == "⏳ Testing...") wsFeedback = "✅ WebSocket LIVE"
-                }
                 CommunicationMode.DISCONNECTED -> {
                     if (serialFeedback == "⏳ Testing...") serialFeedback = "❌ Not found"
-                    if (wsFeedback == "⏳ Testing...") wsFeedback = "❌ Unreachable"
                 }
             }
         }
@@ -641,13 +613,10 @@ private fun ConnectionCard(
     robotState: RobotState,
     logs: List<String>,
     onToggleCommunication: () -> Unit,
-    onIPChange: (String) -> Unit,
     onConnectRobotWifi: (ssid: String, password: String) -> Boolean,
     onSaveWifiPassword: (ssid: String, password: String) -> Boolean
 ) {
     val context = LocalContext.current
-    var ipInput by remember { mutableStateOf(robotState.buddybotIP) }
-    var ipSaved by remember { mutableStateOf(false) }
     var phoneSsid by remember { mutableStateOf<String?>(null) }
     var wifiPassword by remember { mutableStateOf("") }
     var wifiPasswordVisible by remember { mutableStateOf(true) }
@@ -769,89 +738,15 @@ private fun ConnectionCard(
     GlassCard(accentColor = NeonCyan) {
         CardHeader("Connection", Icons.Default.SettingsEthernet, NeonCyan)
 
-        // USB Serial toggle
+        // USB Serial toggle — only mode available now
         NeonToggleRow(
             icon = Icons.Default.Usb,
             label = "USB Serial",
-            sublabel = "115200 baud · Pico W USB bridge",
+            sublabel = "115200 baud · Pico W USB bridge (HTTP removed)",
             isActive = robotState.communicationMode == CommunicationMode.USB_SERIAL,
             accentColor = NeonGreen,
             onClick = onToggleCommunication
         )
-
-        Spacer(Modifier.height(8.dp))
-
-        // WebSocket toggle
-        NeonToggleRow(
-            icon = Icons.Default.Wifi,
-            label = "WiFi HTTP",
-            sublabel = "Pico W fallback · /status /cmd",
-            isActive = robotState.communicationMode == CommunicationMode.HTTP_PICO_W,
-            accentColor = NeonCyan,
-            onClick = onToggleCommunication
-        )
-
-        Spacer(Modifier.height(14.dp))
-
-        // IP input
-        Text(
-            "ROBOT IP ADDRESS",
-            color = NeonCyan.copy(alpha = 0.6f),
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
-            letterSpacing = 1.sp
-        )
-        Spacer(Modifier.height(6.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = ipInput,
-                onValueChange = { ipInput = it; ipSaved = false },
-                placeholder = {
-                    Text("192.168.1.100", color = NeonCyan.copy(alpha = 0.3f),
-                        fontFamily = FontFamily.Monospace, fontSize = 13.sp)
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                modifier = Modifier.weight(1f),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NeonCyan,
-                    unfocusedBorderColor = NeonCyan.copy(alpha = 0.3f),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    cursorColor = NeonCyan,
-                    focusedContainerColor = DarkCard,
-                    unfocusedContainerColor = DarkCard
-                ),
-                textStyle = LocalTextStyle.current.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp
-                ),
-                shape = RoundedCornerShape(8.dp)
-            )
-            Button(
-                onClick = {
-                    onIPChange(ipInput)
-                    ipSaved = true
-                },
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (ipSaved) NeonGreen.copy(alpha = 0.2f) else NeonCyan.copy(alpha = 0.2f),
-                    contentColor = if (ipSaved) NeonGreen else NeonCyan
-                ),
-                border = BorderStroke(1.dp, if (ipSaved) NeonGreen.copy(alpha = 0.6f) else NeonCyan.copy(alpha = 0.6f)),
-                modifier = Modifier.height(56.dp)
-            ) {
-                Text(
-                    if (ipSaved) "✓" else "SAVE",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp
-                )
-            }
-        }
 
         Spacer(Modifier.height(16.dp))
 

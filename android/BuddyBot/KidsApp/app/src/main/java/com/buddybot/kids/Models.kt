@@ -9,16 +9,8 @@ enum class RobotMode {
 enum class CommunicationMode {
     /** USB serial to Pico W bridge → Mega (primary path, V37). */
     USB_SERIAL,
-    /** HTTP polling to Pico W web server (fallback when USB unavailable). */
-    HTTP_PICO_W,
     /** No link. */
     DISCONNECTED;
-
-    companion object {
-        /** Legacy alias for any external code that still references WEBSOCKET. */
-        @Deprecated("Use HTTP_PICO_W", ReplaceWith("HTTP_PICO_W"))
-        val WEBSOCKET: CommunicationMode get() = HTTP_PICO_W
-    }
 }
 
 /**
@@ -77,12 +69,14 @@ data class RobotState(
     val isAutonomous: Boolean = false,
     val lastGesture: String = "",
     val estopRetryCount: Int = 0,
-    val buddybotIP: String = "",
     /** WiFi provisioning UI phase: "", "connecting", "connected", "failed" */
     val wifiSetupPhase: String = "",
     val gestureReactionsEnabled: Boolean = true,
     val isAutoMode: Boolean = false,
-    val eventBanner: Pair<String, BannerLevel>? = null
+    val eventBanner: Pair<String, BannerLevel>? = null,
+    /** Kept for backward compatibility — always empty now. HTTP removed. */
+    @Deprecated("HTTP communication permanently removed — use USB Serial only")
+    val buddybotIP: String = ""
 )
 
 // ─── Phase 5: Detection result types ────────────────────────────────────────
