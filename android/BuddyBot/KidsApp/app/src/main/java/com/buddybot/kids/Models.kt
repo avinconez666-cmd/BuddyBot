@@ -65,7 +65,7 @@ data class RobotState(
     val showPinEntry: Boolean = false,
     val requestedMode: RobotMode? = null,
     val showCameraFeed: Boolean = false,
-    val communicationMode: CommunicationMode = CommunicationMode.DISCONNECTED,
+    val communicationMode: CommunicationMode = CommunicationMode.USB_SERIAL,
     // Default OFFLINE — updates to GROQ/GEMINI/CLAUDE on first successful AI call
     val aiService: AIService = AIService.OFFLINE,
     // Which network to use for AI/TTS API calls (persisted in SharedPreferences)

@@ -187,6 +187,14 @@ class EnvironmentMonitoringService : Service() {
         var analysisPointer = 0
         
         while (isMonitoring) {
+            // Defer mic reads while HotwordService is actively listening (Samsung Android 10
+            // contention workaround). When isHotwordActive is true, skip the AudioRecord.read()
+            // and wait 100ms before checking again. This avoids ERROR_RECOGNIZER_BUSY on
+            // SpeechRecognizer when two services try to share the microphone simultaneously.
+            if (HotwordService.isHotwordActive) {
+                delay(100)
+                continue
+            }
             val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
             
             if (read > 0) {

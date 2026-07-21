@@ -50,6 +50,14 @@ class HotwordService : Service() {
         // Backoff constants
         private const val INITIAL_RESTART_DELAY_MS = 500L
         private const val MAX_RESTART_DELAY_MS      = 30_000L
+
+        /**
+         * Flag for EnvironmentMonitoringService — tells it whether HotwordService
+         * is currently in an active recognition session (holding the mic).
+         * When true, EnvironmentMonitoringService should skip AudioRecord reads
+         * to avoid mic contention on Samsung Android 10.
+         */
+        @Volatile var isHotwordActive = false
     }
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -209,6 +217,8 @@ class HotwordService : Service() {
         // Release any stale recognizer before creating a new one
         releaseRecognizer()
 
+        isHotwordActive = true
+
         recognizer = SpeechRecognizer.createSpeechRecognizer(applicationContext).also { sr ->
             sr.setRecognitionListener(object : RecognitionListener {
 
@@ -220,6 +230,7 @@ class HotwordService : Service() {
 
                 override fun onResults(results: Bundle?) {
                     isListening = false
+                    isHotwordActive = false
                     val matches = results
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?: return scheduleRestart()
@@ -246,21 +257,19 @@ class HotwordService : Service() {
 
                 override fun onError(error: Int) {
                     isListening = false
+                    isHotwordActive = false
                     val errorName = speechErrorName(error)
                     Log.w(TAG, "SpeechRecognizer error: $errorName ($error)")
-                    // NO_MATCH and SPEECH_TIMEOUT are normal — restart immediately
-                    val delay = when (error) {
-                        SpeechRecognizer.ERROR_NO_MATCH,
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 300L
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 3500L
-                        else -> restartDelayMs.also {
-                            restartDelayMs = (restartDelayMs * 2).coerceAtMost(MAX_RESTART_DELAY_MS)
-                        }
-                    }
-                    scope.launch {
-                        delay(delay)
-                        scheduleRestart()
-                    }
+                    Log.i(TAG, "onError code=$error — performing cancel + delayed restart")
+                    // Transient errors: cancel/destroy the stale recognizer, wait 500ms,
+                    // then restart. This prevents the recognizer from dying permanently
+                    // on Samsung Android 10 when ERROR_RECOGNIZER_BUSY / NO_MATCH / TIMEOUT occur.
+                    recognizer?.cancel()
+                    recognizer?.destroy()
+                    recognizer = null
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        startRecognition()
+                    }, 500)
                 }
 
                 // ── Unused callbacks ─────────────────────────────────────────

@@ -27,10 +27,6 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.net.Uri
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.provider.Settings
 import android.view.Surface
 import android.view.View
@@ -138,100 +134,29 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
     // Change 5: store the alive-behavior Job so it can be cancelled in onDestroy()
     private var aliveBehaviorJob: Job? = null
 
+    // Standard OkHttpClient for all AI/TTS HTTP calls.
+    // Uses the system default socket factory so Android's OS automatically
+    // routes traffic through whatever internet connection is active (4G or WiFi).
     private var httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
-    // ── Network preference ────────────────────────────────────────────
-    // Keeps track of the currently bound network and the active ConnectivityManager
-    // callback so we can swap the OkHttpClient socket factory when the user changes
-    // the network preference in Settings.
-    @Volatile private var currentBoundNetwork: Network? = null
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
-
     /**
-     * Rebuilds [httpClient] so all subsequent AI/TTS calls go through the
-     * network interface matching [pref].
-     *
-     *  ANY         — clear any socket factory binding; OS decides (WiFi preferred)
-     *  WIFI_ONLY   — request a WiFi-only network; if none available the calls will
-     *                simply fail and the AI cascade will fall back to OFFLINE
-     *  MOBILE_ONLY — request a CELLULAR network explicitly, bypassing WiFi
-     *
-     * Must be called on any thread; state update posted to main.
+     * Applies the network preference by persisting the choice.
+     * The httpClient always uses the system default socket factory so Android
+     * automatically routes all HTTP traffic through whichever active internet
+     * connection the phone has (4G Cellular or Home Wi-Fi).
+     * No custom socket factories or Network callbacks are used, ensuring AI/TTS
+     * calls always reach the internet without interference.
      */
     private fun applyNetworkPreference(pref: NetworkPreference) {
-        val cm = getSystemService(ConnectivityManager::class.java)
-
-        // Tear down the previous callback if any
-        networkCallback?.let {
-            try { cm.unregisterNetworkCallback(it) } catch (_: Exception) {}
-        }
-        networkCallback = null
-        currentBoundNetwork = null
-
-        when (pref) {
-            NetworkPreference.ANY -> {
-                // Rebuild with no explicit socket factory — system default
-                rebuildHttpClient(null)
-                Log.d(TAG, "Network: ANY (system default)")
-            }
-
-            NetworkPreference.WIFI_ONLY,
-            NetworkPreference.MOBILE_ONLY -> {
-                val transport = if (pref == NetworkPreference.WIFI_ONLY)
-                    NetworkCapabilities.TRANSPORT_WIFI
-                else
-                    NetworkCapabilities.TRANSPORT_CELLULAR
-
-                val req = NetworkRequest.Builder()
-                    .addTransportType(transport)
-                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                    .build()
-
-                val cb = object : ConnectivityManager.NetworkCallback() {
-                    override fun onAvailable(network: Network) {
-                        currentBoundNetwork = network
-                        rebuildHttpClient(network)
-                        Log.d(TAG, "Network: bound to $pref (network=$network)")
-                    }
-                    override fun onLost(network: Network) {
-                        if (currentBoundNetwork == network) {
-                            currentBoundNetwork = null
-                            rebuildHttpClient(null) // fall back to system
-                            Log.w(TAG, "Network: $pref network lost — reverting to system")
-                        }
-                    }
-                }
-                networkCallback = cb
-                try {
-                    cm.requestNetwork(req, cb)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Network request failed: ${e.message}")
-                }
-            }
-        }
-
-        // Persist choice and update UI state
         getSharedPreferences("buddybot", MODE_PRIVATE).edit {
             putString("network_pref", pref.name)
         }
         _robotState.value = _robotState.value.copy(networkPreference = pref)
-    }
-
-    /** Swaps [httpClient] to use [network]'s socket factory, or the system default if null. */
-    private fun rebuildHttpClient(network: Network?) {
-        val builder = OkHttpClient.Builder()
-            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-        if (network != null) {
-            builder.socketFactory(network.socketFactory)
-        }
-        // httpClient is used by synthesizeWithElevenLabs and all AI calls —
-        // replacing the reference is safe because OkHttp dispatches on its own
-        // thread pool; in-flight calls complete on the old client.
-        @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-        httpClient = builder.build()
+        Log.d(TAG, "Network preference: $pref (OS handles routing)")
     }
 
     private lateinit var arduinoComms: ArduinoComms
@@ -2164,11 +2089,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         arduinoComms.close()
         cameraExecutor.shutdown()
         faceRecognitionManager.close()
-        // Release network callback to avoid resource leak
-        networkCallback?.let {
-            try { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) }
-            catch (_: Exception) {}
-        }
     }
 
     private fun startEnvironmentMonitoring() {
