@@ -26,6 +26,8 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.provider.Settings
 import android.view.Surface
@@ -144,19 +146,96 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         .build()
 
     /**
-     * Applies the network preference by persisting the choice.
-     * The httpClient always uses the system default socket factory so Android
-     * automatically routes all HTTP traffic through whichever active internet
-     * connection the phone has (4G Cellular or Home Wi-Fi).
-     * No custom socket factories or Network callbacks are used, ensuring AI/TTS
-     * calls always reach the internet without interference.
+     * Applies the network preference by persisting the choice AND rebuilding
+     * the HTTP client to use the correct network interface.
+     *
+     * - ANY:        Uses the system default socket factory (Android auto-routes).
+     * - WIFI_ONLY:  Binds the OkHttp socket factory to the WiFi network handle,
+     *               preventing mobile data usage for AI/TTS calls.
+     * - MOBILE_ONLY: Binds the OkHttp socket factory to the cellular network handle,
+     *                enabling AI/TTS calls when WiFi is unavailable (robot roams).
+     *
+     * The socket factory from a specific [android.net.Network] ensures all HTTP
+     * traffic from this client goes through that network interface only.
      */
     private fun applyNetworkPreference(pref: NetworkPreference) {
         getSharedPreferences("buddybot", MODE_PRIVATE).edit {
             putString("network_pref", pref.name)
         }
         _robotState.value = _robotState.value.copy(networkPreference = pref)
-        Log.d(TAG, "Network preference: $pref (OS handles routing)")
+        Log.d(TAG, "Network preference: $pref — rebuilding httpClient")
+
+        // Rebuild the HTTP client with the correct network binding
+        httpClient = when (pref) {
+            NetworkPreference.ANY -> {
+                // System default — no special socket factory
+                OkHttpClient.Builder()
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+            }
+            NetworkPreference.WIFI_ONLY -> {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                val wifiNetwork = findNetworkByTransport(cm, NetworkCapabilities.TRANSPORT_WIFI)
+                if (wifiNetwork != null) {
+                    Log.d(TAG, "Binding HTTP client to WiFi network ${wifiNetwork.networkHandle}")
+                    OkHttpClient.Builder()
+                        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                        .socketFactory(wifiNetwork.socketFactory)
+                        .build()
+                } else {
+                    Log.w(TAG, "WiFi network not available — using default client")
+                    OkHttpClient.Builder()
+                        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                        .build()
+                }
+            }
+            NetworkPreference.MOBILE_ONLY -> {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                val mobileNetwork = findNetworkByTransport(cm, NetworkCapabilities.TRANSPORT_CELLULAR)
+                if (mobileNetwork != null) {
+                    Log.d(TAG, "Binding HTTP client to mobile network ${mobileNetwork.networkHandle}")
+                    OkHttpClient.Builder()
+                        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                        .socketFactory(mobileNetwork.socketFactory)
+                        .build()
+                } else {
+                    Log.w(TAG, "Mobile network not available — using default client")
+                    OkHttpClient.Builder()
+                        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                        .build()
+                }
+            }
+        }
+    }
+
+    /**
+     * Finds the first [android.net.Network] that supports the given transport type.
+     * Returns null if no such network is currently available.
+     */
+    private fun findNetworkByTransport(cm: ConnectivityManager, transport: Int): android.net.Network? {
+        return try {
+            val allNetworks = cm.allNetworks
+            for (network in allNetworks) {
+                val caps = cm.getNetworkCapabilities(network) ?: continue
+                if (caps.hasTransport(transport)) {
+                    return network
+                }
+            }
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "findNetworkByTransport error for transport=$transport: ${e.message}")
+            null
+        }
     }
 
     private lateinit var arduinoComms: ArduinoComms
@@ -1544,18 +1623,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener, SensorEve
         }
     }
 
-    /** V37: AI fallback chain delegated to AIRouter (single source of truth). */
+    /** V37: AI fallback chain delegated to AIRouter (single source of truth).
+     *  Returns the response text. The actual provider that served it is reported
+     *  to the UI via the onProviderChanged callback inside AIRouter. */
     private suspend fun getAIResponse(userInput: String): String {
-        val response = aiRouter.getResponse(userInput)
+        val (response, actualProvider) = aiRouter.getResponse(userInput)
         withContext(Dispatchers.Main) {
-            _robotState.value = _robotState.value.copy(
-                aiService = when {
-                    BuddyBotConfig.isGroqConfigured   -> AIService.GROQ
-                    BuddyBotConfig.isGeminiConfigured -> AIService.GEMINI
-                    BuddyBotConfig.isClaudeConfigured -> AIService.CLAUDE
-                    else                              -> AIService.OFFLINE
-                }
-            )
+            _robotState.value = _robotState.value.copy(aiService = actualProvider)
         }
         return response
     }

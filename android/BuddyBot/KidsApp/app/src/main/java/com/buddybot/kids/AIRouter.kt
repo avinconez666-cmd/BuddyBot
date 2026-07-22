@@ -47,27 +47,43 @@ class AIRouter(
         "You're the coolest kid ever!"
     )
 
-    suspend fun getResponse(userInput: String): String = withContext(Dispatchers.IO) {
+    /**
+     * Returns a pair of (response text, provider that served it).
+     * The caller can use the provider to update the UI accurately.
+     */
+    suspend fun getResponse(userInput: String): Pair<String, AIService> = withContext(Dispatchers.IO) {
         if (BuddyBotConfig.isGroqConfigured) {
             try {
                 val r = callGroq(userInput)
-                if (r.isNotBlank()) { onProviderChanged(AIService.GROQ); return@withContext limitWords(r) }
+                if (r.isNotBlank()) {
+                    val resp = limitWords(r)
+                    onProviderChanged(AIService.GROQ)
+                    return@withContext Pair(resp, AIService.GROQ)
+                }
             } catch (e: Exception) { Log.w(TAG, "Groq failed: ${e.message}") }
         }
         if (BuddyBotConfig.isGeminiConfigured) {
             try {
                 val r = callGemini(userInput)
-                if (r.isNotBlank()) { onProviderChanged(AIService.GEMINI); return@withContext limitWords(r) }
+                if (r.isNotBlank()) {
+                    val resp = limitWords(r)
+                    onProviderChanged(AIService.GEMINI)
+                    return@withContext Pair(resp, AIService.GEMINI)
+                }
             } catch (e: Exception) { Log.w(TAG, "Gemini failed: ${e.message}") }
         }
         if (BuddyBotConfig.isClaudeConfigured) {
             try {
                 val r = callClaude(userInput)
-                if (r.isNotBlank()) { onProviderChanged(AIService.CLAUDE); return@withContext limitWords(r) }
+                if (r.isNotBlank()) {
+                    val resp = limitWords(r)
+                    onProviderChanged(AIService.CLAUDE)
+                    return@withContext Pair(resp, AIService.CLAUDE)
+                }
             } catch (e: Exception) { Log.w(TAG, "Claude failed: ${e.message}") }
         }
         onProviderChanged(AIService.OFFLINE)
-        return@withContext offlineResponses.random()
+        return@withContext Pair(offlineResponses.random(), AIService.OFFLINE)
     }
 
     private fun limitWords(text: String, max: Int = 15): String {
