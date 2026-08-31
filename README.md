@@ -1,32 +1,32 @@
-# 🤖 BuddyBot — AI-Powered Robotic Companion
+# BuddyBot — AI-Powered Robotic Companion
 
-**BuddyBot** is a production-grade, kid-friendly AI robot with 3 brains working in harmony: a **Samsung S9 phone** (face, voice, vision, AI), a **Pico W** (dashboard display, WiFi bridge, audio), and a **Mega 2560** (motors, sensors, safety). Two Android apps provide kid interaction and parent monitoring.
+**BuddyBot** is a production-grade, kid-friendly AI robot with 3 brains working in harmony: a **Samsung S9 phone** (face, voice, vision, AI), a **Pico W** (dashboard display, WiFi bridge, audio), and a **Mega 2560** (motors, sensors, safety). Two Android apps provide kid interaction and parent monitoring. A **web KidsApp** mirrors the S9 companion in the browser.
 
 ---
 
-## 📦 System Architecture
+## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    SAMSUNG S9 (Head)                     │
-│  ┌─────────────┐  ┌──────────┐  ┌───────────────────┐  │
+│  ┌─────────────┐  ┌─────────┐  ┌──────────────────┐  │
 │  │  ML Kit      │  │ ElevenLabs│  │  AI Router        │  │
 │  │  Face/Obj    │  │  TTS     │  │  Groq→Gemini→     │  │
 │  │  Detection   │  │  LipSync │  │  Claude→Offline   │  │
-│  └──────┬──────┘  └────┬─────┘  └────────┬──────────┘  │
+│  └──────┘  └────┘  └────────┘  │
 │         │              │                  │              │
-│         └──────────────┴──────────────────┘              │
+│         └──────────────┘              │
 │                        │                                │
-│              ┌─────────▼──────────┐                     │
+│              ┌─────────┴──────────┐                     │
 │              │   USB Hub (OTG)    │                     │
-│              └──┬─────────────┬───┘                     │
+│              └──┘─────────────┘───┘                     │
 │                 │             │                          │
-│         ┌───────▼──┐   ┌─────▼──────┐                  │
+│         ┌──────┴──┐   ┌────┴──────┐                  │
 │         │  Webcam  │   │  Pico W   │                  │
 │         │ (UVC)    │   │ (Bridge)  │                  │
-│         └──────────┘   └─────┬──────┘                  │
+│         └──────────┘   └────┴──────┘                  │
 │                              │ UART1 (GP4/GP5)          │
-│                       ┌──────▼──────┐                  │
+│                       ┌──────┴──────┐                  │
 │                       │  Mega 2560  │                  │
 │                       │  (V37)      │                  │
 │                       │  Motors,    │                  │
@@ -44,7 +44,7 @@
 
 ---
 
-## 🧠 Core Components
+## Core Components
 
 ### 1. Android App — KidsApp (`android/BuddyBot/KidsApp/`)
 The S9 runs the main BuddyBot app with:
@@ -57,6 +57,16 @@ The S9 runs the main BuddyBot app with:
 - **HotwordService** (`HotwordService.kt`): Always-listening "Hey Buddy" wake word
 - **CameraStreamManager** (`streaming/CameraStreamManager.kt`): MJPEG server for parent app
 - **Compose UI**: Full overlay with telemetry, gesture indicators, lipsync mouth, settings
+
+### 1b. Web KidsApp (`web-kidsapp/`)
+Browser companion of the S9 KidsApp for when the phone is not in reach:
+- Talk to Buddy (Grok, same toddler-safe prompt, 18-word cap, offline fallback)
+- Personalities: Normal, Dog, Guard, Party (Unhinged stays adults-only on the phone)
+- Six Pico games: Buddy Run, Maze Munch, Starship, Memory, Color Match, Math Blast
+- Simulated Mega V37 telemetry HUD
+- Call Daddy + SOS practice, first-meeting intro
+
+Hardware (USB camera, Mega motors, wake word) is not in the browser. See `web-kidsapp/README.md`.
 
 ### 2. Pico W Dashboard (`firmware/BuddyBot_PicoW_Dash_V1.2/`)
 - **TFT Display**: 320×480 portrait, TFT_eSPI
@@ -75,19 +85,19 @@ The S9 runs the main BuddyBot app with:
 
 ---
 
-## 🎭 Personalities (Modes)
+## Personalities (Modes)
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
-| **NORMAL** 😊 | Friendly, educational, patient | Daily interaction with AJ |
-| **DOG** 🐕 | Protective, barking alerts, patrol | Security mode |
-| **BODYGUARD** 🕶️ | Tactical, perimeter scanning, threat assessment | Serious protection |
-| **UNHINGED** 😈 | Sarcastic, roasting, adult humor | Adults only |
-| **PARTY** 🎉 | Dancing, lights, celebration | Fun time |
+| **NORMAL** | Friendly, educational, patient | Daily interaction with AJ |
+| **DOG** | Protective, barking alerts, patrol | Security mode |
+| **BODYGUARD** | Tactical, perimeter scanning, threat assessment | Serious protection |
+| **UNHINGED** | Sarcastic, roasting, adult humor | Adults only |
+| **PARTY** | Dancing, lights, celebration | Fun time |
 
 ---
 
-## 📹 Animated Face System
+## Animated Face System
 
 15 video states on the S9 display (1920×1080, H.264, 30fps):
 - **Normal**: idle, talk, looking, surprised
@@ -96,9 +106,11 @@ The S9 runs the main BuddyBot app with:
 - **Unhinged**: idle
 - **Special**: intro (3-minute first meeting)
 
+The web KidsApp uses an animated visor face for the same modes (minus Unhinged).
+
 ---
 
-## 🎮 Educational Games (Pico W Dashboard)
+## Educational Games (Pico W Dashboard)
 
 | Game | Skill | Age |
 |------|-------|-----|
@@ -111,7 +123,7 @@ The S9 runs the main BuddyBot app with:
 
 ---
 
-## 📡 Sensor Suite
+## Sensor Suite
 
 | Sensor | Type | Interface |
 |--------|------|-----------|
@@ -128,7 +140,7 @@ The S9 runs the main BuddyBot app with:
 
 ---
 
-## 🔧 Recent Stability Fixes (July 2026)
+## Recent Stability Fixes (July 2026)
 
 | Bug | Root Cause | Fix |
 |-----|-----------|-----|
@@ -140,7 +152,7 @@ The S9 runs the main BuddyBot app with:
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Android Studio (latest)
@@ -167,7 +179,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 BuddyBot/
@@ -175,6 +187,7 @@ BuddyBot/
 │   └── BuddyBot/
 │       ├── KidsApp/          # Main kid-facing Android app
 │       └── ParentApp/        # Parent monitoring app
+├── web-kidsapp/             # Browser KidsApp companion
 ├── firmware/
 │   ├── BuddyBot_Mega_V37/    # Mega 2560 motor/sensor controller
 │   ├── BuddyBot_PicoW_Dash_V1.2/  # Pico W dashboard + bridge
@@ -187,7 +200,7 @@ BuddyBot/
 
 ---
 
-## 📊 Technical Specs
+## Technical Specs
 
 | Parameter | Value |
 |-----------|-------|
@@ -202,7 +215,7 @@ BuddyBot/
 
 ---
 
-## 🔒 Safety Systems
+## Safety Systems
 
 - **Hazard detection**: Fire, gas, tilt, edge → immediate STOP
 - **Watchdog**: 10-second hardware watchdog on Mega
@@ -212,7 +225,7 @@ BuddyBot/
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repo
 2. Create a feature branch (`git checkout -b feature/amazing`)
@@ -222,7 +235,7 @@ BuddyBot/
 
 ---
 
-## 📄 License
+## License
 
 This project is open source. See `LICENSE` for details.
 
