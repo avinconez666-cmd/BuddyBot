@@ -1,0 +1,16 @@
+---
+description: BuddyBot multi-board safety and protocol rules
+alwaysApply: true
+---
+
+Read docs/ARCHITECTURE.md and docs/PROTOCOL.md before editing firmware or comms.
+
+One subsystem per change. Do not use old_firmware as current.
+
+Never change 115200 baud, Mega D18/D19 ↔ Pico GP4/GP5, or the 5V divider on D18.
+Never wire or "repurpose" Pico GP0/GP1.
+Call bridgeLoop() only once per Pico loop.
+MessageRouter.kt is the only Android parser for Mega lines.
+Mega loop must stay non-blocking; keep 10s watchdog and 2s motor timeout.
+Hazards override modes. No LLM on Mega/Pico.
+Protocol changes update emitter + parser + docs/PROTOCOL.md together.
